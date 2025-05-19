@@ -8,8 +8,6 @@ class Mesh:
         self.compute_values(coords4nodes, nodes4elements)
         
         
-    def update_mesh(self, coords4nodes, nodes4elements, dirichlet):   
-        
         self.coords4nodes = coords4nodes
         self.nodes4elements = nodes4elements
         
@@ -44,7 +42,6 @@ class Elements:
         
         self.P_order = P_order
         self.int_order = int_order
-    
         
         self.compute_barycentric_coordinates = lambda x,y: torch.concat([1.0 - x - y, 
                                                                          x, 
@@ -213,4 +210,3 @@ class Basis:
                               local_matrix.reshape(-1),
                               accumulate = True)
                 
-        return global_matrix
