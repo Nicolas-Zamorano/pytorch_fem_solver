@@ -1,4 +1,6 @@
 import torch
+from collections import defaultdict
+
 
 class Mesh:
     def __init__(self, 
@@ -7,6 +9,32 @@ class Mesh:
 
         self.compute_values(coords4nodes, nodes4elements)
         
+    def find_edge_to_element_map(self,nodes4edges, nodes4elements):
+        """
+        nodes4edges: Tensor [num_edges, 2]
+        nodes4elements: Tensor [num_elements, 3]
+        """
+        # Ordenamos nodos de cada arista y triángulo para comparación consistente
+        sorted_edges = torch.sort(nodes4edges.mT, dim=1).values  # [E, 2]
+        elem_edges = torch.stack([
+            torch.sort(nodes4elements[:, [0, 1]], dim=1).values,
+            torch.sort(nodes4elements[:, [1, 2]], dim=1).values,
+            torch.sort(nodes4elements[:, [0, 2]], dim=1).values,
+        ], dim=1)  # [T, 3, 2]
+        
+        # Expand para comparar
+        sorted_edges_exp = sorted_edges.unsqueeze(1).unsqueeze(1)  # [E, 1, 1, 2]
+        elem_edges_exp = elem_edges.unsqueeze(0)  # [1, T, 3, 2]
+        
+        # Comparar
+        matches = (sorted_edges_exp == elem_edges_exp).all(dim=-1)  # [E, T, 3]
+        edge2element = matches.any(dim=-1).float()  # [E, T]
+        
+        # Encontrar primer triángulo que contiene la arista
+        element_indices = edge2element.argmax(dim=1)  # [E]
+        
+        return element_indices
+                
     def compute_values(self, coords4nodes, nodes4elements):
         
         self.coords4nodes = coords4nodes
@@ -75,6 +103,11 @@ class Mesh:
         dot_products = (boundary_edges * vecs).sum(dim = 1)
         
         self.normal4boundary_edges[dot_products < 0] *= -1
+        
+        self.edges2elements_map = self.find_edge_to_element_map(self.nodes4edges, self.nodes4elements)
+        
+
+               
 class Elements:
     def __init__(self,
                  P_order: int,
