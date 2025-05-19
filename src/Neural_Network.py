@@ -28,6 +28,11 @@ class Neural_Network(torch.nn.Module):
         self.middle_layers = torch.nn.ModuleList([torch.nn.Linear(hidden_layers_dimension, 
                                                                   hidden_layers_dimension) for _ in range(deep_layers)])
         self.activation_function = torch.nn.Tanh()
+        
+        torch.nn.init.xavier_uniform_(self.layer_in.weight)
+        torch.nn.init.xavier_uniform_(self.layer_out.weight)
+        for layer in self.middle_layers:
+            torch.nn.init.xavier_uniform_(layer.weight)
                         
     def forward(self, x: torch.Tensor, y: torch.Tensor):
         """
