@@ -28,28 +28,27 @@ def fem_solver(coords4nodes, nodes4elements, dirichlet, f):
     
     dof = torch.arange(nb_nodes)[~torch.isin(torch.arange(nb_nodes), dirichlet)]
     
-    # gaussian_nodes =  torch.tensor([[1/6, 1/6],
-    #                                 [2/3, 1/6],
-    #                                 [1/6, 2/3]])
+    gaussian_nodes =  torch.tensor([[1/6, 1/6],
+                                    [2/3, 1/6],
+                                    [1/6, 2/3]])
     
-    # gaussian_weights = torch.tensor([[1/6], 
-    #                                   [1/6], 
-    #                                   [1/6]])
+    gaussian_weights = torch.tensor([[1/6], 
+                                      [1/6], 
+                                      [1/6]])
     
-    gaussian_nodes = torch.tensor([[1/3, 1/3],
-                                   [0.6, 0.2],
-                                   [0.2, 0.6],
-                                   [0.2, 0.2]])
+    # gaussian_nodes = torch.tensor([[1/3, 1/3],
+    #                                 [0.6, 0.2],
+    #                                 [0.2, 0.6],
+    #                                 [0.2, 0.2]])
     
-    gaussian_weights = torch.tensor([[-9/32],
-                                     [25/96],
-                                     [25/96],
-                                     [25/96]])
+    # gaussian_weights = torch.tensor([[-9/32],
+    #                                   [25/96],
+    #                                   [25/96],
+    #                                   [25/96]])
         
-    
-    shape_functions_grad = torch.tensor([[-1., -1.],
-                                         [ 1.,  0.],
-                                         [ 0.,  1.]])
+    # shape_functions_grad = torch.tensor([[-1., -1.],
+    #                                      [ 1.,  0.],
+    #                                      [ 0.,  1.]])
     
     #--------------- Compute integration values ---------#
     
@@ -69,7 +68,7 @@ def fem_solver(coords4nodes, nodes4elements, dirichlet, f):
     
     stiff_matrix = torch.zeros(nb_nodes, nb_nodes)
     
-    stiff_values = v_grad @ v_grad.mT * det_map_jacobian
+    stiff_values = 0.5 * v_grad @ v_grad.mT * det_map_jacobian
 
     stiff_matrix.index_put_((rows_idx, cols_idx), 
                             stiff_values.reshape(-1), 
@@ -91,17 +90,26 @@ def fem_solver(coords4nodes, nodes4elements, dirichlet, f):
         
     solution[dof] = torch.linalg.solve(stiff_matrix[dof][:, dof], rhs[dof])
     
-    return solution
+    return solution, stiff_matrix
 
+coords4nodes = torch.tensor([[0., 0.],
+        [1., 0.],
+        [0., 1.],
+        [1., 1.]])
+
+nodes4elements = torch.tensor([[0, 1, 2],
+                         [1, 2, 3]])
+
+dirichlet = torch.tensor([0, 1, 2, 3])
 
 def f(x,y):
     # return torch.ones_like(x)
     # return torch.concat([torch.ones_like(x),torch.ones_like(y)], dim = -1)
     return torch.concat([pi * torch.cos(pi * x)*torch.sin(pi * y), pi * torch.sin(pi * x) * torch.cos(pi * y)],dim = -1)
 
-solution = fem_solver(coords4nodes, nodes4elements, dirichlet, f)
+solution, A = fem_solver(coords4nodes, nodes4elements, dirichlet, f)
 
-print(solution)
+print(A)
 
 import matplotlib.pyplot as plt
 
