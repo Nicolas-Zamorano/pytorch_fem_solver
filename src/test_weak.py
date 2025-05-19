@@ -9,8 +9,8 @@ from datetime import datetime
 
 import skfem
 
-torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
-torch.cuda.empty_cache()
+# torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
+# torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
 #---------------------- Neural Network Functions ----------------------#
@@ -28,6 +28,7 @@ def NN_gradiant(NN, x, y):
                                     retain_graph = True,
                                     create_graph = True)
         
+    # return gradients 
     return torch.concat(gradients, dim = -1)
 
 def optimizer_step(optimizer, loss_value):
@@ -38,7 +39,7 @@ def optimizer_step(optimizer, loss_value):
 
 #---------------------- Neural Network Parameters ----------------------#
 
-epochs = 10000
+epochs = 5000
 learning_rate = 0.5e-3
 decay_rate = 0.99
 decay_steps = 100
@@ -56,18 +57,16 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
 
 #---------------------- FEM Parameters ----------------------#
 
-mesh_sk = skfem.MeshTri1().refined()
+mesh_sk = skfem.MeshTri1().refined(4)
 
 coords4nodes = torch.tensor(mesh_sk.p).T
 
 nodes4elements = torch.tensor(mesh_sk.t).T
 
-dirichlet = torch.tensor(mesh_sk.boundary_nodes())
-
-mesh = Mesh(coords4nodes, nodes4elements, dirichlet)
+mesh = Mesh(coords4nodes, nodes4elements)
 
 elements = Elements(P_order = 1, 
-                    int_order = 3)
+                    int_order = 1)
 
 V = Basis(mesh, elements)
 
@@ -78,28 +77,31 @@ rhs = lambda x, y: 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi 
 def residual(elements: Elements):
     
     x, y = elements.integration_points
+
+    # NN_grad = torch.concat(NN_gradiant(NN, x, y), dim = -1)
     
     NN_grad = NN_gradiant(NN, x, y)
+        
     v = elements.v
     v_grad = elements.v_grad
     rhs_value = rhs(x, y)
     
-    return rhs_value * v - NN_grad @ v_grad.mT
+    return rhs_value * v - v_grad @ NN_grad.mT
 
-def gram_matrix(elements: Elements):
+
+# def gram_matrix(elements: Elements):
     
-    v = elements.v
-    v_grad = elements.v_grad
+#     v = elements.v
+#     v_grad = elements.v_grad
     
-    return 3 * v_grad @ v_grad.mT + v @ v.mT
+#     return v_grad @ v_grad.mT + v @ v.mT
 
-A = V.integrate_bilineal_form(gram_matrix)
+# A = V.integrate_bilineal_form(gram_matrix)
 
-A = A[mesh.inner_dofs][:, mesh.inner_dofs]
+# A_inv = torch.linalg.inv(A)
 
-A_inv = torch.linalg.inv(A)
-    
 #---------------------- Error Parameters ----------------------#
+
 
 def H1_exact(elements: Elements):
     
@@ -145,11 +147,11 @@ for epoch in range(epochs):
     current_time = datetime.now().strftime("%H:%M:%S")
     print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
 
-    residual_value = V.integrate_lineal_form(residual)[mesh.inner_dofs]
+    residual_value = V.integrate_lineal_form(residual)[V.inner_dofs]
+        
+    # loss_value = residual_value.T @ (A_inv @ residual_value)
     
-    loss_value = residual_value.T @ (A_inv @ residual_value)
-    
-    # loss_value = (V.integrate_lineal_form(residual)[mesh.inner_dofs]**2).sum()
+    loss_value = (residual_value**2).sum()
 
     optimizer_step(optimizer, loss_value)
     
@@ -184,30 +186,41 @@ y = torch.linspace(0, 1, N_points)
 X, Y = torch.meshgrid(x, y, indexing = "ij")
 
 with torch.no_grad(): 
-    Z = NN(X, Y)
+    Z = abs(torch.sin(math.pi * X) * torch.sin(math.pi * Y) - NN(X, Y))
     
-figure_solution = plt.figure()
-axis_solution = figure_solution.add_subplot(111, projection = '3d')
+# figure_solution = plt.figure()
+# axis_solution = figure_solution.add_subplot(111, projection = '3d')
 
-contour = axis_solution.plot_surface(X.cpu().detach().numpy(), 
-                                     Y.cpu().detach().numpy(), 
-                                     Z.cpu().detach().numpy(), 
-                                     cmap = 'viridis')
+# contour = axis_solution.plot_surface(X.cpu().detach().numpy(), 
+#                                      Y.cpu().detach().numpy(), 
+#                                      Z.cpu().detach().numpy(), 
+#                                      cmap = 'viridis')
 
-axis_solution.set(title = "Solution obtain with RVPINNs method",
-                  xlabel = "x",
-                  ylabel = "y",
-                  zlabel = r"$u_\theta(x,y)$")
+# axis_solution.set(title = "Solution obtain with VPINNs method",
+#                   xlabel = "x",
+#                   ylabel = "y",
+#                   zlabel = r"$u_\theta(x,y)$")
 
-figure_loss, axis_loss = plt.subplots()
+figure_solution, axis_solution = plt.subplots()
 
-axis_loss.semilogy(loss_list)
+fig, ax = plt.subplots(dpi = 500)
+c = ax.contourf(X.cpu(), Y.cpu(), Z.cpu(), levels = 100, cmap = 'viridis')
+fig.colorbar(c, ax=ax, orientation='vertical')
 
-axis_loss.set(title = "Error evolution of RVPINNs method",
-              xlabel = "# epochs", 
-              ylabel = "Error")
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_title(r'$|u-u_\theta|$')
+plt.tight_layout()
 
-figure_error, axis_error = plt.subplots()
+# figure_loss, axis_loss = plt.subplots()
+
+# axis_loss.semilogy(loss_list)
+
+# axis_loss.set(title = "Error evolution of RVPINNs method",
+#               xlabel = "# epochs", 
+#               ylabel = "Error")
+
+figure_error, axis_error = plt.subplots(dpi = 500)
 
 axis_error.semilogy(relative_loss_list,
                     label = r"$\frac{\sqrt{\mathcal{L}(u_\theta)}}{\|u\|_{U}}$",
@@ -217,15 +230,15 @@ axis_error.semilogy(H1_error_list,
                     label = r"$\frac{\|u-u_\theta\|_{U}}{\|u\|_{U}}$",
                     linestyle = ":")
 
-axis_error.legend()
+axis_error.legend(fontsize=15)
 
 figure_loglog, axis_loglog = plt.subplots()
 
 axis_loglog.loglog(relative_loss_list,
-                   H1_error_list)
+                    H1_error_list)
 
-axis_loglog.set(title = "Error vs Loss comparasion of RVPINNs method",
-                xlabel = "Relative Loss", 
-                ylabel = "Relative Error")
+# axis_loglog.set(title = "Error vs Loss comparasion of RVPINNs method",
+#                 xlabel = "Relative Loss", 
+#                 ylabel = "Relative Error")
 
 plt.show()
