@@ -154,6 +154,21 @@ class Elements:
                                       4 * (lambda_2 * grad_lambda_1 + lambda_1 * grad_lambda_2),
                                       4 * (lambda_3 * grad_lambda_2 + lambda_2 * grad_lambda_3),
                                       4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_mapping_jacobian.unsqueeze(1)
+                
+            # if self.P_order == 3:
+            #     v = torch.stack([0.5 * lambda_1 * (3 * lambda_1 - 1) * (3 * lambda_1 - 2),
+            #                      0.5 * lambda_2 * (3 * lambda_2 - 1) * (3 * lambda_2 - 2),
+            #                      0.5 * lambda_3 * (3 * lambda_3 - 1) * (3 * lambda_3 - 2),
+            #                      9.0 * lambda_1 * lambda_2 * (3 * lambda_1 - 1),
+            #                      9.0 * lambda_1 * lambda_2 * (3 * lambda_2 - 1),
+            #                      9.0 * lambda_2 * lambda_3 * (3 * lambda_2 - 1),
+            #                      9.0 * lambda_2 * lambda_3 * (3 * lambda_3 - 1),
+            #                      9.0 * lambda_3 * lambda_1 * (3 * lambda_3 - 1),
+            #                      9.0 * lambda_3 * lambda_1 * (3 * lambda_1 - 1),
+            #                      27. * lambda_1 * lambda_2 * lambda_3], dim = -2)
+                
+            #     v_grad = torch.stack([])
+                
         
         return v, v_grad
                 
