@@ -7,6 +7,7 @@ class Mesh:
 
         self.compute_values(coords4nodes, nodes4elements)
         
+    def compute_values(self, coords4nodes, nodes4elements):
         
         self.coords4nodes = coords4nodes
         self.nodes4elements = nodes4elements
@@ -35,6 +36,7 @@ class Mesh:
         self.coords4unique_edges = self.coords4nodes[self.nodes4unique_edges.mT]
         
         self.nodes4boundary = torch.unique(self.nodes4boundary_edges)
+        
 class Elements:
     def __init__(self,
                  P_order: int,
