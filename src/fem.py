@@ -182,17 +182,17 @@ class Basis:
             
             self.update_dofs_values(coords4dofs, nodes4dofs, nodes4boundary_dofs)
 
-    def integrate_functional(self, function):
+    def integrate_functional(self, function, *args, **kwargs):
                 
-        integral_value = (0.5 * self.elements.gaussian_weights * function(self.elements) * self.elements.det_map_jacobian).sum(-3)
+        integral_value = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
                         
         return integral_value
         
-    def integrate_lineal_form(self, function):
+    def integrate_lineal_form(self, function,  *args, **kwargs):
         
         integral_value = torch.zeros(self.nb_global_dofs, 1)
         
-        integrand_value = (0.5 * self.elements.gaussian_weights * function(self.elements) * self.elements.det_map_jacobian).sum(-3)
+        integrand_value = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
         
         integral_value.index_put_((self.form_idx,), 
                               integrand_value.reshape(-1, 1),
@@ -200,11 +200,11 @@ class Basis:
                 
         return integral_value
         
-    def integrate_bilineal_form(self, function):
+    def integrate_bilineal_form(self, function, *args, **kwargs):
         
         global_matrix = torch.zeros(self.nb_global_dofs, self.nb_global_dofs)
         
-        local_matrix = (0.5 * self.elements.gaussian_weights * function(self.elements) * self.elements.det_map_jacobian).sum(-3)
+        local_matrix = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
         
         global_matrix.index_put_((self.rows_idx, self.cols_idx), 
                               local_matrix.reshape(-1),
