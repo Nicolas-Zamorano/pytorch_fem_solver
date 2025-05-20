@@ -1,4 +1,6 @@
 import torch
+from collections import defaultdict
+
 
 class Mesh:
     def __init__(self, 
@@ -7,6 +9,32 @@ class Mesh:
 
         self.compute_values(coords4nodes, nodes4elements)
         
+    def find_edge_to_element_map(self,nodes4edges, nodes4elements):
+        """
+        nodes4edges: Tensor [num_edges, 2]
+        nodes4elements: Tensor [num_elements, 3]
+        """
+        # Ordenamos nodos de cada arista y triángulo para comparación consistente
+        sorted_edges = torch.sort(nodes4edges.mT, dim=1).values  # [E, 2]
+        elem_edges = torch.stack([
+            torch.sort(nodes4elements[:, [0, 1]], dim=1).values,
+            torch.sort(nodes4elements[:, [1, 2]], dim=1).values,
+            torch.sort(nodes4elements[:, [0, 2]], dim=1).values,
+        ], dim=1)  # [T, 3, 2]
+        
+        # Expand para comparar
+        sorted_edges_exp = sorted_edges.unsqueeze(1).unsqueeze(1)  # [E, 1, 1, 2]
+        elem_edges_exp = elem_edges.unsqueeze(0)  # [1, T, 3, 2]
+        
+        # Comparar
+        matches = (sorted_edges_exp == elem_edges_exp).all(dim=-1)  # [E, T, 3]
+        edge2element = matches.any(dim=-1).float()  # [E, T]
+        
+        # Encontrar primer triángulo que contiene la arista
+        element_indices = edge2element.argmax(dim=1)  # [E]
+        
+        return element_indices
+                
     def compute_values(self, coords4nodes, nodes4elements):
         
         self.coords4nodes = coords4nodes
@@ -37,6 +65,47 @@ class Mesh:
         
         self.nodes4boundary = torch.unique(self.nodes4boundary_edges)
         
+        coords4unique_edges_1, coords4unique_edges_2 = torch.split(self.coords4unique_edges, 1, dim = -2)
+        
+        edge_vectors = coords4unique_edges_2 - coords4unique_edges_1
+        
+        edge_vectors_x, edge_vectors_y = torch.split(edge_vectors, 1, dim = -1)
+
+        normal_vector = torch.concat([-edge_vectors_y,edge_vectors_x], dim = -1)
+
+        unit_normal_vector = normal_vector / torch.norm(normal_vector, dim = -1, keepdim = True)
+        
+        self.normal4boundary_edges = unit_normal_vector[self.boundary_mask == 1]
+        self.normal4inner_edges = unit_normal_vector[self.boundary_mask != 1]
+        
+        boundary_edges = self.nodes4boundary_edges.mT
+        edge2element_map = torch.zeros(len(boundary_edges), dtype=torch.long)
+        
+        for i, edge in enumerate(boundary_edges):
+            for e_id, elem in enumerate(self.nodes4elements):
+                if set(edge.tolist()).issubset(elem.tolist()):
+                    edge2element_map[i] = e_id
+                    break
+        
+        edge2element_map_xd = torch.zeros(len(self.nodes4edges.mT), dtype=torch.long)
+        
+        for i, edge in enumerate(self.nodes4edges.mT):
+            for e_id, elem in enumerate(self.nodes4elements):
+                if set(edge.tolist()).issubset(elem.tolist()):
+                    edge2element_map_xd[i] = e_id
+                    break
+        
+        tri_centroids = self.coords4elements[edge2element_map].mean(dim = -2)
+        edge_midpoints = self.coords4nodes[boundary_edges].mean(dim = 1)
+        
+        vecs = edge_midpoints - tri_centroids
+        
+        dot_products = (boundary_edges * vecs).sum(dim = 1)
+        
+        self.normal4boundary_edges[dot_products < 0] *= -1
+        
+        self.edges2elements_map = self.find_edge_to_element_map(self.nodes4edges, self.nodes4elements)
+
 class Elements:
     def __init__(self,
                  P_order: int,
@@ -83,6 +152,21 @@ class Elements:
                                       4 * (lambda_2 * grad_lambda_1 + lambda_1 * grad_lambda_2),
                                       4 * (lambda_3 * grad_lambda_2 + lambda_2 * grad_lambda_3),
                                       4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_mapping_jacobian.unsqueeze(1)
+                
+            # if self.P_order == 3:
+            #     v = torch.stack([0.5 * lambda_1 * (3 * lambda_1 - 1) * (3 * lambda_1 - 2),
+            #                      0.5 * lambda_2 * (3 * lambda_2 - 1) * (3 * lambda_2 - 2),
+            #                      0.5 * lambda_3 * (3 * lambda_3 - 1) * (3 * lambda_3 - 2),
+            #                      9.0 * lambda_1 * lambda_2 * (3 * lambda_1 - 1),
+            #                      9.0 * lambda_1 * lambda_2 * (3 * lambda_2 - 1),
+            #                      9.0 * lambda_2 * lambda_3 * (3 * lambda_2 - 1),
+            #                      9.0 * lambda_2 * lambda_3 * (3 * lambda_3 - 1),
+            #                      9.0 * lambda_3 * lambda_1 * (3 * lambda_3 - 1),
+            #                      9.0 * lambda_3 * lambda_1 * (3 * lambda_1 - 1),
+            #                      27. * lambda_1 * lambda_2 * lambda_3], dim = -2)
+                
+            #     v_grad = torch.stack([])
+                
         
         return v, v_grad
                 
