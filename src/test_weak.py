@@ -9,8 +9,8 @@ from datetime import datetime
 
 import skfem
 
-# torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
-# torch.cuda.empty_cache()
+torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
+torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
 #---------------------- Neural Network Functions ----------------------#
@@ -77,8 +77,6 @@ rhs = lambda x, y: 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi 
 def residual(elements: Elements):
     
     x, y = elements.integration_points
-
-    # NN_grad = torch.concat(NN_gradiant(NN, x, y), dim = -1)
     
     NN_grad = NN_gradiant(NN, x, y)
         
@@ -187,19 +185,6 @@ X, Y = torch.meshgrid(x, y, indexing = "ij")
 
 with torch.no_grad(): 
     Z = abs(torch.sin(math.pi * X) * torch.sin(math.pi * Y) - NN(X, Y))
-    
-# figure_solution = plt.figure()
-# axis_solution = figure_solution.add_subplot(111, projection = '3d')
-
-# contour = axis_solution.plot_surface(X.cpu().detach().numpy(), 
-#                                      Y.cpu().detach().numpy(), 
-#                                      Z.cpu().detach().numpy(), 
-#                                      cmap = 'viridis')
-
-# axis_solution.set(title = "Solution obtain with VPINNs method",
-#                   xlabel = "x",
-#                   ylabel = "y",
-#                   zlabel = r"$u_\theta(x,y)$")
 
 figure_solution, axis_solution = plt.subplots()
 
@@ -211,14 +196,6 @@ ax.set_xlabel('x')
 ax.set_ylabel('y')
 ax.set_title(r'$|u-u_\theta|$')
 plt.tight_layout()
-
-# figure_loss, axis_loss = plt.subplots()
-
-# axis_loss.semilogy(loss_list)
-
-# axis_loss.set(title = "Error evolution of RVPINNs method",
-#               xlabel = "# epochs", 
-#               ylabel = "Error")
 
 figure_error, axis_error = plt.subplots(dpi = 500)
 
@@ -237,8 +214,8 @@ figure_loglog, axis_loglog = plt.subplots()
 axis_loglog.loglog(relative_loss_list,
                     H1_error_list)
 
-# axis_loglog.set(title = "Error vs Loss comparasion of RVPINNs method",
-#                 xlabel = "Relative Loss", 
-#                 ylabel = "Relative Error")
+axis_loglog.set(title = "Error vs Loss comparasion of RVPINNs method",
+                xlabel = "Relative Loss", 
+                ylabel = "Relative Error")
 
 plt.show()
