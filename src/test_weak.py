@@ -57,7 +57,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
 
 #---------------------- FEM Parameters ----------------------#
 
-mesh_sk = skfem.MeshTri1().refined(4)
+mesh_sk = skfem.MeshTri1().refined(0)
 
 coords4nodes = torch.tensor(mesh_sk.p).T
 
