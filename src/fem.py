@@ -105,9 +105,7 @@ class Mesh:
         self.normal4boundary_edges[dot_products < 0] *= -1
         
         self.edges2elements_map = self.find_edge_to_element_map(self.nodes4edges, self.nodes4elements)
-        
 
-               
 class Elements:
     def __init__(self,
                  P_order: int,
@@ -199,20 +197,18 @@ class Elements:
                                                   [[25/48]]])
                         
     def compute_integral_values(self, mesh: Mesh):
-        
-        self.mesh = mesh
-        
-        bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes_x, self.gaussian_nodes_y) 
-                        
-        mapping_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
-        
-        self.det_map_jacobian = abs(torch.linalg.det(mapping_jacobian)).reshape(mesh.nb_elements, 1, 1, 1)
-        
-        self.integration_points = torch.split((bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
-        
-        inv_mapping_jacobian = torch.linalg.inv(mapping_jacobian)
                 
-        self.v, self.v_grad = self.shape_functions_value_and_grad(bar_coords, inv_mapping_jacobian)
+        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes_x, self.gaussian_nodes_y) 
+                        
+        self.mapping_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
+        
+        self.det_map_jacobian = abs(torch.linalg.det(self.mapping_jacobian)).reshape(mesh.nb_elements, 1, 1, 1)
+        
+        self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
+        
+        self.inv_mapping_jacobian = torch.linalg.inv(self.mapping_jacobian)
+                
+        self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_mapping_jacobian)
 
 class Basis:
     def __init__(self, 
@@ -270,17 +266,17 @@ class Basis:
             
             self.update_dofs_values(coords4dofs, nodes4dofs, nodes4boundary_dofs)
 
-    def integrate_functional(self, function):
+    def integrate_functional(self, function, *args, **kwargs):
                 
-        integral_value = (0.5 * self.elements.gaussian_weights * function(self.elements) * self.elements.det_map_jacobian).sum(-3)
+        integral_value = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
                         
         return integral_value
         
-    def integrate_lineal_form(self, function):
+    def integrate_lineal_form(self, function,  *args, **kwargs):
         
         integral_value = torch.zeros(self.nb_global_dofs, 1)
         
-        integrand_value = (0.5 * self.elements.gaussian_weights * function(self.elements) * self.elements.det_map_jacobian).sum(-3)
+        integrand_value = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
         
         integral_value.index_put_((self.form_idx,), 
                               integrand_value.reshape(-1, 1),
@@ -288,28 +284,26 @@ class Basis:
                 
         return integral_value
         
-    def integrate_bilineal_form(self, function):
+    def integrate_bilineal_form(self, function, *args, **kwargs):
         
         global_matrix = torch.zeros(self.nb_global_dofs, self.nb_global_dofs)
         
-        local_matrix = (0.5 * self.elements.gaussian_weights * function(self.elements) * self.elements.det_map_jacobian).sum(-3)
+        local_matrix = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
         
         global_matrix.index_put_((self.rows_idx, self.cols_idx), 
                               local_matrix.reshape(-1),
                               accumulate = True)
-                
+        
         return global_matrix
-    
-    def compute_jump(self, uh):
-        jumps = []
-        for i, edge in enumerate(self.mesh.nodes4inner_edges.T):
-            edge_key = edge
-            elems = self.mesh.edges2elements_map[edge_key]
-            if len(elems) == 2:
-                e1, e2 = elems
-                u1 = uh[e1]  # depende de cómo definas uh
-                u2 = uh[e2]
-                normal = self.mesh.normal4inner_edges[i]
-                jump = (u1 - u2) @ normal
-                jumps.append(jump)
-        return torch.stack(jumps)
+
+    def interpolate_to(self, elements):
+        
+        nodes_x, nodes_y = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
+        
+        v, v_grad = self.elements.shape_functions_value_and_grad(elements.bar_coords, elements.inv_mapping_jacobian)
+        
+        interpolator = lambda function: (function(nodes_x, nodes_y) * v).sum(-2, keepdim = True)
+        
+        interpolator_grad = lambda function: (function(nodes_x, nodes_y) * v_grad).sum(-2, keepdim = True)
+        
+        return interpolator, interpolator_grad
