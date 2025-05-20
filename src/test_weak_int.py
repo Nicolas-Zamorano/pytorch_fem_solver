@@ -30,7 +30,7 @@ def NN_gradiant(NN, x, y):
         
     return torch.concat(gradients, dim = -1)
 
-def optimizer_step(optimizer, loss_value):
+def optimizer_step(optimizer, scheduler, loss_value):
         optimizer.zero_grad()
         loss_value.backward(retain_graph = True)
         optimizer.step()
@@ -48,16 +48,26 @@ NN = torch.jit.script(Neural_Network(input_dimension = 2,
                                       deep_layers = 4, 
                                       hidden_layers_dimension = 40))
 
+NN_int = torch.jit.script(Neural_Network(input_dimension = 2, 
+                                      output_dimension = 1,
+                                      deep_layers = 4, 
+                                      hidden_layers_dimension = 40))
+
 optimizer = torch.optim.Adam(NN.parameters(), 
                              lr = learning_rate)  
+
+optimizer_int = torch.optim.Adam(NN_int.parameters(), 
+                                 lr = learning_rate) 
 
 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 
                                                    decay_rate ** (1/decay_steps))
 
+scheduler_int = torch.optim.lr_scheduler.ExponentialLR(optimizer_int, 
+                                                       decay_rate ** (1/decay_steps))
+
 #---------------------- FEM Parameters ----------------------#
 
-
-k_ref = 3
+k_ref = 4
 
 q = 1
 k_int = 2 
@@ -75,23 +85,26 @@ I_H, I_H_grad = V_h.interpolate_to(V_h.elements)
 
 #---------------------- Residual Parameters ----------------------#
 
+NN_grad_func = lambda x,y: NN_gradiant(NN, x, y)
+
+I_H_NN = lambda x, y : I_H(NN)
+
+I_H_NN_grad = lambda x, y : I_H_grad(NN)
+
 rhs = lambda x, y: 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
-def residual(elements: Elements):
+def residual(elements: Elements, NN_gradient):
     
     x, y = elements.integration_points
     
-    # NN_grad = NN_gradiant(NN, x, y)
+    NN_grad = NN_gradient(x, y)
     
     v = elements.v
     v_grad = elements.v_grad
     rhs_value = rhs(x, y)
+            
+    return rhs_value * v - v_grad @ NN_grad.mT
     
-    NN_int_grad = I_H_grad(NN)
-        
-    return rhs_value * v - v_grad @ NN_int_grad.mT
-    # return rhs_value * v - v_grad @ NN_grad.mT
-
 # def gram_matrix(elements: Elements):
     
 #     v = elements.v
@@ -117,11 +130,11 @@ def H1_exact(elements: Elements):
     
     return exact_dx**2 + exact_dy**2 + exact**2
 
-def H1_norm(elements: Elements):
+def H1_norm(elements: Elements, NN, NN_gradiant):
    
     x, y = elements.integration_points
     
-    NN_dx, NN_dy = torch.split(NN_gradiant(NN, x, y), 1 , dim = -1)
+    NN_dx, NN_dy = torch.split(NN_gradiant(x, y), 1 , dim = -1)
 
     exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
     
@@ -136,11 +149,8 @@ def H1_norm(elements: Elements):
     
 exact_norm = torch.sqrt(torch.sum(V_h.integrate_functional(H1_exact)))
 
-loss_list = []
-relative_loss_list = []
+H_1_error_int_list = []
 H1_error_list = []
-
-loss_opt = 10e4
 
 #---------------------- Training ----------------------#
 
@@ -150,27 +160,31 @@ for epoch in range(epochs):
     current_time = datetime.now().strftime("%H:%M:%S")
     print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
 
-    residual_value = V_h.integrate_lineal_form(residual)[V_h.inner_dofs]
+    residual_value = V_H.integrate_lineal_form(residual, NN_grad_func)[V_H.inner_dofs]
         
     # loss_value = residual_value.T @ (A_inv @ residual_value)
     
     loss_value = (residual_value**2).sum()
-
-    optimizer_step(optimizer, loss_value)
     
-    error_norm = torch.sqrt(torch.sum(V_h.integrate_functional(H1_norm)))/exact_norm
-        
-    relative_loss = torch.sqrt(loss_value)/exact_norm 
-            
-    print(f"Loss: {loss_value.item():.8f} Relative Loss: {relative_loss.item():.8f} Relative error: {error_norm.item():.8f}")
-        
-    if loss_value < loss_opt:
-        loss_opt = loss_value
-        params_opt = NN.state_dict()
+    optimizer_step(optimizer, scheduler, loss_value)
 
-    loss_list.append(loss_value.item())
-    relative_loss_list.append(relative_loss.item())
+    error_norm = torch.sqrt(torch.sum(V_h.integrate_functional(H1_norm, NN, NN_grad_func)))/exact_norm
+            
+    residual_value_int = V_h.integrate_lineal_form(residual, I_H_NN_grad)[V_h.inner_dofs]
+        
+    # loss_value_int = residual_value_int.T @ (A_inv @ residual_value_int)
+    
+    loss_value_int = (residual_value_int**2).sum()
+
+    optimizer_step(optimizer_int, scheduler_int, loss_value_int)
+    
+    error_norm_int = torch.sqrt(torch.sum(V_h.integrate_functional(H1_norm, I_H_NN, I_H_NN_grad)))/exact_norm
+                    
+    print(f"u_NN error: {error_norm.item():.8f} I_H u_NN error: {error_norm_int.item():.8f}")
+        
     H1_error_list.append(error_norm.item())
+    H_1_error_int_list.append(error_norm_int.item())
+
 
 end_time = datetime.now()
 
@@ -180,68 +194,17 @@ print(f"Training time: {execution_time}")
 
 #---------------------- Plotting ----------------------#
 
-NN.load_state_dict(params_opt)
-
-N_points = 100
-
-x = torch.linspace(0, 1, N_points)
-y = torch.linspace(0, 1, N_points)
-X, Y = torch.meshgrid(x, y, indexing = "ij")
-
-with torch.no_grad(): 
-    Z = abs(torch.sin(math.pi * X) * torch.sin(math.pi * Y) - NN(X, Y))
-    
-# figure_solution = plt.figure()
-# axis_solution = figure_solution.add_subplot(111, projection = '3d')
-
-# contour = axis_solution.plot_surface(X.cpu().detach().numpy(), 
-#                                      Y.cpu().detach().numpy(), 
-#                                      Z.cpu().detach().numpy(), 
-#                                      cmap = 'viridis')
-
-# axis_solution.set(title = "Solution obtain with VPINNs method",
-#                   xlabel = "x",
-#                   ylabel = "y",
-#                   zlabel = r"$u_\theta(x,y)$")
-
-figure_solution, axis_solution = plt.subplots()
-
-fig, ax = plt.subplots(dpi = 500)
-c = ax.contourf(X.cpu(), Y.cpu(), Z.cpu(), levels = 100, cmap = 'viridis')
-fig.colorbar(c, ax=ax, orientation='vertical')
-
-ax.set_xlabel('x')
-ax.set_ylabel('y')
-ax.set_title(r'$|u-u_\theta|$')
-plt.tight_layout()
-
-# figure_loss, axis_loss = plt.subplots()
-
-# axis_loss.semilogy(loss_list)
-
-# axis_loss.set(title = "Error evolution of RVPINNs method",
-#               xlabel = "# epochs", 
-#               ylabel = "Error")
 
 figure_error, axis_error = plt.subplots(dpi = 500)
 
-axis_error.semilogy(relative_loss_list,
-                    label = r"$\frac{\sqrt{\mathcal{L}(u_\theta)}}{\|u\|_{U}}$",
-                    linestyle = "-.")
-
 axis_error.semilogy(H1_error_list,
                     label = r"$\frac{\|u-u_\theta\|_{U}}{\|u\|_{U}}$",
+                    linestyle = "-.")
+
+axis_error.semilogy(H_1_error_int_list,
+                    label = r"$\frac{\|u-I_H u_\theta\|_{U}}{\|u\|_{U}}$",
                     linestyle = ":")
 
 axis_error.legend(fontsize=15)
-
-figure_loglog, axis_loglog = plt.subplots()
-
-axis_loglog.loglog(relative_loss_list,
-                    H1_error_list)
-
-# axis_loglog.set(title = "Error vs Loss comparasion of RVPINNs method",
-#                 xlabel = "Relative Loss", 
-#                 ylabel = "Relative Error")
 
 plt.show()
