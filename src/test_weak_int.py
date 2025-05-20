@@ -71,7 +71,7 @@ V_h = Basis(Mesh(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T), Elem
 
 V_H = Basis(Mesh(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T), Elements(P_order = k_int, int_order = q))
 
-I_H_NN = V_h.interpolate_function(NN)
+I_H, I_H_grad = V_h.interpolate_to(V_h.elements)
 
 #---------------------- Residual Parameters ----------------------#
 
@@ -81,17 +81,16 @@ def residual(elements: Elements):
     
     x, y = elements.integration_points
     
-    NN_grad = NN_gradiant(NN, x, y)
+    # NN_grad = NN_gradiant(NN, x, y)
     
     v = elements.v
     v_grad = elements.v_grad
     rhs_value = rhs(x, y)
     
-    _, NN_int_grad = I_H_NN(elements.bar_coords, elements.inv_mapping_jacobian)
+    NN_int_grad = I_H_grad(NN)
         
     return rhs_value * v - v_grad @ NN_int_grad.mT
     # return rhs_value * v - v_grad @ NN_grad.mT
-
 
 # def gram_matrix(elements: Elements):
     
@@ -100,7 +99,7 @@ def residual(elements: Elements):
     
 #     return v_grad @ v_grad.mT + v @ v.mT
 
-# A = V_h.integrate_bilineal_form(gram_matrix)
+# A = V_h.integrate_bilineal_form(gram_matrix)[V_h.inner_dofs, :][:, V_h.inner_dofs]
 
 # A_inv = torch.linalg.inv(A)
 

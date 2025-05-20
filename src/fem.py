@@ -209,21 +209,17 @@ class Basis:
         global_matrix.index_put_((self.rows_idx, self.cols_idx), 
                               local_matrix.reshape(-1),
                               accumulate = True)
-
-    def interpolate_function(self, function):
         
-        nodes_x, nodes_y = torch.split(self.coords4elements, 1, dim = -1)
-                        
-        def interpolation_value_and_grad(bar_coords, inv_mapping_jacobian):
-            
-            interpolated_function = function(nodes_x, nodes_y).unsqueeze(-3)
-            
-            v, v_grad = self.elements.shape_functions_value_and_grad(bar_coords, inv_mapping_jacobian)
-            
-            interpolation_value = (interpolated_function * v).sum(-2, keepdim = True)
-            
-            interpolation_grad_value = (interpolated_function * v_grad).sum(-2, keepdim = True)
-            
-            return interpolation_value, interpolation_grad_value
+        return global_matrix
 
-        return interpolation_value_and_grad
+    def interpolate_to(self, elements):
+        
+        nodes_x, nodes_y = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
+        
+        v, v_grad = self.elements.shape_functions_value_and_grad(elements.bar_coords, elements.inv_mapping_jacobian)
+        
+        interpolator = lambda function: (function(nodes_x, nodes_y) * v).sum(-2, keepdim = True)
+        
+        interpolator_grad = lambda function: (function(nodes_x, nodes_y) * v_grad).sum(-2, keepdim = True)
+        
+        return interpolator, interpolator_grad
