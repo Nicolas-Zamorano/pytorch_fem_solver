@@ -7,6 +7,7 @@ class Mesh:
 
         self.compute_values(coords4nodes, nodes4elements)
         
+    def compute_values(self, coords4nodes, nodes4elements):
         
         self.coords4nodes = coords4nodes
         self.nodes4elements = nodes4elements
@@ -35,6 +36,7 @@ class Mesh:
         self.coords4unique_edges = self.coords4nodes[self.nodes4unique_edges.mT]
         
         self.nodes4boundary = torch.unique(self.nodes4boundary_edges)
+        
 class Elements:
     def __init__(self,
                  P_order: int,
@@ -111,20 +113,18 @@ class Elements:
                                                   [[25/48]]])
                         
     def compute_integral_values(self, mesh: Mesh):
-        
-        self.mesh = mesh
-        
-        bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes_x, self.gaussian_nodes_y) 
-                        
-        mapping_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
-        
-        self.det_map_jacobian = abs(torch.linalg.det(mapping_jacobian)).reshape(mesh.nb_elements, 1, 1, 1)
-        
-        self.integration_points = torch.split((bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
-        
-        inv_mapping_jacobian = torch.linalg.inv(mapping_jacobian)
                 
-        self.v, self.v_grad = self.shape_functions_value_and_grad(bar_coords, inv_mapping_jacobian)
+        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes_x, self.gaussian_nodes_y) 
+                        
+        self.mapping_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
+        
+        self.det_map_jacobian = abs(torch.linalg.det(self.mapping_jacobian)).reshape(mesh.nb_elements, 1, 1, 1)
+        
+        self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
+        
+        self.inv_mapping_jacobian = torch.linalg.inv(self.mapping_jacobian)
+                
+        self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_mapping_jacobian)
 
 class Basis:
     def __init__(self, 
@@ -209,4 +209,17 @@ class Basis:
         global_matrix.index_put_((self.rows_idx, self.cols_idx), 
                               local_matrix.reshape(-1),
                               accumulate = True)
-                
+        
+        return global_matrix
+
+    def interpolate_to(self, elements):
+        
+        nodes_x, nodes_y = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
+        
+        v, v_grad = self.elements.shape_functions_value_and_grad(elements.bar_coords, elements.inv_mapping_jacobian)
+        
+        interpolator = lambda function: (function(nodes_x, nodes_y) * v).sum(-2, keepdim = True)
+        
+        interpolator_grad = lambda function: (function(nodes_x, nodes_y) * v_grad).sum(-2, keepdim = True)
+        
+        return interpolator, interpolator_grad
