@@ -9,8 +9,8 @@ from datetime import datetime
 
 import skfem
 
-# torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
-# torch.cuda.empty_cache()
+torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
+torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
 #---------------------- Neural Network Functions ----------------------#
@@ -28,7 +28,6 @@ def NN_gradiant(NN, x, y):
                                     retain_graph = True,
                                     create_graph = True)
         
-    # return gradients 
     return torch.concat(gradients, dim = -1)
 
 def optimizer_step(optimizer, loss_value):
@@ -57,18 +56,22 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
 
 #---------------------- FEM Parameters ----------------------#
 
-mesh_sk = skfem.MeshTri1().refined(4)
 
-coords4nodes = torch.tensor(mesh_sk.p).T
+k_ref = 3
 
-nodes4elements = torch.tensor(mesh_sk.t).T
+q = 1
+k_int = 2 
+k_test = 1
 
-mesh = Mesh(coords4nodes, nodes4elements)
+mesh_sk_H = skfem.MeshTri1().refined(k_ref) 
 
-elements = Elements(P_order = 1, 
-                    int_order = 1)
+mesh_sk_h = mesh_sk_H.refined(k_test)
 
-V = Basis(mesh, elements)
+V_h = Basis(Mesh(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T), Elements(P_order = k_test, int_order = q))
+
+V_H = Basis(Mesh(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T), Elements(P_order = k_int, int_order = q))
+
+I_H_NN = V_h.interpolate_function(NN)
 
 #---------------------- Residual Parameters ----------------------#
 
@@ -79,12 +82,16 @@ def residual(elements: Elements):
     x, y = elements.integration_points
     
     NN_grad = NN_gradiant(NN, x, y)
-        
+    
     v = elements.v
     v_grad = elements.v_grad
     rhs_value = rhs(x, y)
     
-    return rhs_value * v - v_grad @ NN_grad.mT
+    _, NN_int_grad = I_H_NN(elements.bar_coords, elements.inv_mapping_jacobian)
+        
+    return rhs_value * v - v_grad @ NN_int_grad.mT
+    # return rhs_value * v - v_grad @ NN_grad.mT
+
 
 # def gram_matrix(elements: Elements):
     
@@ -93,7 +100,7 @@ def residual(elements: Elements):
     
 #     return v_grad @ v_grad.mT + v @ v.mT
 
-# A = V.integrate_bilineal_form(gram_matrix)
+# A = V_h.integrate_bilineal_form(gram_matrix)
 
 # A_inv = torch.linalg.inv(A)
 
@@ -128,7 +135,7 @@ def H1_norm(elements: Elements):
     
     return L2_error + H1_0_error 
     
-exact_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_exact)))
+exact_norm = torch.sqrt(torch.sum(V_h.integrate_functional(H1_exact)))
 
 loss_list = []
 relative_loss_list = []
@@ -144,7 +151,7 @@ for epoch in range(epochs):
     current_time = datetime.now().strftime("%H:%M:%S")
     print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
 
-    residual_value = V.integrate_lineal_form(residual)[V.inner_dofs]
+    residual_value = V_h.integrate_lineal_form(residual)[V_h.inner_dofs]
         
     # loss_value = residual_value.T @ (A_inv @ residual_value)
     
@@ -152,7 +159,7 @@ for epoch in range(epochs):
 
     optimizer_step(optimizer, loss_value)
     
-    error_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_norm)))/exact_norm
+    error_norm = torch.sqrt(torch.sum(V_h.integrate_functional(H1_norm)))/exact_norm
         
     relative_loss = torch.sqrt(loss_value)/exact_norm 
             
