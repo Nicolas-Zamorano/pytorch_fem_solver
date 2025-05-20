@@ -122,9 +122,27 @@ class Elements:
         
         self.integration_points = torch.split((bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
         
-        inv_mapping_jacobian = torch.linalg.inv(mapping_jacobian)
+        self.inv_mapping_jacobian = torch.linalg.inv(mapping_jacobian)
                 
-        self.v, self.v_grad = self.shape_functions_value_and_grad(bar_coords, inv_mapping_jacobian)
+        self.v, self.v_grad = self.shape_functions_value_and_grad(bar_coords, self.inv_mapping_jacobian)
+
+    def interpolate_function(self, function, mesh: Mesh):
+        
+        self.compute_integral_values(mesh)
+        
+        interpolated_function = function(*self.integration_points)
+        
+        def interpolation_value_and_grad(self, bar_coords, inv_mapping_jacobian):
+            
+            v, v_grad = self.shape_functions_value_and_grad(bar_coords, inv_mapping_jacobian)
+            
+            interpolation_value = interpolated_function * v
+            
+            interpolation_grad_value = interpolated_function * v_grad
+            
+            return interpolation_value, interpolation_grad_value
+
+        return interpolation_value_and_grad
 
 class Basis:
     def __init__(self, 
