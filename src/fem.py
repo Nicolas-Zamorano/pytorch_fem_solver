@@ -113,9 +113,7 @@ class Elements:
                                                   [[25/48]]])
                         
     def compute_integral_values(self, mesh: Mesh):
-        
-        self.mesh = mesh
-        
+                
         bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes_x, self.gaussian_nodes_y) 
                         
         mapping_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
@@ -211,4 +209,3 @@ class Basis:
         global_matrix.index_put_((self.rows_idx, self.cols_idx), 
                               local_matrix.reshape(-1),
                               accumulate = True)
-                
