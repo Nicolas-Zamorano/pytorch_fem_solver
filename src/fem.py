@@ -19,6 +19,13 @@ class Mesh:
                                                 [1, 2], 
                                                 [0, 2]]]
         
+        self.coords4edges = self.coords4nodes[self.nodes4edges]
+        
+        coords4edges_1, coords4edges_2 = torch.split(self.coords4edges, 1, dim = -2)
+        
+        edge_vectors = coords4edges_2 - coords4edges_1
+        
+        self.elements_diameter = torch.max(torch.sqrt((edge_vectors**2).sum(-1)), dim = -2)[0]       
         
         nodes4unique_edges, self.edges_idx, self.boundary_mask = torch.unique(self.nodes4edges.reshape(-1, self.nb_dimensions).mT, 
                                                                             return_inverse = True, 
@@ -35,12 +42,18 @@ class Mesh:
         
         self.nodes4boundary = torch.unique(self.nodes4boundary_edges)
         
+    def compute_normals(self):
         
         # Compute unit normal vector from all edges.
         
         coords4unique_edges_1, coords4unique_edges_2 = torch.split(self.coords4unique_edges, 1, dim = -2)
         
         edge_vectors = coords4unique_edges_2 - coords4unique_edges_1
+        
+        self.edges_length = torch.sqrt((edge_vectors**2).sum(-1))
+        
+        self.boundary_edges_lenght = self.edges_length [self.boundary_mask == 1]
+        self.inner_edges_lenght = self.edges_length [self.boundary_mask != 1]
         
         edge_vectors_x, edge_vectors_y = torch.split(edge_vectors, 1, dim = -1)
 
