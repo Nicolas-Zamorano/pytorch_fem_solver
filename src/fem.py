@@ -100,7 +100,6 @@ class Mesh:
                                 
         self.compute_mesh_parameters()
         
-        self.edges2elements_map = self.find_edge_to_element_map(self.nodes4edges, self.nodes4elements)
         self.compute_edges_values()
 
         self.compute_normals()
@@ -113,9 +112,9 @@ class Elements:
         self.P_order = P_order
         self.int_order = int_order
         
-        self.compute_barycentric_coordinates = lambda x,y: torch.concat([1.0 - x - y, 
-                                                                         x, 
-                                                                         y], dim = -1)
+        self.compute_barycentric_coordinates = lambda x, y : torch.concat([1.0 - x - y, 
+                                                                           x, 
+                                                                           y], dim = -1)
         
         self.barycentric_grad = torch.tensor([[-1.0, -1.0],
                                               [ 1.0,  0.0],
@@ -138,6 +137,7 @@ class Elements:
             grad_lambda_1, grad_lambda_2, grad_lambda_3 = torch.split(self.barycentric_grad, 1, dim = 0)
                     
             if self.P_order == 2:
+                
                 v = torch.stack([lambda_1 * (2 * lambda_1 - 1),
                                  lambda_2 * (2 * lambda_2 - 1),
                                  lambda_3 * (2 * lambda_3 - 1),
@@ -151,27 +151,13 @@ class Elements:
                                       4 * (lambda_2 * grad_lambda_1 + lambda_1 * grad_lambda_2),
                                       4 * (lambda_3 * grad_lambda_2 + lambda_2 * grad_lambda_3),
                                       4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_mapping_jacobian.unsqueeze(1)
-                
-            # if self.P_order == 3:
-            #     v = torch.stack([0.5 * lambda_1 * (3 * lambda_1 - 1) * (3 * lambda_1 - 2),
-            #                      0.5 * lambda_2 * (3 * lambda_2 - 1) * (3 * lambda_2 - 2),
-            #                      0.5 * lambda_3 * (3 * lambda_3 - 1) * (3 * lambda_3 - 2),
-            #                      9.0 * lambda_1 * lambda_2 * (3 * lambda_1 - 1),
-            #                      9.0 * lambda_1 * lambda_2 * (3 * lambda_2 - 1),
-            #                      9.0 * lambda_2 * lambda_3 * (3 * lambda_2 - 1),
-            #                      9.0 * lambda_2 * lambda_3 * (3 * lambda_3 - 1),
-            #                      9.0 * lambda_3 * lambda_1 * (3 * lambda_3 - 1),
-            #                      9.0 * lambda_3 * lambda_1 * (3 * lambda_1 - 1),
-            #                      27. * lambda_1 * lambda_2 * lambda_3], dim = -2)
-                
-            #     v_grad = torch.stack([])
-                
-        
+
         return v, v_grad
                 
     def compute_gauss_values(self, int_order: int):
         
         if int_order == 1: 
+            
             self.gaussian_nodes_x = torch.tensor([[1/3]])
                                                   
             self.gaussian_nodes_y = torch.tensor([[1/3]])
@@ -179,6 +165,7 @@ class Elements:
             self.gaussian_weights = torch.tensor([[[1.]]])
             
         if int_order == 2:
+            
             self.gaussian_nodes_x = torch.tensor([[1/6], [2/3], [1/6]])
                                                   
             self.gaussian_nodes_y = torch.tensor([[1/6], [1/6], [2/3]])
@@ -186,6 +173,7 @@ class Elements:
             self.gaussian_weights = torch.tensor([[[1/3]], [[1/3]], [[1/3]]])
             
         if int_order == 3: 
+            
             self.gaussian_nodes_x = torch.tensor([[1/3], [0.6], [0.2], [0.2]])
                                                   
             self.gaussian_nodes_y = torch.tensor([[1/3], [0.2], [0.6], [0.2]])
@@ -294,7 +282,7 @@ class Basis:
                               accumulate = True)
         
         return global_matrix
-
+            
     def interpolate_to(self, elements):
         
         nodes_x, nodes_y = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
@@ -306,3 +294,4 @@ class Basis:
         interpolator_grad = lambda function: (function(nodes_x, nodes_y) * v_grad).sum(-2, keepdim = True)
         
         return interpolator, interpolator_grad
+    
