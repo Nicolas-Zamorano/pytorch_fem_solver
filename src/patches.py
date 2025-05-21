@@ -140,6 +140,8 @@ class Basis:
 
         self.elements.compute_integral_values(self.patches)
         
+        self.patches_area = 0.5 * self.elements.det_map_jacobian.sum(-4).squeeze(-1)
+        
     def update_dofs_values(self, coords4dofs, nodes4dofs, nodes4boundary_dofs):
         
         self.coords4global_dofs = coords4dofs
