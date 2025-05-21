@@ -21,8 +21,14 @@ class Patches:
         
         coords4nodes = self.centers.unsqueeze(-2) + self.signs4nodes * self.radius.unsqueeze(-2)
                 
-        self.compute_values(coords4nodes)
+        angle = torch.tensor(torch.pi / 4) 
+        self.rotation_matrix = torch.tensor([[torch.cos(angle), -torch.sin(angle)],
+                                             [torch.sin(angle),  torch.cos(angle)]])
         
+        self.rotated_signs = (self.rotation_matrix @ self.signs4nodes.to(torch.get_default_dtype()).T).T 
+        
+        self.compute_values(coords4nodes)
+             
     def compute_values(self, coords4nodes: torch.Tensor):
 
         self.coords4nodes = coords4nodes
@@ -48,25 +54,36 @@ class Patches:
         
         self.boundary_edges_idx = torch.nonzero((self.nodes4unique_edges.unsqueeze(-1) == self.nodes4boundary_edges.unsqueeze(-2)).all(dim = -3).any(dim = -1)).squeeze(-1)
 
-    def refine_patches(self, refine_idx):
+    def refine_patches(self, refine_idx, maintain_old_patches: bool = False):
         
         new_radius = 0.5 * self.radius[refine_idx]
         
         new_centers = self.centers[refine_idx, :].unsqueeze(-2) + self.signs4nodes[:-1, :] * new_radius.unsqueeze(-2) # WARNING!!!  no deja los centros en la ordenados correctamente, los ordenados en sentido horario (originalmente los etiuqetamos sentido antihorairo). 
         
         new_coords4nodes = new_centers.unsqueeze(-2) + (self.signs4nodes * new_radius.unsqueeze(-2)).unsqueeze(-3)
+        
+        
+        rotated_radius = 2 * new_radius / torch.sqrt(torch.tensor(2.0))
+        
+        rotated_centers = self.centers[refine_idx, :]
+        
+        rotated_coords4nodes = rotated_centers.unsqueeze(-2) + self.rotated_signs.unsqueeze(0) * rotated_radius.unsqueeze(-1)
                 
-        refined_radius = torch.concat([self.radius[~refine_idx], new_radius.repeat(4, 1)], dim = 0)
+        if maintain_old_patches == False:
         
-        refined_centers = torch.concat([self.centers[~refine_idx, :], new_centers.view(-1, self.nb_dimensions)], dim = 0)
+            refined_radius = torch.concat([self.radius[~refine_idx], new_radius.repeat(4, 1), rotated_radius], dim = 0)
+            
+            refined_centers = torch.concat([self.centers[~refine_idx, :], new_centers.view(-1, self.nb_dimensions), rotated_centers], dim = 0)
+            
+            refined_coords4nodes = torch.concat([self.coords4nodes[~refine_idx, ...], new_coords4nodes.view(-1, self.nb_nodes, self.nb_dimensions), rotated_coords4nodes], dim = 0)
         
-        refined_coords4nodes = torch.concat([self.coords4nodes[~refine_idx, ...], new_coords4nodes.view(-1, self.nb_nodes, self.nb_dimensions)], dim = 0)
-                
-        refined_radius = torch.concat([self.radius, new_radius.repeat(4, 1)], dim = 0)
-        
-        refined_centers = torch.concat([self.centers, new_centers.view(-1, self.nb_dimensions)], dim = 0)
-        
-        refined_coords4nodes = torch.concat([self.coords4nodes, new_coords4nodes.view(-1, self.nb_nodes, self.nb_dimensions)], dim = 0)
+        else:
+            
+            refined_radius = torch.concat([self.radius, new_radius.repeat(4, 1), rotated_radius], dim = 0)
+            
+            refined_centers = torch.concat([self.centers, new_centers.view(-1, self.nb_dimensions), rotated_centers], dim = 0)
+            
+            refined_coords4nodes = torch.concat([self.coords4nodes, new_coords4nodes.view(-1, self.nb_nodes, self.nb_dimensions), rotated_coords4nodes], dim = 0)
 
         return refined_centers, refined_radius, refined_coords4nodes
     
@@ -161,7 +178,6 @@ class Basis:
         self.form_idx = self.global_dofs4elements.reshape(-1)
                 
         self.inner_dofs = torch.arange(self.nb_global_dofs)[~torch.isin(torch.arange(self.nb_global_dofs), self.nodes4boundary_dofs)]
-    
 
     def compute_dofs(self, patches: Patches):
                 
