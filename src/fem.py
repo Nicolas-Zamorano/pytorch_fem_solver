@@ -7,35 +7,36 @@ class Mesh:
 
         self.compute_values(coords4nodes, nodes4elements)
         
-    def compute_values(self, coords4nodes, nodes4elements):
+    def compute_mesh_parameters(self):
         
-        self.coords4nodes = coords4nodes
-        self.nodes4elements = nodes4elements
-        
-        self.coords4elements = self.coords4nodes[self.nodes4elements]
-                                
         self.nb_nodes, self.nb_dimensions = self.coords4nodes.shape
         self.nb_elements, self.size4elements = self.nodes4elements.shape
+        
+    def compute_edges_values(self):
         
         self.nodes4edges = self.nodes4elements[..., 
                                                [[0, 1], 
                                                 [1, 2], 
-                                                [0, 2]]].reshape(-1, self.nb_dimensions).mT
+                                                [0, 2]]]
         
-        self.nodes4unique_edges, self.edges_idx, self.boundary_mask = torch.unique(self.nodes4edges, 
+        
+        nodes4unique_edges, self.edges_idx, self.boundary_mask = torch.unique(self.nodes4edges.reshape(-1, self.nb_dimensions).mT, 
                                                                             return_inverse = True, 
                                                                             sorted = False, 
                                                                             return_counts = True, 
                                                                              dim = -1)
+        
+        self.nodes4unique_edges = nodes4unique_edges.mT
                 
-        self.nodes4boundary_edges = self.nodes4unique_edges[..., self.boundary_mask == 1]
-        self.nodes4inner_edges = self.nodes4unique_edges[..., self.boundary_mask != 1]
+        self.nodes4boundary_edges = self.nodes4unique_edges[self.boundary_mask == 1, ...]
+        self.nodes4inner_edges = self.nodes4unique_edges[self.boundary_mask != 1, ...]
         
-        self.boundary_edges_idx = torch.nonzero((self.nodes4unique_edges.unsqueeze(-1) == self.nodes4boundary_edges.unsqueeze(-2)).all(dim = -3).any(dim = -1)).squeeze(-1)
-        
-        self.coords4unique_edges = self.coords4nodes[self.nodes4unique_edges.mT]
+        self.coords4unique_edges = self.coords4nodes[self.nodes4unique_edges]
         
         self.nodes4boundary = torch.unique(self.nodes4boundary_edges)
+        
+        
+        # Compute unit normal vector from all edges.
         
         coords4unique_edges_1, coords4unique_edges_2 = torch.split(self.coords4unique_edges, 1, dim = -2)
         
@@ -43,41 +44,54 @@ class Mesh:
         
         edge_vectors_x, edge_vectors_y = torch.split(edge_vectors, 1, dim = -1)
 
-        normal_vector = torch.concat([-edge_vectors_y,edge_vectors_x], dim = -1)
+        normal_vector = torch.concat([-edge_vectors_y, edge_vectors_x], dim = -1)
 
         unit_normal_vector = normal_vector / torch.norm(normal_vector, dim = -1, keepdim = True)
-        
+                
         self.normal4boundary_edges = unit_normal_vector[self.boundary_mask == 1]
         self.normal4inner_edges = unit_normal_vector[self.boundary_mask != 1]
         
-        boundary_edges = self.nodes4boundary_edges.mT
-        edge2element_map = torch.zeros(len(boundary_edges), dtype=torch.long)
+        # Compute idx of interest.
         
-        for i, edge in enumerate(boundary_edges):
-            for e_id, elem in enumerate(self.nodes4elements):
-                if set(edge.tolist()).issubset(elem.tolist()):
-                    edge2element_map[i] = e_id
-                    break
+        self.nodes_idx4boundary_edges = torch.nonzero((self.nodes4unique_edges.unsqueeze(-2) == self.nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -2))
         
-        edge2element_map_xd = torch.zeros(len(self.nodes4edges.mT), dtype=torch.long)
+        self.elements4inner_edges = torch.nonzero((self.nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1))[:, 1].reshape(-1, 2)
         
-        for i, edge in enumerate(self.nodes4edges.mT):
-            for e_id, elem in enumerate(self.nodes4elements):
-                if set(edge.tolist()).issubset(elem.tolist()):
-                    edge2element_map_xd[i] = e_id
-                    break
-        
-        tri_centroids = self.coords4elements[edge2element_map].mean(dim = -2)
-        edge_midpoints = self.coords4nodes[boundary_edges].mean(dim = 1)
-        
-        vecs = edge_midpoints - tri_centroids
-        
-        dot_products = (boundary_edges * vecs).sum(dim = 1)
+        self.elements4boundary_edges = (self.nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1).float().argmax(dim=1) 
+    
+        # Fix normal from boundary edges to point outside the domain.
+    
+        tri_centroids = self.coords4elements[self.elements4boundary_edges].mean(dim = -2)
+        edge_midpoints = self.coords4nodes[self.nodes4boundary_edges].mean(dim = 1)
+                
+        dot_products = (self.nodes4boundary_edges * (edge_midpoints - tri_centroids)).sum(dim = 1)
         
         self.normal4boundary_edges[dot_products < 0] *= -1
         
+        # Fix normal from inner edges to point to the other triangle.
+    
+        tri_centroids = self.coords4elements[self.elements4inner_edges].mean(dim = -2)
+        
+        tri_centroids_1, tri_centroids_2 = torch.split(self.coords4elements[self.elements4inner_edges].mean(dim = -2), 1, dim = -2)
+        
+        dot_products = (self.normal4inner_edges * (tri_centroids_1 - tri_centroids_2)).sum(dim = -2, keepdim = True)
+    
+        self.normal4inner_edges[dot_products < 0] *= -1
+    
+    def compute_values(self, coords4nodes, nodes4elements):
+        
+        self.coords4nodes = coords4nodes
+        self.nodes4elements = nodes4elements
+        
+        self.coords4elements = self.coords4nodes[self.nodes4elements]
+                                
+        self.compute_mesh_parameters()
+        
         self.edges2elements_map = self.find_edge_to_element_map(self.nodes4edges, self.nodes4elements)
+        self.compute_edges_values()
 
+        self.compute_normals()
+        
 class Elements:
     def __init__(self,
                  P_order: int,
