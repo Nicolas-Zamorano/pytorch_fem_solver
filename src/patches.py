@@ -1,4 +1,5 @@
 import torch
+import matplotlib.pyplot as plt
 
 class Patches:
     def __init__(self, 
@@ -93,6 +94,50 @@ class Patches:
            self.centers, self.radius, new_coords4nodes = self.refine_patches(torch.tensor([True] * self.nb_patches))
            self.compute_values(new_coords4nodes)
            
+    def plot_patches(self):
+        centers_numpy = self.centers.cpu().detach().numpy()
+        radius_numpy = self.radius.cpu().detach().numpy()
+    
+        cmap = plt.get_cmap('tab10', len(centers_numpy))
+    
+        fig, ax = plt.subplots()
+
+        for i, (center, r) in enumerate(zip(centers_numpy, radius_numpy)):
+            x_min = center[0] - r
+            x_max = center[0] + r
+            y_min = center[1] - r
+            y_max = center[1] + r
+            
+            color = cmap(i)
+    
+            square = plt.Rectangle((x_min, y_min), 
+                                   x_max - x_min, 
+                                   y_max - y_min, 
+                                   fill = False, 
+                                   edgecolor = color, 
+                                   linewidth = 1)
+            ax.add_patch(square)
+            
+            ax.plot([x_min, x_max], 
+                    [y_max, y_min], 
+                    color = color, 
+                    lw = 1, 
+                    alpha = 0.6)
+            ax.plot([x_min, x_max], 
+                    [y_min, y_max], 
+                    color = color, 
+                    lw = 1, 
+                    alpha = 0.6) 
+    
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_aspect('equal', 'box')
+    
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.grid(True)
+        plt.show()   
+        
 class Elements:
     def __init__(self,
                  P_order: int,
