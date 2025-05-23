@@ -5,38 +5,35 @@ class Mesh:
                  coords4nodes: torch.Tensor, 
                  nodes4elements: torch.Tensor):
 
+        self.edges_permutations = torch.tensor([[0, 1], 
+                                                [1, 2], 
+                                                [0, 2]])
+
         self.compute_values(coords4nodes, nodes4elements)
         
     def compute_mesh_parameters(self):
         
         self.nb_nodes, self.nb_dimensions = self.coords4nodes.shape
-        self.nb_elements, self.size4elements = self.nodes4elements.shape
+        self.nb_simplex, self.size4simplex = self.nodes4elements.shape
         
     def compute_edges_values(self):
         
-        self.nodes4edges = self.nodes4elements[..., 
-                                               [[0, 1], 
-                                                [1, 2], 
-                                                [0, 2]]]
+        self.nodes4edges = self.nodes4elements[..., self.edges_permutations]
         
         self.coords4edges = self.coords4nodes[self.nodes4edges]
-        
-        coords4edges_1, coords4edges_2 = torch.split(self.coords4edges, 1, dim = -2)
-        
-        edge_vectors = coords4edges_2 - coords4edges_1
-        
-        self.elements_diameter = torch.max(torch.sqrt((edge_vectors**2).sum(-1)), dim = -2)[0]       
+                        
+        self.elements_diameter = torch.max(torch.norm(self.coords4edges[..., 1, :] - self.coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2)[0]       
         
         nodes4unique_edges, self.edges_idx, self.boundary_mask = torch.unique(self.nodes4edges.reshape(-1, self.nb_dimensions).mT, 
-                                                                            return_inverse = True, 
-                                                                            sorted = False, 
-                                                                            return_counts = True, 
-                                                                             dim = -1)
+                                                                              return_inverse = True, 
+                                                                              sorted = False, 
+                                                                              return_counts = True, 
+                                                                              dim = -1)
         
         self.nodes4unique_edges = nodes4unique_edges.mT
                 
-        self.nodes4boundary_edges = self.nodes4unique_edges[self.boundary_mask == 1, ...]
-        self.nodes4inner_edges = self.nodes4unique_edges[self.boundary_mask != 1, ...]
+        self.nodes4boundary_edges = self.nodes4unique_edges[self.boundary_mask == 1]
+        self.nodes4inner_edges = self.nodes4unique_edges[self.boundary_mask != 1]
         
         self.coords4unique_edges = self.coords4nodes[self.nodes4unique_edges]
         
@@ -45,19 +42,15 @@ class Mesh:
     def compute_normals(self):
         
         # Compute unit normal vector from all edges.
+                
+        edge_vectors = self.coords4unique_edges[..., 1, :] - self.coords4unique_edges[..., 0, :]
         
-        coords4unique_edges_1, coords4unique_edges_2 = torch.split(self.coords4unique_edges, 1, dim = -2)
-        
-        edge_vectors = coords4unique_edges_2 - coords4unique_edges_1
-        
-        self.edges_length = torch.sqrt((edge_vectors**2).sum(-1))
+        self.edges_length = torch.norm(edge_vectors, dim = -1, keepdim = True)
         
         self.boundary_edges_lenght = self.edges_length [self.boundary_mask == 1]
         self.inner_edges_lenght = self.edges_length [self.boundary_mask != 1]
         
-        edge_vectors_x, edge_vectors_y = torch.split(edge_vectors, 1, dim = -1)
-
-        normal_vector = torch.concat([-edge_vectors_y, edge_vectors_x], dim = -1)
+        normal_vector = edge_vectors[..., [1, 0]] * torch.tensor([-1., 1.])
 
         unit_normal_vector = normal_vector / torch.norm(normal_vector, dim = -1, keepdim = True)
                 
@@ -68,28 +61,26 @@ class Mesh:
         
         self.nodes_idx4boundary_edges = torch.nonzero((self.nodes4unique_edges.unsqueeze(-2) == self.nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -2))
         
-        self.elements4inner_edges = torch.nonzero((self.nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1))[:, 1].reshape(-1, 2)
+        self.elements4inner_edges = torch.nonzero((self.nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1))[:, 1].reshape(-1, self.nb_dimensions)
         
-        self.elements4boundary_edges = (self.nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1).float().argmax(dim=1) 
+        self.elements4boundary_edges = (self.nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1).float().argmax(dim = -1) 
     
         # Fix normal from boundary edges to point outside the domain.
     
-        tri_centroids = self.coords4elements[self.elements4boundary_edges].mean(dim = -2)
-        edge_midpoints = self.coords4nodes[self.nodes4boundary_edges].mean(dim = 1)
+        boundary_elements_centroid = self.coords4elements[self.elements4boundary_edges].mean(dim = -2)
+        boundary_edges_midpoint = self.coords4nodes[self.nodes4boundary_edges].mean(dim = -2)
                 
-        dot_products = (self.nodes4boundary_edges * (edge_midpoints - tri_centroids)).sum(dim = 1)
+        boundary_direction_mask = (self.nodes4boundary_edges * (boundary_elements_centroid - boundary_edges_midpoint)).sum(dim = -1)
         
-        self.normal4boundary_edges[dot_products < 0] *= -1
+        self.normal4boundary_edges[boundary_direction_mask < 0] *= -1
         
         # Fix normal from inner edges to point to the other triangle.
     
-        tri_centroids = self.coords4elements[self.elements4inner_edges].mean(dim = -2)
-        
-        tri_centroids_1, tri_centroids_2 = torch.split(self.coords4elements[self.elements4inner_edges].mean(dim = -2), 1, dim = -2)
-        
-        dot_products = (self.normal4inner_edges * (tri_centroids_1 - tri_centroids_2)).sum(dim = -2, keepdim = True)
+        inner_elements_centroid = self.coords4elements[self.elements4inner_edges].mean(dim = -2)
+                
+        inner_direction_mask = (self.normal4inner_edges * (inner_elements_centroid[..., 1, :] - inner_elements_centroid[..., 0, :])).sum(dim = -1)
     
-        self.normal4inner_edges[dot_products < 0] *= -1
+        self.normal4inner_edges[inner_direction_mask < 0] *= -1
     
     def compute_values(self, coords4nodes, nodes4elements):
         
@@ -195,7 +186,7 @@ class Elements:
         
         self.inv_mapping_jacobian = torch.linalg.inv(self.mapping_jacobian)
                 
-        self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_mapping_jacobian)
+        self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
 
 class Basis:
     def __init__(self, 
@@ -214,7 +205,7 @@ class Basis:
         if self.elements.P_order == 2:
             
             new_coords4dofs = (mesh.coords4nodes[mesh.nodes4unique_edges]).mean(0)
-            new_nodes4dofs = mesh.edges_idx.reshape(mesh.nb_elements, 3) + mesh.nb_nodes
+            new_nodes4dofs = mesh.edges_idx.reshape(mesh.nb_simplex, 3) + mesh.nb_nodes
             new_boundary_dofs = mesh.boundary_edges_idx + mesh.nb_nodes
             
         return new_coords4dofs, new_nodes4dofs, new_boundary_dofs
