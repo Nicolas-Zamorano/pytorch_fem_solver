@@ -104,6 +104,66 @@ class Mesh:
 
         self.compute_normals()
         
+class Elements_1D:
+    def __init__(self,
+                 P_order: int,
+                 int_order: int):
+        
+        self.P_order = P_order
+        self.int_order = int_order
+        
+        self.compute_barycentric_coordinates = lambda x: torch.concat([0.5 * (1. - x), 
+                                                                       0.5 * (1. + x)], dim = -1)
+        
+        self.barycentric_grad = torch.tensor([[-0.5],
+                                              [ 0.5]])
+        
+        self.compute_gauss_values(self.int_order)
+        
+    def compute_gauss_values(self, int_order: int):
+        
+        if int_order == 2: 
+            
+            nodes = 1./torch.sqrt(torch.tensor(3.))
+            
+            self.gaussian_nodes= torch.tensor([[-nodes], 
+                                               [nodes]])
+                                                              
+            self.gaussian_weights = torch.tensor([[[.5]],
+                                                  [[.5]]])
+        
+        if int_order == 3:
+            
+            nodes = torch.sqrt(torch.tensor(3/5))
+            
+            self.gaussian_nodes = torch.tensor([[0], 
+                                                [-nodes], 
+                                                [nodes]])
+            
+    # def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
+        
+    #     if self.P_order == 1: 
+            
+    #         v = bar_coords.unsqueeze(0).repeat(inv_map_jacobian.shape[0], 1, 1)
+            
+    #         v_grad = (self.barycentric_grad @ inv_map_jacobian)
+        
+    #     return v, v_grad
+    
+    def compute_integral_values(self, coords4elements):
+                
+        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes) 
+                        
+        self.map_jacobian =  (coords4elements.mT @ self.barycentric_grad)
+        
+        self.det_map_jacobian = torch.linalg.norm(self.map_jacobian, dim = -2, keepdim = True)
+        
+        self.integration_points = torch.split((self.bar_coords @ coords4elements).unsqueeze(-1), 1, dim = -2)
+        
+        self.inv_map_jacobian = 1./self.det_map_jacobian
+                
+        # self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
+
 class Elements:
     def __init__(self,
                  P_order: int,
