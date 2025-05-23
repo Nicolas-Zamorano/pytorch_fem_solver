@@ -257,6 +257,48 @@ class Elements:
                 
         self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_mapping_jacobian)
 
+class Interior_Facet_Basis:
+    def __init__(self, 
+                 mesh: Mesh,
+                 elements: Elements_1D):
+        
+        self.elements = elements
+        self.mesh = mesh
+        
+        self.compute_dofs(mesh)
+
+        self.elements.compute_integral_values(mesh.coords4nodes[mesh.nodes4inner_edges])
+        
+    def compute_dofs(self, mesh: Mesh):
+                        
+        if self.elements.P_order == 1:
+            
+            self.update_dofs_values(mesh.coords4nodes, mesh.nodes4inner_edges, mesh.nodes4boundary)
+            
+    def update_dofs_values(self, coords4dofs, nodes4dofs, nodes4boundary_dofs):
+        
+        self.coords4global_dofs = coords4dofs
+        self.global_dofs4elements = nodes4dofs
+        self.nodes4boundary_dofs = nodes4boundary_dofs
+
+        self.coords4elements = self.coords4global_dofs[self.global_dofs4elements]
+                
+        self.nb_global_dofs, self.nb_dimensions = self.coords4global_dofs.shape
+        self.nb_elements, self.nb_local_dofs = self.global_dofs4elements.shape
+        
+        self.rows_idx = self.global_dofs4elements.repeat(1, self.nb_local_dofs, 1).reshape(-1)
+        self.cols_idx = self.global_dofs4elements.repeat_interleave(self.nb_local_dofs, 1).reshape(-1)
+        
+        self.form_idx = self.global_dofs4elements.reshape(-1)
+                
+        self.inner_dofs = torch.arange(self.nb_global_dofs)[~torch.isin(torch.arange(self.nb_global_dofs), self.nodes4boundary_dofs)]
+     
+    def integrate_functional(self, function, *args, **kwargs):
+                
+        integral_value = (2. * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
+                        
+        return integral_value    
+    
 class Basis:
     def __init__(self, 
                  mesh: Mesh,
