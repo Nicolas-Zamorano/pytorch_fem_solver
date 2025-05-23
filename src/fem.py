@@ -113,13 +113,13 @@ class Elements:
         
         self.compute_gauss_values(self.int_order)
                 
-    def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_mapping_jacobian: torch.Tensor):
+    def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
         
         if self.P_order == 1: 
             
-            v = bar_coords.unsqueeze(-1).repeat(inv_mapping_jacobian.shape[0], 1, 1, 1)
+            v = bar_coords.unsqueeze(-1).repeat(inv_map_jacobian.shape[0], 1, 1, 1)
             
-            v_grad = (self.barycentric_grad @ inv_mapping_jacobian).unsqueeze(1).repeat(1, bar_coords.shape[0], 1, 1)
+            v_grad = (self.barycentric_grad @ inv_map_jacobian).unsqueeze(1).repeat(1, bar_coords.shape[0], 1, 1)
             
         else:                   
         
@@ -141,7 +141,7 @@ class Elements:
                                       (4 * lambda_3 - 1) * grad_lambda_3,
                                       4 * (lambda_2 * grad_lambda_1 + lambda_1 * grad_lambda_2),
                                       4 * (lambda_3 * grad_lambda_2 + lambda_2 * grad_lambda_3),
-                                      4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_mapping_jacobian.unsqueeze(1)
+                                      4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_map_jacobian.unsqueeze(1)
 
         return v, v_grad
                 
@@ -178,13 +178,13 @@ class Elements:
                 
         self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes_x, self.gaussian_nodes_y) 
                         
-        self.mapping_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
+        self.map_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
         
-        self.det_map_jacobian = abs(torch.linalg.det(self.mapping_jacobian)).reshape(mesh.nb_elements, 1, 1, 1)
+        self.det_map_jacobian = abs(torch.linalg.det(self.map_jacobian)).reshape(mesh.nb_simplex, 1, 1, 1)
         
         self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
         
-        self.inv_mapping_jacobian = torch.linalg.inv(self.mapping_jacobian)
+        self.inv_map_jacobian = torch.linalg.inv(self.map_jacobian)
                 
         self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
 
@@ -278,7 +278,7 @@ class Basis:
         
         nodes_x, nodes_y = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
         
-        v, v_grad = self.elements.shape_functions_value_and_grad(elements.bar_coords, elements.inv_mapping_jacobian)
+        v, v_grad = self.elements.shape_functions_value_and_grad(elements.bar_coords, elements.inv_map_jacobian)
         
         interpolator = lambda function: (function(nodes_x, nodes_y) * v).sum(-2, keepdim = True)
         
