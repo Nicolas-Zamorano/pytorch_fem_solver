@@ -286,7 +286,7 @@ class Interior_Facet_Basis:
      
     def integrate_functional(self, function, *args, **kwargs):
                 
-        integral_value = (2. * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
+        integral_value = (2. * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian.unsqueeze(-1)).sum(-3)
                         
         return integral_value    
     
@@ -376,15 +376,15 @@ class Basis:
         
         return global_matrix
             
-    def interpolate_to(self, elements):
+    def interpolate_to(self, basis):
         
-        nodes_x, nodes_y = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
+        nodes = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
         
-        v, v_grad = self.elements.shape_functions_value_and_grad(elements.bar_coords, elements.inv_map_jacobian)
+        v, v_grad = self.elements.shape_functions_value_and_grad(basis.elements.bar_coords, basis.elements.inv_map_jacobian)
         
-        interpolator = lambda function: (function(nodes_x, nodes_y) * v).sum(-2, keepdim = True)
+        interpolator = lambda function: (function(*nodes)[basis.coords4global_dofs] * v).sum(-2, keepdim = True)
         
-        interpolator_grad = lambda function: (function(nodes_x, nodes_y) * v_grad).sum(-2, keepdim = True)
+        interpolator_grad = lambda function: (function(*nodes)[basis.coords4global_dofs] * v_grad).sum(-2, keepdim = True)
         
         return interpolator, interpolator_grad
     
