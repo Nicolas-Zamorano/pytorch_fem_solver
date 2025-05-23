@@ -81,7 +81,7 @@ V_h = Basis(Mesh(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T), Elem
 
 V_H = Basis(Mesh(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T), Elements(P_order = k_int, int_order = q))
 
-I_H, I_H_grad = V_h.interpolate_to(V_h.elements)
+I_H, I_H_grad = V_h.interpolate_to(V_h)
 
 #---------------------- Residual Parameters ----------------------#
 
