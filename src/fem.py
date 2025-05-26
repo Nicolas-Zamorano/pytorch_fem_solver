@@ -357,6 +357,14 @@ class Basis:
         
         return global_matrix
     
+    def interpolate_and_grad(self, tensor):
+        
+        interpolation = (tensor[self.global_dofs4elements] * self.v).sum(-3)
+        
+        interpolation_grad = (tensor[self.global_dofs4elements] * self.v).sum(-3)
+        
+        return interpolation, interpolation_grad
+        
     def interpolate_to(self, basis):
         
         elements_mask = self.mesh.map_fine_mesh(basis.mesh)
@@ -374,6 +382,7 @@ class Basis:
         
         nodes4elements = basis.global_dofs4elements.unsqueeze(-2).unsqueeze(-2)
         
+        nodes = torch.split(basis.coords4global_dofs, 1, dim = -1)
         
         interpolator = lambda function: (function(*nodes)[nodes4elements] * v.unsqueeze(-2)).sum(-3)
         
