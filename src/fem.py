@@ -95,6 +95,58 @@ class Mesh:
 
         self.compute_normals()
         
+    def map_fine_mesh(self, fine_mesh) -> torch.Tensor:
+        """
+        Devuelve un tensor de shape (n_elements_fino,) tal que 
+        cada entrada i indica a qué triángulo del mallado grueso pertenece 
+        el triángulo i del mallado fino.
+        """
+        c4e_h = fine_mesh.coords4elements        # (n_elem_h, 3, 2)
+        c4e_H = self.coords4elements      # (n_elem_H, 3, 2)
+        centroids_h = c4e_h.mean(dim = -2)          # (n_elem_h, 2)
+    
+        # Expandimos para broadcasting
+        P = centroids_h[:, None, :]              # (n_elem_h, 1, 2)
+        A = c4e_H[None, :, 0, :]                 # (1, n_elem_H, 2)
+        B = c4e_H[None, :, 1, :]
+        C = c4e_H[None, :, 2, :]
+    
+        v0 = C - A                               # (1, n_elem_H, 2)
+        v1 = B - A
+        v2 = P - A                               # (n_elem_h, n_elem_H, 2)
+    
+        dot00 = (v0 * v0).sum(dim=-1)            # (1, n_elem_H)
+        dot01 = (v0 * v1).sum(dim=-1)
+        dot11 = (v1 * v1).sum(dim=-1)
+    
+        dot02 = (v0 * v2).sum(dim=-1)            # (n_elem_h, n_elem_H)
+        dot12 = (v1 * v2).sum(dim=-1)
+    
+        denom = dot00 * dot11 - dot01 * dot01    # (1, n_elem_H)
+        denom = denom.clamp(min=1e-14)
+    
+        u = (dot11 * dot02 - dot01 * dot12) / denom  # (n_elem_h, n_elem_H)
+        v = (dot00 * dot12 - dot01 * dot02) / denom
+    
+        inside = (u >= 0) & (v >= 0) & (u + v <= 1)   # (n_elem_h, n_elem_H)
+    
+        # Inicializar con -1
+        mapping = torch.full((c4e_h.shape[0],), -1, dtype=torch.long)
+    
+        # Para cada triángulo fino, buscamos el primer triángulo grueso que lo contiene
+        candidates = inside.nonzero(as_tuple=False)  # shape (n_matches, 2)
+    
+        # candidates[i, 0] es índice en T_h, candidates[i, 1] es índice en T_H
+        # Queremos quedarnos con el primer T_H válido para cada T_h
+        seen = torch.zeros(c4e_h.shape[0], dtype=torch.bool)
+        for i in range(candidates.shape[0]):
+            idx_h, idx_H = candidates[i]
+            if not seen[idx_h]:
+                mapping[idx_h] = idx_H
+                seen[idx_h] = True
+    
+        return mapping
+    
 class Elements:
     def __init__(self,
                  P_order: int,
@@ -300,6 +352,7 @@ class Basis:
         interpolator = lambda function: (function(nodes_x, nodes_y) * v).sum(-2, keepdim = True)
         
         interpolator_grad = lambda function: (function(nodes_x, nodes_y) * v_grad).sum(-2, keepdim = True)
+        interpolator_grad = lambda function: (function(*nodes)[nodes4elements] * v_grad.unsqueeze(-2)).sum(-3)
         
         return interpolator, interpolator_grad
     
