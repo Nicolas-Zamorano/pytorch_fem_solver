@@ -356,16 +356,27 @@ class Basis:
                               accumulate = True)
         
         return global_matrix
-            
-    def interpolate_to(self, elements):
+    
+    def interpolate_to(self, basis):
         
-        nodes_x, nodes_y = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
+        elements_mask = self.mesh.map_fine_mesh(basis.mesh)
         
-        v, v_grad = self.elements.shape_functions_value_and_grad(elements.bar_coords, elements.inv_map_jacobian)
+        coords4elements_first_node = self.coords4elements[:, [0], :][elements_mask].unsqueeze(-3)
         
-        interpolator = lambda function: (function(nodes_x, nodes_y) * v).sum(-2, keepdim = True)
+        inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+                
+        new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+                                                                    basis.elements.integration_points, 
+                                                                    inv_map_jacobian)
         
-        interpolator_grad = lambda function: (function(nodes_x, nodes_y) * v_grad).sum(-2, keepdim = True)
+        bar_coords, v, v_grad = self.elements.compute_shape_functions(*torch.unbind(new_integrations_points, dim = -1), 
+                                                                      inv_map_jacobian)
+        
+        nodes4elements = basis.global_dofs4elements.unsqueeze(-2).unsqueeze(-2)
+        
+        
+        interpolator = lambda function: (function(*nodes)[nodes4elements] * v.unsqueeze(-2)).sum(-3)
+        
         interpolator_grad = lambda function: (function(*nodes)[nodes4elements] * v_grad.unsqueeze(-2)).sum(-3)
         
         return interpolator, interpolator_grad
