@@ -43,14 +43,14 @@ class Mesh:
         
         # Compute unit normal vector from all edges.
                 
-        edge_vectors = self.coords4unique_edges[..., 1, :] - self.coords4unique_edges[..., 0, :]
+        self.edge_vectors = self.coords4unique_edges[..., 1, :] - self.coords4unique_edges[..., 0, :]
         
-        self.edges_length = torch.norm(edge_vectors, dim = -1, keepdim = True)
+        self.edges_length = torch.norm(self.edge_vectors, dim = -1, keepdim = True)
         
         self.boundary_edges_lenght = self.edges_length [self.boundary_mask == 1]
         self.inner_edges_lenght = self.edges_length [self.boundary_mask != 1]
         
-        normal_vector = edge_vectors[..., [1, 0]] * torch.tensor([-1., 1.])
+        normal_vector = self.edge_vectors[..., [1, 0]] * torch.tensor([-1., 1.])
 
         unit_normal_vector = normal_vector / torch.norm(normal_vector, dim = -1, keepdim = True)
                 
@@ -110,7 +110,7 @@ class Elements:
         self.barycentric_grad = torch.tensor([[-1.0, -1.0],
                                               [ 1.0,  0.0],
                                               [ 0.0,  1.0]])
-        
+            
         self.compute_gauss_values(self.int_order)
                 
     def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
@@ -141,7 +141,7 @@ class Elements:
                                       (4 * lambda_3 - 1) * grad_lambda_3,
                                       4 * (lambda_2 * grad_lambda_1 + lambda_1 * grad_lambda_2),
                                       4 * (lambda_3 * grad_lambda_2 + lambda_2 * grad_lambda_3),
-                                      4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_map_jacobian.unsqueeze(1)
+                                      4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_map_jacobian.unsqueeze(-3)
 
         return v, v_grad
                 
@@ -173,18 +173,35 @@ class Elements:
                                                   [[25/48]],
                                                   [[25/48]],
                                                   [[25/48]]])
-                        
+            
+    def compute_shape_functions(self, x, y, inv_map_jacobian):
+        
+        bar_coords = self.compute_barycentric_coordinates(x, y) 
+        
+        v, v_grad = self.shape_functions_value_and_grad(bar_coords, inv_map_jacobian)
+
+        return bar_coords, v, v_grad                 
+       
+    def compute_map(self, coords4elements, nb_simplex):
+        
+        map_jacobian =  coords4elements.mT @ self.barycentric_grad
+        
+        det_map_jacobian = abs(torch.linalg.det(map_jacobian)).reshape(nb_simplex, 1, 1, 1)
+        
+        inv_map_jacobian = torch.linalg.inv(map_jacobian)
+        
+        return map_jacobian, det_map_jacobian, inv_map_jacobian
+            
     def compute_integral_values(self, mesh: Mesh):
+        
+        self.map_jacobian, self.det_map_jacobian, self.inv_map_jacobian = self.compute_map(mesh.coords4elements, 
+                                                                                           mesh.nb_simplex)
                 
-        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes_x, self.gaussian_nodes_y) 
+        self.bar_coords, self.v, self.v_grad = self.compute_shape_functions(self.gaussian_nodes_x, 
+                                                                            self.gaussian_nodes_y, 
+                                                                            self.inv_map_jacobian)
                         
-        self.map_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
-        
-        self.det_map_jacobian = abs(torch.linalg.det(self.map_jacobian)).reshape(mesh.nb_simplex, 1, 1, 1)
-        
         self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
-        
-        self.inv_map_jacobian = torch.linalg.inv(self.map_jacobian)
                 
         self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
 
@@ -204,9 +221,9 @@ class Basis:
         
         if self.elements.P_order == 2:
             
-            new_coords4dofs = (mesh.coords4nodes[mesh.nodes4unique_edges]).mean(0)
+            new_coords4dofs = (mesh.coords4nodes[mesh.nodes4unique_edges]).mean(-2)
             new_nodes4dofs = mesh.edges_idx.reshape(mesh.nb_simplex, 3) + mesh.nb_nodes
-            new_boundary_dofs = mesh.boundary_edges_idx + mesh.nb_nodes
+            new_boundary_dofs = mesh.nodes_idx4boundary_edges.squeeze(-1) + mesh.nb_nodes
             
         return new_coords4dofs, new_nodes4dofs, new_boundary_dofs
         

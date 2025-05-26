@@ -81,7 +81,7 @@ V_h = Basis(Mesh(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T), Elem
 
 V_H = Basis(Mesh(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T), Elements(P_order = k_int, int_order = q))
 
-I_H, I_H_grad = V_h.interpolate_to(V_h.elements)
+I_H, I_H_grad = V_H.interpolate_to(V_h)
 
 #---------------------- Residual Parameters ----------------------#
 
@@ -160,7 +160,7 @@ for epoch in range(epochs):
     current_time = datetime.now().strftime("%H:%M:%S")
     print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
 
-    residual_value = V_H.integrate_lineal_form(residual, NN_grad_func)[V_H.inner_dofs]
+    residual_value = V_h.integrate_lineal_form(residual, NN_grad_func)[V_h.inner_dofs]
         
     # loss_value = residual_value.T @ (A_inv @ residual_value)
     
