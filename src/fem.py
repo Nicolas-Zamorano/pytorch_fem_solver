@@ -173,18 +173,35 @@ class Elements:
                                                   [[25/48]],
                                                   [[25/48]],
                                                   [[25/48]]])
-                        
+            
+    def compute_shape_functions(self, x, y, inv_map_jacobian):
+        
+        bar_coords = self.compute_barycentric_coordinates(x, y) 
+        
+        v, v_grad = self.shape_functions_value_and_grad(bar_coords, inv_map_jacobian)
+
+        return bar_coords, v, v_grad                 
+       
+    def compute_map(self, coords4elements, nb_simplex):
+        
+        map_jacobian =  coords4elements.mT @ self.barycentric_grad
+        
+        det_map_jacobian = abs(torch.linalg.det(map_jacobian)).reshape(nb_simplex, 1, 1, 1)
+        
+        inv_map_jacobian = torch.linalg.inv(map_jacobian)
+        
+        return map_jacobian, det_map_jacobian, inv_map_jacobian
+            
     def compute_integral_values(self, mesh: Mesh):
+        
+        self.map_jacobian, self.det_map_jacobian, self.inv_map_jacobian = self.compute_map(mesh.coords4elements, 
+                                                                                           mesh.nb_simplex)
                 
-        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes_x, self.gaussian_nodes_y) 
+        self.bar_coords, self.v, self.v_grad = self.compute_shape_functions(self.gaussian_nodes_x, 
+                                                                            self.gaussian_nodes_y, 
+                                                                            self.inv_map_jacobian)
                         
-        self.map_jacobian =  mesh.coords4elements.mT @ self.barycentric_grad
-        
-        self.det_map_jacobian = abs(torch.linalg.det(self.map_jacobian)).reshape(mesh.nb_simplex, 1, 1, 1)
-        
         self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
-        
-        self.inv_map_jacobian = torch.linalg.inv(self.map_jacobian)
                 
         self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
 
