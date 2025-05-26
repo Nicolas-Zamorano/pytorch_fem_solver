@@ -43,14 +43,14 @@ class Mesh:
         
         # Compute unit normal vector from all edges.
                 
-        edge_vectors = self.coords4unique_edges[..., 1, :] - self.coords4unique_edges[..., 0, :]
+        self.edge_vectors = self.coords4unique_edges[..., 1, :] - self.coords4unique_edges[..., 0, :]
         
-        self.edges_length = torch.norm(edge_vectors, dim = -1, keepdim = True)
+        self.edges_length = torch.norm(self.edge_vectors, dim = -1, keepdim = True)
         
         self.boundary_edges_lenght = self.edges_length [self.boundary_mask == 1]
         self.inner_edges_lenght = self.edges_length [self.boundary_mask != 1]
         
-        normal_vector = edge_vectors[..., [1, 0]] * torch.tensor([-1., 1.])
+        normal_vector = self.edge_vectors[..., [1, 0]] * torch.tensor([-1., 1.])
 
         unit_normal_vector = normal_vector / torch.norm(normal_vector, dim = -1, keepdim = True)
                 
@@ -110,7 +110,7 @@ class Elements:
         self.barycentric_grad = torch.tensor([[-1.0, -1.0],
                                               [ 1.0,  0.0],
                                               [ 0.0,  1.0]])
-        
+            
         self.compute_gauss_values(self.int_order)
                 
     def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
@@ -141,7 +141,7 @@ class Elements:
                                       (4 * lambda_3 - 1) * grad_lambda_3,
                                       4 * (lambda_2 * grad_lambda_1 + lambda_1 * grad_lambda_2),
                                       4 * (lambda_3 * grad_lambda_2 + lambda_2 * grad_lambda_3),
-                                      4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_map_jacobian.unsqueeze(1)
+                                      4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_map_jacobian.unsqueeze(-3)
 
         return v, v_grad
                 
