@@ -254,8 +254,22 @@ class Elements:
                                                                             self.inv_map_jacobian)
                         
         self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
+                        
+    def compute_inverse_map(self, first_node, integration_points = None, inv_map_jacobian = None):
+
+        if integration_points == None:
+            
+            integration_points = self.integration_points
+            
+        if inv_map_jacobian == None:
+            
+            inv_map_jacobian = self.inv_map_jacobian
+
+        integration_points = torch.concat(integration_points, dim = -1)
+
+        inv_map = inv_map_jacobian.unsqueeze(-3) @(integration_points - first_node).mT 
                 
-        self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
+        return inv_map.mT
 
 class Basis:
     def __init__(self, 
