@@ -204,9 +204,9 @@ class Basis:
         
         if self.elements.P_order == 2:
             
-            new_coords4dofs = (mesh.coords4nodes[mesh.nodes4unique_edges]).mean(0)
+            new_coords4dofs = (mesh.coords4nodes[mesh.nodes4unique_edges]).mean(-2)
             new_nodes4dofs = mesh.edges_idx.reshape(mesh.nb_simplex, 3) + mesh.nb_nodes
-            new_boundary_dofs = mesh.boundary_edges_idx + mesh.nb_nodes
+            new_boundary_dofs = mesh.nodes_idx4boundary_edges.squeeze(-1) + mesh.nb_nodes
             
         return new_coords4dofs, new_nodes4dofs, new_boundary_dofs
         
