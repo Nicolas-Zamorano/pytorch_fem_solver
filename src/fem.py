@@ -59,7 +59,7 @@ class Mesh:
         
         # Compute idx of interest.
         
-        self.nodes_idx4boundary_edges = torch.nonzero((self.nodes4unique_edges.unsqueeze(-2) == self.nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -2))
+        self.nodes_idx4boundary_edges = torch.nonzero((self.nodes4unique_edges.unsqueeze(-2) == self.nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
         
         self.elements4inner_edges = torch.nonzero((self.nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1))[:, 1].reshape(-1, self.nb_dimensions)
         
@@ -95,6 +95,58 @@ class Mesh:
 
         self.compute_normals()
         
+    def map_fine_mesh(self, fine_mesh) -> torch.Tensor:
+        """
+        Devuelve un tensor de shape (n_elements_fino,) tal que 
+        cada entrada i indica a qué triángulo del mallado grueso pertenece 
+        el triángulo i del mallado fino.
+        """
+        c4e_h = fine_mesh.coords4elements        # (n_elem_h, 3, 2)
+        c4e_H = self.coords4elements      # (n_elem_H, 3, 2)
+        centroids_h = c4e_h.mean(dim = -2)          # (n_elem_h, 2)
+    
+        # Expandimos para broadcasting
+        P = centroids_h[:, None, :]              # (n_elem_h, 1, 2)
+        A = c4e_H[None, :, 0, :]                 # (1, n_elem_H, 2)
+        B = c4e_H[None, :, 1, :]
+        C = c4e_H[None, :, 2, :]
+    
+        v0 = C - A                               # (1, n_elem_H, 2)
+        v1 = B - A
+        v2 = P - A                               # (n_elem_h, n_elem_H, 2)
+    
+        dot00 = (v0 * v0).sum(dim=-1)            # (1, n_elem_H)
+        dot01 = (v0 * v1).sum(dim=-1)
+        dot11 = (v1 * v1).sum(dim=-1)
+    
+        dot02 = (v0 * v2).sum(dim=-1)            # (n_elem_h, n_elem_H)
+        dot12 = (v1 * v2).sum(dim=-1)
+    
+        denom = dot00 * dot11 - dot01 * dot01    # (1, n_elem_H)
+        denom = denom.clamp(min=1e-14)
+    
+        u = (dot11 * dot02 - dot01 * dot12) / denom  # (n_elem_h, n_elem_H)
+        v = (dot00 * dot12 - dot01 * dot02) / denom
+    
+        inside = (u >= 0) & (v >= 0) & (u + v <= 1)   # (n_elem_h, n_elem_H)
+    
+        # Inicializar con -1
+        mapping = torch.full((c4e_h.shape[0],), -1, dtype=torch.long)
+    
+        # Para cada triángulo fino, buscamos el primer triángulo grueso que lo contiene
+        candidates = inside.nonzero(as_tuple=False)  # shape (n_matches, 2)
+    
+        # candidates[i, 0] es índice en T_h, candidates[i, 1] es índice en T_H
+        # Queremos quedarnos con el primer T_H válido para cada T_h
+        seen = torch.zeros(c4e_h.shape[0], dtype=torch.bool)
+        for i in range(candidates.shape[0]):
+            idx_h, idx_H = candidates[i]
+            if not seen[idx_h]:
+                mapping[idx_h] = idx_H
+                seen[idx_h] = True
+    
+        return mapping
+    
 class Elements:
     def __init__(self,
                  P_order: int,
@@ -202,8 +254,22 @@ class Elements:
                                                                             self.inv_map_jacobian)
                         
         self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
+                        
+    def compute_inverse_map(self, first_node, integration_points = None, inv_map_jacobian = None):
+
+        if integration_points == None:
+            
+            integration_points = self.integration_points
+            
+        if inv_map_jacobian == None:
+            
+            inv_map_jacobian = self.inv_map_jacobian
+
+        integration_points = torch.concat(integration_points, dim = -1)
+
+        inv_map = inv_map_jacobian.unsqueeze(-3) @(integration_points - first_node).mT 
                 
-        self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
+        return inv_map.mT
 
 class Basis:
     def __init__(self, 
@@ -290,16 +356,37 @@ class Basis:
                               accumulate = True)
         
         return global_matrix
-            
-    def interpolate_to(self, elements):
+    
+    def interpolate_and_grad(self, tensor):
         
-        nodes_x, nodes_y = torch.split(self.coords4elements.unsqueeze(-3), 1, dim = -1)
+        interpolation = (tensor[self.global_dofs4elements].unsqueeze(-3) * self.elements.v).sum(-2, keepdim = True)
         
-        v, v_grad = self.elements.shape_functions_value_and_grad(elements.bar_coords, elements.inv_map_jacobian)
+        interpolation_grad = (tensor[self.global_dofs4elements].unsqueeze(-3) * self.elements.v_grad).sum(-2, keepdim = True)
         
-        interpolator = lambda function: (function(nodes_x, nodes_y) * v).sum(-2, keepdim = True)
+        return interpolation, interpolation_grad
         
-        interpolator_grad = lambda function: (function(nodes_x, nodes_y) * v_grad).sum(-2, keepdim = True)
+    def interpolate_to(self, basis):
+        
+        elements_mask = self.mesh.map_fine_mesh(basis.mesh)
+        
+        coords4elements_first_node = self.coords4elements[:, [0], :][elements_mask].unsqueeze(-3)
+        
+        inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+                
+        new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+                                                                    basis.elements.integration_points, 
+                                                                    inv_map_jacobian)
+        
+        bar_coords, v, v_grad = self.elements.compute_shape_functions(*torch.unbind(new_integrations_points, dim = -1), 
+                                                                      inv_map_jacobian)
+        
+        nodes4elements = basis.global_dofs4elements.unsqueeze(-2).unsqueeze(-2)
+        
+        nodes = torch.split(basis.coords4global_dofs, 1, dim = -1)
+        
+        interpolator = lambda function: (function(*nodes)[nodes4elements] * v.unsqueeze(-2)).sum(-3)
+        
+        interpolator_grad = lambda function: (function(*nodes)[nodes4elements] * v_grad.unsqueeze(-2)).sum(-3)
         
         return interpolator, interpolator_grad
     
