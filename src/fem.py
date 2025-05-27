@@ -359,9 +359,9 @@ class Basis:
     
     def interpolate_and_grad(self, tensor):
         
-        interpolation = (tensor[self.global_dofs4elements] * self.v).sum(-3)
+        interpolation = (tensor[self.global_dofs4elements].unsqueeze(-3) * self.elements.v).sum(-2, keepdim = True)
         
-        interpolation_grad = (tensor[self.global_dofs4elements] * self.v).sum(-3)
+        interpolation_grad = (tensor[self.global_dofs4elements].unsqueeze(-3) * self.elements.v_grad).sum(-2, keepdim = True)
         
         return interpolation, interpolation_grad
         
