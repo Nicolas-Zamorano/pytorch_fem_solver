@@ -46,12 +46,12 @@ decay_steps = 100
 NN = torch.jit.script(Neural_Network(input_dimension = 2, 
                                       output_dimension = 1,
                                       deep_layers = 4, 
-                                      hidden_layers_dimension = 40))
+                                      hidden_layers_dimension = 20))
 
 NN_int = torch.jit.script(Neural_Network(input_dimension = 2, 
                                       output_dimension = 1,
                                       deep_layers = 4, 
-                                      hidden_layers_dimension = 40))
+                                      hidden_layers_dimension = 20))
 
 optimizer = torch.optim.Adam(NN.parameters(), 
                              lr = learning_rate)  
@@ -67,7 +67,7 @@ scheduler_int = torch.optim.lr_scheduler.ExponentialLR(optimizer_int,
 
 #---------------------- FEM Parameters ----------------------#
 
-k_ref = 4
+k_ref = 0
 
 q = 1
 k_int = 2 
@@ -81,7 +81,7 @@ V_h = Basis(Mesh(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T), Elem
 
 V_H = Basis(Mesh(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T), Elements(P_order = k_int, int_order = q))
 
-I_H, I_H_grad = V_h.interpolate_to(V_h.elements)
+I_H, I_H_grad = V_H.interpolate_to(V_h)
 
 #---------------------- Residual Parameters ----------------------#
 
@@ -103,7 +103,7 @@ def residual(elements: Elements, NN_gradient):
     v_grad = elements.v_grad
     rhs_value = rhs(x, y)
             
-    return rhs_value * v - v_grad @ NN_grad.mT
+    return rhs_value * v - (v_grad.unsqueeze(-2) @ NN_grad.unsqueeze(-2).mT).squeeze(-1)
     
 # def gram_matrix(elements: Elements):
     
@@ -160,7 +160,7 @@ for epoch in range(epochs):
     current_time = datetime.now().strftime("%H:%M:%S")
     print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
 
-    residual_value = V_H.integrate_lineal_form(residual, NN_grad_func)[V_H.inner_dofs]
+    residual_value = V_h.integrate_lineal_form(residual, NN_grad_func)[V_h.inner_dofs]
         
     # loss_value = residual_value.T @ (A_inv @ residual_value)
     
@@ -193,7 +193,6 @@ execution_time = end_time - start_time
 print(f"Training time: {execution_time}")
 
 #---------------------- Plotting ----------------------#
-
 
 figure_error, axis_error = plt.subplots(dpi = 500)
 
