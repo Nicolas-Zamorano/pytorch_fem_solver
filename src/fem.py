@@ -146,7 +146,67 @@ class Mesh:
                 seen[idx_h] = True
     
         return mapping
+
+class Elements_1D:
+    def __init__(self,
+                 P_order: int,
+                 int_order: int):
+        
+        self.P_order = P_order
+        self.int_order = int_order
+        
+        self.compute_barycentric_coordinates = lambda x: torch.concat([0.5 * (1. - x), 
+                                                                       0.5 * (1. + x)], dim = -1)
+        
+        self.barycentric_grad = torch.tensor([[-0.5],
+                                              [ 0.5]])
+        
+        self.compute_gauss_values(self.int_order)
+        
+    def compute_gauss_values(self, int_order: int):
+        
+        if int_order == 2: 
+            
+            nodes = 1./torch.sqrt(torch.tensor(3.))
+            
+            self.gaussian_nodes= torch.tensor([[-nodes], 
+                                               [nodes]])
+                                                              
+            self.gaussian_weights = torch.tensor([[[.5]],
+                                                  [[.5]]])
+        
+        if int_order == 3:
+            
+            nodes = torch.sqrt(torch.tensor(3/5))
+            
+            self.gaussian_nodes = torch.tensor([[0], 
+                                                [-nodes], 
+                                                [nodes]])
+            
+    # def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
+        
+    #     if self.P_order == 1: 
+            
+    #         v = bar_coords.unsqueeze(0).repeat(inv_map_jacobian.shape[0], 1, 1)
+            
+    #         v_grad = (self.barycentric_grad @ inv_map_jacobian)
+        
+    #     return v, v_grad
     
+    def compute_integral_values(self, coords4elements):
+                
+        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes) 
+                        
+        self.map_jacobian =  (coords4elements.mT @ self.barycentric_grad)
+        
+        self.det_map_jacobian = torch.linalg.norm(self.map_jacobian, dim = -2, keepdim = True)
+        
+        self.integration_points = torch.split((self.bar_coords @ coords4elements).unsqueeze(-1), 1, dim = -2)
+        
+        self.inv_map_jacobian = 1./self.det_map_jacobian
+                
+        # self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
+
 class Elements:
     def __init__(self,
                  P_order: int,
@@ -271,6 +331,48 @@ class Elements:
                 
         return inv_map.mT
 
+class Interior_Facet_Basis:
+    def __init__(self, 
+                 mesh: Mesh,
+                 elements: Elements_1D):
+        
+        self.elements = elements
+        self.mesh = mesh
+        
+        self.compute_dofs(mesh)
+
+        self.elements.compute_integral_values(mesh.coords4nodes[mesh.nodes4inner_edges])
+        
+    def compute_dofs(self, mesh: Mesh):
+                        
+        if self.elements.P_order == 1:
+            
+            self.update_dofs_values(mesh.coords4nodes, mesh.nodes4inner_edges, mesh.nodes4boundary)
+            
+    def update_dofs_values(self, coords4dofs, nodes4dofs, nodes4boundary_dofs):
+        
+        self.coords4global_dofs = coords4dofs
+        self.global_dofs4elements = nodes4dofs
+        self.nodes4boundary_dofs = nodes4boundary_dofs
+
+        self.coords4elements = self.coords4global_dofs[self.global_dofs4elements]
+                
+        self.nb_global_dofs, self.nb_dimensions = self.coords4global_dofs.shape
+        self.nb_elements, self.nb_local_dofs = self.global_dofs4elements.shape
+        
+        self.rows_idx = self.global_dofs4elements.repeat(1, self.nb_local_dofs, 1).reshape(-1)
+        self.cols_idx = self.global_dofs4elements.repeat_interleave(self.nb_local_dofs, 1).reshape(-1)
+        
+        self.form_idx = self.global_dofs4elements.reshape(-1)
+                
+        self.inner_dofs = torch.arange(self.nb_global_dofs)[~torch.isin(torch.arange(self.nb_global_dofs), self.nodes4boundary_dofs)]
+     
+    def integrate_functional(self, function, *args, **kwargs):
+                
+        integral_value = (2. * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian.unsqueeze(-1)).sum(-3)
+                        
+        return integral_value    
+    
 class Basis:
     def __init__(self, 
                  mesh: Mesh,
@@ -387,6 +489,6 @@ class Basis:
         interpolator = lambda function: (function(*nodes)[nodes4elements] * v.unsqueeze(-2)).sum(-3)
         
         interpolator_grad = lambda function: (function(*nodes)[nodes4elements] * v_grad.unsqueeze(-2)).sum(-3)
-        
+
         return interpolator, interpolator_grad
     
