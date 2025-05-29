@@ -22,7 +22,7 @@ class Mesh:
         
         self.coords4edges = self.coords4nodes[self.nodes4edges]
                         
-        self.elements_diameter = torch.max(torch.norm(self.coords4edges[..., 1, :] - self.coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2)[0]       
+        self.elements_diameter = torch.min(torch.norm(self.coords4edges[..., 1, :] - self.coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2)[0]       
         
         nodes4unique_edges, self.edges_idx, self.boundary_mask = torch.unique(self.nodes4edges.reshape(-1, self.nb_dimensions).mT, 
                                                                               return_inverse = True, 
