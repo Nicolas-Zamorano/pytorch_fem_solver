@@ -197,8 +197,8 @@ class Elements_1D:
         self.map_jacobian = coords4elements.mT @ self.barycentric_grad
         
         self.det_map_jacobian = torch.linalg.norm(self.map_jacobian, dim = -2, keepdim = True)
-        
-        self.integration_points = torch.split((self.bar_coords @ coords4elements), 1, dim = -1)
+                
+        self.integration_points = torch.split((self.bar_coords @ coords4elements).unsqueeze(-1).unsqueeze(-3), 1, dim = -2)
         
         self.inv_map_jacobian = 1./self.det_map_jacobian
                 
@@ -228,7 +228,7 @@ class Elements:
             
             v = bar_coords.unsqueeze(-1)
             
-            v_grad = (self.barycentric_grad @ inv_map_jacobian).unsqueeze(-3)
+            v_grad = self.barycentric_grad @ inv_map_jacobian
             
         else:                   
         
@@ -250,7 +250,7 @@ class Elements:
                                       (4 * lambda_3 - 1) * grad_lambda_3,
                                       4 * (lambda_2 * grad_lambda_1 + lambda_1 * grad_lambda_2),
                                       4 * (lambda_3 * grad_lambda_2 + lambda_2 * grad_lambda_3),
-                                      4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_map_jacobian.unsqueeze(-3)
+                                      4 * (lambda_1 * grad_lambda_3 + lambda_3 * grad_lambda_1)], dim = -2) @ inv_map_jacobian
 
         return v, v_grad
                 
@@ -308,7 +308,7 @@ class Elements:
                 
         self.bar_coords, self.v, self.v_grad = self.compute_shape_functions(self.gaussian_nodes_x, 
                                                                             self.gaussian_nodes_y, 
-                                                                            self.inv_map_jacobian)
+                                                                            self.inv_map_jacobian.unsqueeze(-3))
                         
         self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
                         
