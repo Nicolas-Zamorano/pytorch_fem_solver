@@ -17,7 +17,7 @@ class Mesh:
         self.nb_simplex, self.size4simplex = self.nodes4elements.shape
         
     def compute_edges_values(self):
-        
+    
         self.nodes4edges = self.nodes4elements[..., self.edges_permutations]
         
         self.coords4edges = self.coords4nodes[self.nodes4edges]
@@ -35,49 +35,42 @@ class Mesh:
         self.nodes4boundary_edges = self.nodes4unique_edges[self.boundary_mask == 1]
         self.nodes4inner_edges = self.nodes4unique_edges[self.boundary_mask != 1]
         
-        self.coords4unique_edges = self.coords4nodes[self.nodes4unique_edges]
-        
-        self.nodes4boundary = torch.unique(self.nodes4boundary_edges)
-        
-    def compute_normals(self):
-        
-        # Compute unit normal vector from all edges.
-                
-        self.edge_vectors = self.coords4unique_edges[..., 1, :] - self.coords4unique_edges[..., 0, :]
-        
-        self.edges_length = torch.norm(self.edge_vectors, dim = -1, keepdim = True)
-        
-        self.boundary_edges_lenght = self.edges_length [self.boundary_mask == 1]
-        self.inner_edges_lenght = self.edges_length [self.boundary_mask != 1]
-        
-        normal_vector = self.edge_vectors[..., [1, 0]] * torch.tensor([-1., 1.])
-
-        unit_normal_vector = normal_vector / torch.norm(normal_vector, dim = -1, keepdim = True)
-                
-        self.normal4boundary_edges = unit_normal_vector[self.boundary_mask == 1]
-        self.normal4inner_edges = unit_normal_vector[self.boundary_mask != 1]
-        
-        # Compute idx of interest.
-        
-        self.nodes_idx4boundary_edges = torch.nonzero((self.nodes4unique_edges.unsqueeze(-2) == self.nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
-        
+        self.elements4boundary_edges = (self.nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1).float().argmax(dim = -1) 
         self.elements4inner_edges = torch.nonzero((self.nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1))[:, 1].reshape(-1, self.nb_dimensions)
         
-        self.elements4boundary_edges = (self.nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == self.nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1).float().argmax(dim = -1) 
-    
-        # Fix normal from boundary edges to point outside the domain.
-    
+        self.coords4boundary_edges = self.coords4nodes[self.nodes4boundary_edges]
+        self.coords4inner_edges = self.coords4nodes[self.nodes4inner_edges]
+
+        self.nodes4boundary = torch.unique(self.nodes4boundary_edges)
+        self.nodes_idx4boundary_edges = torch.nonzero((self.nodes4unique_edges.unsqueeze(-2) == self.nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
+
+    def compute_normals(self):
+        
+        # Compute normal from boundary edges to point outside the domain.
+        
+        self.boundary_edges_vector = self.coords4boundary_edges[..., 1, :] - self.coords4boundary_edges[..., 0, :]
+        
+        self.boundary_edges_length = torch.norm(self.boundary_edges_vector, dim = -1, keepdim = True)
+                
+        self.normal4boundary_edges = self.boundary_edges_vector[..., [1, 0]] * torch.tensor([-1., 1.])/ self.boundary_edges_length
+        
         boundary_elements_centroid = self.coords4elements[self.elements4boundary_edges].mean(dim = -2)
-        boundary_edges_midpoint = self.coords4nodes[self.nodes4boundary_edges].mean(dim = -2)
-                
-        boundary_direction_mask = (self.nodes4boundary_edges * (boundary_elements_centroid - boundary_edges_midpoint)).sum(dim = -1)
+        boundary_edges_midpoint = self.coords4boundary_edges.mean(dim = -2)
         
-        self.normal4boundary_edges[boundary_direction_mask < 0] *= -1
+        boundary_normals_mask = (self.nodes4boundary_edges * (boundary_elements_centroid - boundary_edges_midpoint)).sum(dim = -1)
         
-        # Fix normal from inner edges to point to the other triangle.
+        self.normal4boundary_edges[boundary_normals_mask < 0] *= -1
+
+        # Fix normal from inner edges to point to element with highest idx.
     
-        inner_elements_centroid = self.coords4elements[self.elements4inner_edges].mean(dim = -2)
+        self.inner_edges_vector = self.coords4inner_edges[..., 1, :] - self.coords4inner_edges[..., 0, :]
+        
+        self.inner_edges_length = torch.norm(self.inner_edges_vector, dim = -1, keepdim = True)
                 
+        self.normal4inner_edges = self.inner_edges_vector[..., [1, 0]] * torch.tensor([-1., 1.])/ self.inner_edges_length
+                
+        inner_elements_centroid = self.coords4elements[self.elements4inner_edges].mean(dim = -2)
+        
         inner_direction_mask = (self.normal4inner_edges * (inner_elements_centroid[..., 1, :] - inner_elements_centroid[..., 0, :])).sum(dim = -1)
     
         self.normal4inner_edges[inner_direction_mask < 0] *= -1

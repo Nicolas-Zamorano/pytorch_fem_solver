@@ -79,7 +79,7 @@ V = Basis(mesh, elements)
 rhs = lambda x, y: 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
 normals = mesh.normal4inner_edges.unsqueeze(-2).unsqueeze(-2)
-h_E = mesh.inner_edges_lenght.unsqueeze(-1).unsqueeze(-1)
+h_E = mesh.inner_edges_length.unsqueeze(-1).unsqueeze(-1)
 h_T = mesh.elements_diameter.unsqueeze(-1).unsqueeze(-1)
 
 def jump_term(elements: Elements, normals, h_E):
