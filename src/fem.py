@@ -356,7 +356,7 @@ class Interior_Facet_Basis:
      
     def integrate_functional(self, function, *args, **kwargs):
                 
-        integral_value = (2. * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian.unsqueeze(-1)).sum(-3)
+        integral_value = (2. * self.elements.gaussian_weights.squeeze(-1) * function(self.elements, *args, **kwargs) * self.elements.inv_map_jacobian.unsqueeze(-1)).sum(-2)
                         
         return integral_value    
     
@@ -453,7 +453,7 @@ class Basis:
         interpolation_grad = (tensor[self.global_dofs4elements].unsqueeze(-3) * self.elements.v_grad).sum(-2, keepdim = True)
         
         return interpolation, interpolation_grad
-        
+            
     def interpolate_to(self, basis):
         
         elements_mask = self.mesh.map_fine_mesh(basis.mesh)
