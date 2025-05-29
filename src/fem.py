@@ -176,6 +176,10 @@ class Elements_1D:
                                                 [-nodes], 
                                                 [nodes]])
             
+            self.gaussian_weights = torch.tensor([[[8/18]],
+                                                  [[5/18]],
+                                                  [[5/18]]])
+            
     # def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
         
     #     if self.P_order == 1: 
