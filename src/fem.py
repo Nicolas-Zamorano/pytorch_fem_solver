@@ -314,19 +314,9 @@ class Elements:
                         
     def compute_inverse_map(self, first_node, integration_points = None, inv_map_jacobian = None):
 
-        if integration_points == None:
-            
-            integration_points = self.integration_points
-            
-        if inv_map_jacobian == None:
-            
-            inv_map_jacobian = self.inv_map_jacobian
-
-        integration_points = torch.concat(integration_points, dim = -1)
-
-        inv_map = inv_map_jacobian.unsqueeze(-3) @(integration_points - first_node).mT 
+        inv_map = inv_map_jacobian @ (integration_points - first_node) 
                 
-        return inv_map.mT
+        return inv_map
 
 class Interior_Facet_Basis:
     def __init__(self, 
