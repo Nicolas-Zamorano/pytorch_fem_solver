@@ -445,16 +445,9 @@ class Basis:
                               accumulate = True)
         
         return global_matrix
-    
-    def interpolate_and_grad(self, tensor):
-        
-        interpolation = (tensor[self.global_dofs4elements].unsqueeze(-3) * self.elements.v).sum(-2, keepdim = True)
-        
-        interpolation_grad = (tensor[self.global_dofs4elements].unsqueeze(-3) * self.elements.v_grad).sum(-2, keepdim = True)
                 
     def interpolate(self, basis, tensor = None):
         
-        return interpolation, interpolation_grad
         if basis == self:
             dofs_idx = self.global_dofs4elements.unsqueeze(-3) 
             v = self.elements.v
