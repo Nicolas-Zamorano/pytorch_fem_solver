@@ -198,7 +198,7 @@ class Elements_1D:
         
         self.det_map_jacobian = torch.linalg.norm(self.map_jacobian, dim = -2, keepdim = True)
                 
-        self.integration_points = torch.split((self.bar_coords @ coords4elements).unsqueeze(-1).unsqueeze(-3), 1, dim = -2)
+        self.integration_points = torch.split((self.bar_coords @ coords4elements).unsqueeze(-1).unsqueeze(-4), 1, dim = -2)
         
         self.inv_map_jacobian = 1./self.det_map_jacobian
                 
@@ -480,23 +480,22 @@ class Basis:
             
             _, v, v_grad = self.elements.compute_shape_functions(*torch.unbind(new_integrations_points,dim = -2), 
                                                                           inv_map_jacobian)
-            
-            v = v
-            v_grad = v_grad
-        
+                    
         if tensor != None:
             
             interpolation = (tensor[dofs_idx] * v).sum(-2)
             
-            interpolation_grad = (tensor[dofs_idx] * v).sum(-2)
+            interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2)
             
             return interpolation, interpolation_grad
         
         else:
             
-            interpolator = lambda function: (function[dofs_idx] * v).sum(-2)
+            nodes = torch.split(self.coords4global_dofs, 1, dim = -1)
             
-            interpolator_grad = lambda function: (function[dofs_idx] * v_grad).sum(-2)
+            interpolator = lambda function: (function(*nodes)[dofs_idx] * v).sum(-2, keepdim = True)
+            
+            interpolator_grad = lambda function: (function(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
             
             return interpolator, interpolator_grad
 
