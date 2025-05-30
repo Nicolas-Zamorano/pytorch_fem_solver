@@ -81,7 +81,7 @@ V_h = Basis(Mesh(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T), Elem
 
 V_H = Basis(Mesh(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T), Elements(P_order = k_int, int_order = q))
 
-I_H, I_H_grad = V_H.interpolate_to(V_h)
+I_H, I_H_grad = V_H.interpolate(V_h)
 
 #---------------------- Residual Parameters ----------------------#
 
@@ -103,7 +103,7 @@ def residual(elements: Elements, NN_gradient):
     v_grad = elements.v_grad
     rhs_value = rhs(x, y)
             
-    return rhs_value * v - (v_grad.unsqueeze(-2) @ NN_grad.unsqueeze(-2).mT).squeeze(-1)
+    return rhs_value * v - (v_grad @ NN_grad.mT)
     
 # def gram_matrix(elements: Elements):
     
