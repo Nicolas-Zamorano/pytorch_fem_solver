@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from Neural_Network import Neural_Network
 from Triangulation import Triangulation
 
+import skfem
+
 from datetime import datetime
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
@@ -41,13 +43,13 @@ def optimizer_step(optimizer, scheduler, loss_value):
 
 epochs = 1
 learning_rate = 0.5e-3
-decay_rate = 0.95
-decay_steps = 300
+decay_rate = 0.99
+decay_steps = 100
 
 input_dimension = 2
 output_dimension = 1
 deep_layers = 4
-hidden_layers_dimension = 15
+hidden_layers_dimension = 40
 
     #---------------------- VPINNs/RVPINNs ----------------------#
 
@@ -92,6 +94,12 @@ scheduler_MF_RVPINNs = torch.optim.lr_scheduler.ExponentialLR(optimizer_MF_RVPIN
 
 coords4nodes, nodes4elements = Triangulation(3)
 
+mesh_sk = skfem.MeshTri1().refined(3)
+
+# coords4nodes = mesh_sk.p.T
+
+# nodes4elements = mesh_sk.t.T
+
 mesh = fem.Mesh(torch.tensor(coords4nodes), torch.tensor(nodes4elements))
 
 elements = fem.Elements(P_order = 1, 
@@ -106,7 +114,7 @@ mesh_MF = patches.Patches(centers, radius)
 
 # mesh_MF.plot_patches()
 
-mesh_MF.uniform_refine(1)
+mesh_MF.uniform_refine(2)
 
 elements_MF = patches.Elements(P_order = 1, 
                                int_order = 2)
@@ -126,7 +134,7 @@ plt.show()
 
 #---------------------- Residual Parameters ----------------------#
 
-rhs = lambda x, y: 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+rhs = lambda x, y: 5. * math.pi**2 * torch.sin(2 * math.pi * x) * torch.sin(math.pi * y)
 
 def residual(elements, NN):
     
@@ -139,7 +147,6 @@ def residual(elements, NN):
     rhs_value = rhs(x, y)
             
     return rhs_value * v - v_grad @ NN_grad.mT
-
 
 def gram_matrix(elements):
     
@@ -156,19 +163,23 @@ A = V.integrate_bilineal_form(gram_matrix)[V.inner_dofs, :][:, V.inner_dofs]
 
 A_inv = torch.linalg.inv(A)
 
-
 #---------------------- Error Parameters ----------------------#
+
+exact = lambda x, y : torch.sin(2 * math.pi * x) * torch.sin(math.pi * y)
+
+exact_dx = lambda x, y : 2 * math.pi * torch.cos(2 * math.pi * x) * torch.sin(math.pi * y)
+exact_dy = lambda x, y : math.pi * torch.sin(2 * math.pi * x) * torch.cos(math.pi * y)
 
 def H1_exact(elements):
     
     x, y = elements.integration_points
     
-    exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
+    # exact = torch.sin(5 * math.pi * x) * torch.sin(math.pi * y)
     
-    exact_dx = math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
-    exact_dy = math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
+    # exact_dx = 5 * math.pi * torch.cos(5 * math.pi * x) * torch.sin(math.pi * y)
+    # exact_dy = math.pi * torch.sin(5 * math.pi * x) * torch.cos(math.pi * y)
     
-    return exact_dx**2 + exact_dy**2 + exact**2
+    return exact_dx(x, y)**2 + exact_dy(x, y)**2 + exact(x, y)**2
 
 def H1_norm(elements, NN):
    
@@ -176,14 +187,14 @@ def H1_norm(elements, NN):
     
     NN_dx, NN_dy = torch.split(NN_gradiant(NN,x, y), 1 , dim = -1)
 
-    exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
+    # exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
     
-    exact_dx = math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
-    exact_dy = math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
+    # exact_dx = 5 * math.pi * torch.cos(5 * math.pi * x) * torch.sin(math.pi * y)
+    # exact_dy = math.pi * torch.sin(5 * math.pi * x) * torch.cos(math.pi * y)
 
-    L2_error = (exact - NN(x,y))**2
+    L2_error = (exact(x, y) - NN(x,y))**2
     
-    H1_0_error = (exact_dx - NN_dx)**2 + (exact_dy - NN_dy)**2
+    H1_0_error = (exact_dx(x, y) - NN_dx)**2 + (exact_dy(x, y) - NN_dy)**2
     
     return L2_error + H1_0_error 
     
@@ -219,7 +230,7 @@ for epoch in range(epochs):
 
     residual_value_MF_VPINNs = V_MF.integrate_lineal_form(residual, NN_MF_VPINNs)[:, V_MF.inner_dofs]
             
-    loss_value_MF_VPINNs  = (residual_value_MF_VPINNs **2).mean()
+    loss_value_MF_VPINNs  = (residual_value_MF_VPINNs **2/V_MF.patches_area).sum()
     
     optimizer_step(optimizer_MF_VPINNs, scheduler_MF_VPINNs, loss_value_MF_VPINNs)
 
@@ -231,7 +242,7 @@ for epoch in range(epochs):
     
     residual_value_MF_RVPINNs = V_MF.integrate_lineal_form(residual, NN_MF_RVPINNs)[:, V_MF.inner_dofs]
         
-    loss_value_MF_RVPINNs = (residual_value_MF_RVPINNs.mT * (A_inv_MF * residual_value_MF_RVPINNs)).mean()
+    loss_value_MF_RVPINNs = (residual_value_MF_RVPINNs.mT * (A_inv_MF * residual_value_MF_RVPINNs)).sum()
     
     optimizer_step(optimizer_MF_RVPINNs, scheduler_MF_RVPINNs, loss_value_MF_RVPINNs)
     
@@ -256,7 +267,7 @@ y = torch.linspace(0, 1, N_points)
 X, Y = torch.meshgrid(x, y, indexing = "ij")
 
 with torch.no_grad(): 
-    Z = torch.sin(math.pi * X) * torch.sin(math.pi * Y)
+    Z = exact(X, Y)
 
 figure_solution = plt.figure()
 axis_solution = figure_solution.add_subplot(111, projection = '3d')
