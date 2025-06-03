@@ -28,7 +28,6 @@ def NN_gradiant(NN, x, y):
                                     retain_graph = True,
                                     create_graph = True)
         
-    # return gradients 
     return torch.concat(gradients, dim = -1)
 
 def optimizer_step(optimizer, loss_value):
@@ -57,7 +56,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
 
 #---------------------- FEM Parameters ----------------------#
 
-mesh_sk = skfem.MeshTri1().refined(0)
+mesh_sk = skfem.MeshTri1().refined(3)
 
 coords4nodes = torch.tensor(mesh_sk.p).T
 
@@ -65,14 +64,14 @@ nodes4elements = torch.tensor(mesh_sk.t).T
 
 mesh = Mesh(coords4nodes, nodes4elements)
 
-elements = Elements(P_order = 1, 
-                    int_order = 1)
+elements = Elements(P_order = 2, 
+                    int_order = 3)
 
 V = Basis(mesh, elements)
 
 #---------------------- Residual Parameters ----------------------#
 
-rhs = lambda x, y: 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+rhs = lambda x, y : 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
 def residual(elements: Elements):
     
@@ -86,7 +85,6 @@ def residual(elements: Elements):
     
     return rhs_value * v - v_grad @ NN_grad.mT
 
-
 # def gram_matrix(elements: Elements):
     
 #     v = elements.v
@@ -94,41 +92,30 @@ def residual(elements: Elements):
     
 #     return v_grad @ v_grad.mT + v @ v.mT
 
-# A = V.integrate_bilineal_form(gram_matrix)
+# A = V.integrate_bilineal_form(gram_matrix)[V.inner_dofs, :][:, V.inner_dofs]
 
 # A_inv = torch.linalg.inv(A)
 
 #---------------------- Error Parameters ----------------------#
 
+exact = lambda x, y : torch.sin(math.pi * x) * torch.sin(math.pi * y)
+exact_dy = lambda x, y : math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
+exact_dx = lambda x, y : math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
 
 def H1_exact(elements: Elements):
-    
+
     x, y = elements.integration_points
     
-    exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
-    
-    exact_dx = math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
-    exact_dy = math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
-    
-    return exact_dx**2 + exact_dy**2 + exact**2
+    return exact(x, y)**2 + exact_dx(x, y)**2 + exact_dy(x,y)**2
 
 def H1_norm(elements: Elements):
    
     x, y = elements.integration_points
     
     NN_dx, NN_dy = torch.split(NN_gradiant(NN, x, y), 1 , dim = -1)
-
-    exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
     
-    exact_dx = math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
-    exact_dy = math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
-
-    L2_error = (exact - NN(x,y))**2
-    
-    H1_0_error = (exact_dx - NN_dx)**2 + (exact_dy - NN_dy)**2
-    
-    return L2_error + H1_0_error 
-    
+    return (exact(x, y)- NN(x,y))**2 + (exact_dx(x, y) - NN_dx)**2 + (exact_dy(x, y) - NN_dy)**2
+        
 exact_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_exact)))
 
 loss_list = []
@@ -179,12 +166,11 @@ NN.load_state_dict(params_opt)
 
 N_points = 100
 
-x = torch.linspace(0, 1, N_points)
-y = torch.linspace(0, 1, N_points)
-X, Y = torch.meshgrid(x, y, indexing = "ij")
+X, Y = torch.meshgrid(torch.linspace(0, 1, N_points), torch.linspace(0, 1, N_points), indexing = "ij")
+
 
 with torch.no_grad(): 
-    Z = abs(torch.sin(math.pi * X) * torch.sin(math.pi * Y) - NN(X, Y))
+    Z = abs(exact(X,Y) - NN(X, Y))
 
 figure_solution, axis_solution = plt.subplots()
 
