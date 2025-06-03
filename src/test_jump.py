@@ -57,7 +57,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
 
 #---------------------- FEM Parameters ----------------------#
 
-mesh_sk = skfem.MeshTri1().refined(5)
+mesh_sk = skfem.MeshTri1().refined(3)
 
 coords4nodes = torch.tensor(mesh_sk.p).T
 
@@ -74,6 +74,8 @@ V_edges = Interior_Facet_Basis(mesh, elements_1D)
 
 V = Basis(mesh, elements)
 
+I, I_grad = V.interpolate(V_edges)
+
 #---------------------- Residual Parameters ----------------------#
 
 rhs = lambda x, y: 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
@@ -82,25 +84,15 @@ normals = mesh.normal4inner_edges.unsqueeze(-2).unsqueeze(-2)
 h_E = mesh.inner_edges_length.unsqueeze(-1).unsqueeze(-1)
 h_T = mesh.elements_diameter.unsqueeze(-1).unsqueeze(-1)
 
-def jump_term(elements: Elements, normals, h_E):
-    
-    # x, y = elements.integration_points
-    
-    x,y = torch.split(mesh.coords4elements[mesh.elements4inner_edges], 1, dim = -1)
-        
-    NN_grad = NN_gradiant(NN, x, y).mean(-2, keepdim=True)
-    
-    NN_grad_plus, NN_grad_minus = torch.split(NN_grad, 1, dim = -3)
-        
-    jump = normals @ NN_grad_plus.mT - normals @ NN_grad_minus.mT
-    
-    return jump**2
+def jump(elements: Elements, n_E, h_E):
+    I_u_grad_plus, I_u_grad_minus = torch.unbind(I_grad(NN),dim = -4)
+    return ((I_u_grad_plus * n_E).sum(-1, keepdim=True) + (I_u_grad_minus * -n_E).sum(-1, keepdim=True))**2
     
 def rhs_term(elements: Elements, h_T):
     
     x,y = elements.integration_points
     
-    return rhs(x,y)**2
+    return h_T**2 * rhs(x,y)**2
 
 #---------------------- Error Parameters ----------------------#
 
@@ -148,11 +140,9 @@ for epoch in range(epochs):
     current_time = datetime.now().strftime("%H:%M:%S")
     print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
 
-    residual_value = (h_T**2 * V.integrate_functional(rhs_term, h_T)).sum() + (h_E * V_edges.integrate_functional(jump_term, normals, h_E)).sum()
-        
-    # loss_value = residual_value.T @ (A_inv @ residual_value)
-    
-    loss_value = torch.sqrt(residual_value)
+    residual_value = (V.integrate_functional(rhs_term, h_T)).sum() + (V_edges.integrate_functional(jump, normals, h_E)).sum()
+            
+    loss_value = residual_value
 
     optimizer_step(optimizer, loss_value)
     
@@ -212,13 +202,13 @@ axis_error.semilogy(H1_error_list,
 
 axis_error.legend(fontsize=15)
 
-figure_loglog, axis_loglog = plt.subplots()
+# figure_loglog, axis_loglog = plt.subplots()
 
-axis_loglog.loglog(relative_loss_list,
-                    H1_error_list)
+# axis_loglog.loglog(relative_loss_list,
+#                     H1_error_list)
 
-axis_loglog.set(title = "Error vs Loss comparasion of RVPINNs method",
-                xlabel = "Relative Loss", 
-                ylabel = "Relative Error")
+# axis_loglog.set(title = "Error vs Loss comparasion of RVPINNs method",
+#                 xlabel = "Relative Loss", 
+#                 ylabel = "Relative Error")
 
 plt.show()
