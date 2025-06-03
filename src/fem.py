@@ -108,12 +108,12 @@ class Mesh:
         v1 = B - A
         v2 = P - A                               # (n_elem_h, n_elem_H, 2)
     
-        dot00 = (v0 * v0).sum(dim=-1)            # (1, n_elem_H)
-        dot01 = (v0 * v1).sum(dim=-1)
-        dot11 = (v1 * v1).sum(dim=-1)
+        dot00 = (v0 * v0).sum(dim = -1)            # (1, n_elem_H)
+        dot01 = (v0 * v1).sum(dim = -1)
+        dot11 = (v1 * v1).sum(dim = -1)
     
-        dot02 = (v0 * v2).sum(dim=-1)            # (n_elem_h, n_elem_H)
-        dot12 = (v1 * v2).sum(dim=-1)
+        dot02 = (v0 * v2).sum(dim = -1)            # (n_elem_h, n_elem_H)
+        dot12 = (v1 * v2).sum(dim = -1)
     
         denom = dot00 * dot11 - dot01 * dot01    # (1, n_elem_H)
         denom = denom.clamp(min=1e-14)
@@ -124,14 +124,14 @@ class Mesh:
         inside = (u >= 0) & (v >= 0) & (u + v <= 1)   # (n_elem_h, n_elem_H)
     
         # Inicializar con -1
-        mapping = torch.full((c4e_h.shape[0],), -1, dtype=torch.long)
+        mapping = torch.full((c4e_h.shape[0],), -1, dtype = torch.long)
     
         # Para cada triángulo fino, buscamos el primer triángulo grueso que lo contiene
         candidates = inside.nonzero(as_tuple=False)  # shape (n_matches, 2)
     
         # candidates[i, 0] es índice en T_h, candidates[i, 1] es índice en T_H
         # Queremos quedarnos con el primer T_H válido para cada T_h
-        seen = torch.zeros(c4e_h.shape[0], dtype=torch.bool)
+        seen = torch.zeros(c4e_h.shape[0], dtype = torch.bool)
         for i in range(candidates.shape[0]):
             idx_h, idx_H = candidates[i]
             if not seen[idx_h]:
@@ -381,7 +381,7 @@ class Basis:
             new_boundary_dofs = mesh.nodes_idx4boundary_edges.squeeze(-1) + mesh.nb_nodes
             
         return new_coords4dofs, new_nodes4dofs, new_boundary_dofs
-        
+            
     def update_dofs_values(self, coords4dofs, nodes4dofs, nodes4boundary_dofs):
         
         self.coords4global_dofs = coords4dofs
@@ -483,9 +483,9 @@ class Basis:
                     
         if tensor != None:
             
-            interpolation = (tensor[dofs_idx] * v).sum(-2)
+            interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim = True)
             
-            interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2)
+            interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2, keepdim = True)
             
             return interpolation, interpolation_grad
         
@@ -493,10 +493,8 @@ class Basis:
             
             nodes = torch.split(self.coords4global_dofs, 1, dim = -1)
             
-            interpolator = lambda function: (function(*nodes)[dofs_idx] * v).sum(-2, keepdim = True)
+            interpolator = lambda function : (function(*nodes)[dofs_idx] * v).sum(-2, keepdim = True)
             
-            interpolator_grad = lambda function: (function(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
+            interpolator_grad = lambda function : (function(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
             
             return interpolator, interpolator_grad
-
-    
