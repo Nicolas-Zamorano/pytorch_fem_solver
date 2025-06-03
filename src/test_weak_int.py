@@ -67,7 +67,7 @@ scheduler_int = torch.optim.lr_scheduler.ExponentialLR(optimizer_int,
 
 #---------------------- FEM Parameters ----------------------#
 
-k_ref = 0
+k_ref = 3
 
 q = 1
 k_int = 2 
@@ -193,6 +193,28 @@ execution_time = end_time - start_time
 print(f"Training time: {execution_time}")
 
 #---------------------- Plotting ----------------------#
+
+N_points = 100
+
+x = torch.linspace(0, 1, N_points)
+y = torch.linspace(0, 1, N_points)
+X, Y = torch.meshgrid(x, y, indexing = "ij")
+
+with torch.no_grad(): 
+    Z = abs(torch.sin(math.pi * X) * torch.sin(math.pi * Y) - NN_int(X, Y))
+
+figure_solution, axis_solution = plt.subplots()
+
+fig, ax = plt.subplots(dpi = 500)
+c = ax.contourf(X.cpu(), Y.cpu(), Z.cpu(), levels = 100, cmap = 'viridis')
+fig.colorbar(c, ax=ax, orientation='vertical')
+
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_title(r'$|u-I_H u_\theta|$')
+plt.tight_layout()
+
+figure_error, axis_error = plt.subplots(dpi = 500)
 
 figure_error, axis_error = plt.subplots(dpi = 500)
 
