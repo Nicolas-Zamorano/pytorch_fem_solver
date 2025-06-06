@@ -340,7 +340,7 @@ class Element_Tri(Abstract_Element):
         inv_map_jacobian = (1 / det_map_jacobian) * torch.concat([torch.concat([d, -b], dim = -1),
                                                                   torch.concat([-c, a], dim = -1)], dim = -2)
     
-        return det_map_jacobian, inv_map_jacobian
+        return abs(det_map_jacobian), inv_map_jacobian
 
 class Abstract_Basis(ABC):
     def __init__(self,
@@ -408,11 +408,11 @@ class Abstract_Basis(ABC):
         return integral_value
     
     @abstractmethod
-    def compute_dofs(self, mesh):
+    def compute_dofs(self, coords4nodes, nodes4elements, nodes4boundary, mesh_parameters, edges_parameters, P_order):
         raise NotImplementedError
         
     @abstractmethod
-    def compute_basis_parameters(self):
+    def compute_basis_parameters(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
         raise NotImplementedError
 
 class Basis(Abstract_Basis):
