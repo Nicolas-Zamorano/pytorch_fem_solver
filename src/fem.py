@@ -132,13 +132,67 @@ class Mesh_Tri(Abstract_Mesh):
     
         return mapping
 
-class Elements_1D:
+class Abstract_Element(ABC):
     def __init__(self,
                  P_order: int,
                  int_order: int):
         
         self.P_order = P_order
         self.int_order = int_order
+        
+        self.gaussian_nodes, self.gaussian_weights = self.compute_gauss_values()
+        
+    def compute_integral_values(self, coords4elements: torch.Tensor):
+        
+        det_map_jacobian, inv_map_jacobian = self.compute_map(coords4elements)
+                
+        bar_coords, v, v_grad = self.compute_shape_functions(self.gaussian_nodes, inv_map_jacobian)
+                        
+        integration_points = torch.split(bar_coords.mT @ coords4elements, 1, dim = -1)
+                        
+        dx = self.reference_element_area * self.gaussian_weights * det_map_jacobian 
+        
+        return v, v_grad, integration_points, dx
+    
+    def compute_map(self, coords4elements: torch.Tensor):
+        
+        map_jacobian = coords4elements.mT @ self.barycentric_grad
+        
+        det_map_jacobian, inv_map_jacobian = self.compute_det_and_inv_map(map_jacobian)
+        
+        return det_map_jacobian, inv_map_jacobian
+            
+    def compute_shape_functions(self, gaussian_nodes: torch.Tensor, inv_map_jacobian: torch.Tensor):
+        
+        bar_coords = self.compute_barycentric_coordinates(gaussian_nodes) 
+        
+        v, v_grad = self.shape_functions_value_and_grad(bar_coords, inv_map_jacobian)
+
+        return bar_coords, v, v_grad                 
+
+    @staticmethod
+    def compute_inverse_map(first_node: torch.Tensor, integration_points: torch.Tensor, inv_map_jacobian: torch.Tensor):
+
+        inv_map = inv_map_jacobian @ (integration_points - first_node) 
+                
+        return inv_map
+
+    @abstractmethod
+    def compute_gauss_values(self):
+        raise NotImplementedError
+        
+    @abstractmethod
+    def shape_functions_value_and_grad(self, bar_coords, inv_map_jacobian):
+        raise NotImplementedError
+        
+    @abstractmethod
+    def compute_det_and_inv_map(self, map_jacobian):
+        raise NotImplementedError
+
+class Element_Line(Abstract_Element):
+    def __init__(self,
+                 P_order: int = 1,
+                 int_order: int = 2):
         
         self.compute_barycentric_coordinates = lambda x: torch.concat([0.5 * (1. - x), 
                                                                        0.5 * (1. + x)], dim = -1)
@@ -146,98 +200,94 @@ class Elements_1D:
         self.barycentric_grad = torch.tensor([[-0.5],
                                               [ 0.5]])
         
-        self.compute_gauss_values(self.int_order)
+        self.reference_element_area = 2.
         
-    def compute_gauss_values(self, int_order: int):
+        super().__init__(P_order, 
+                         int_order)
         
-        if int_order == 2: 
+    def compute_gauss_values(self):
+        
+        if self.int_order == 2: 
             
             nodes = 1./torch.sqrt(torch.tensor(3.))
             
-            self.gaussian_nodes= torch.tensor([[-nodes], 
-                                               [nodes]])
+            gaussian_nodes= torch.tensor([[-nodes], 
+                                          [nodes]])
                                                               
-            self.gaussian_weights = torch.tensor([[[.5]],
-                                                  [[.5]]])
+            gaussian_weights = torch.tensor([[[.5]],
+                                             [[.5]]])
         
-        if int_order == 3:
+        if self.int_order == 3:
             
             nodes = torch.sqrt(torch.tensor(3/5))
             
-            self.gaussian_nodes = torch.tensor([[0], 
-                                                [-nodes], 
-                                                [nodes]])
+            gaussian_nodes = torch.tensor([[0], 
+                                           [-nodes], 
+                                           [nodes]])
             
-            self.gaussian_weights = torch.tensor([[[8/18]],
-                                                  [[5/18]],
-                                                  [[5/18]]])
+            gaussian_weights = torch.tensor([[[8/18]],
+                                             [[5/18]],
+                                             [[5/18]]])
             
-    # def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
-        
-    #     if self.P_order == 1: 
-            
-    #         v = bar_coords.unsqueeze(0).repeat(inv_map_jacobian.shape[0], 1, 1)
-            
-    #         v_grad = (self.barycentric_grad @ inv_map_jacobian)
-        
-    #     return v, v_grad
-    
-    def compute_integral_values(self, coords4elements):
-                
-        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes) 
+        return gaussian_nodes, gaussian_weights
                         
-        self.map_jacobian = coords4elements.mT @ self.barycentric_grad
-        
-        self.det_map_jacobian = torch.linalg.norm(self.map_jacobian, dim = -2, keepdim = True)
-                
-        self.integration_points = torch.split((self.bar_coords @ coords4elements).unsqueeze(-1).unsqueeze(-4), 1, dim = -2)
-        
-        self.inv_map_jacobian = 1./self.det_map_jacobian
-                
-        # self.v, self.v_grad = self.shape_functions_value_and_grad(self.bar_coords, self.inv_map_jacobian)
-
-class Elements:
-    def __init__(self,
-                 P_order: int,
-                 int_order: int):
-        
-        self.P_order = P_order
-        self.int_order = int_order
-        
-        self.compute_barycentric_coordinates = lambda x, y : torch.concat([1.0 - x - y, 
-                                                                           x, 
-                                                                           y], dim = -1)
-        
-        self.barycentric_grad = torch.tensor([[-1.0, -1.0],
-                                              [ 1.0,  0.0],
-                                              [ 0.0,  1.0]])
-            
-        self.compute_gauss_values(self.int_order)
-        
+    
     def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
         
         if self.P_order == 1: 
             
-            v = bar_coords.unsqueeze(-1)
+            v = bar_coords
+            
+            v_grad = self.barycentric_grad @ inv_map_jacobian
+        
+        return v, v_grad
+    
+    def compute_det_and_inv_map(map_jacobian):
+
+        raise NotImplementedError 
+    
+class Element_Tri(Abstract_Element):
+    def __init__(self,
+                 P_order: int,
+                 int_order: int):
+        
+        self.compute_barycentric_coordinates = lambda x: torch.stack([1.0 - x[..., [0]] - x[..., [1]], 
+                                                                       x[..., [0]], 
+                                                                       x[..., [1]]], dim = -2)
+        
+        self.barycentric_grad = torch.tensor([[-1.0, -1.0],
+                                              [ 1.0,  0.0],
+                                              [ 0.0,  1.0]])
+        
+        self.reference_element_area = 0.5
+        
+        super().__init__(P_order, 
+                         int_order)
+                    
+    def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
+        
+        if self.P_order == 1: 
+            
+            v = bar_coords
             
             v_grad = self.barycentric_grad @ inv_map_jacobian
             
-        else:                   
+        if self.P_order == 2:                   
         
-            lambda_1, lambda_2, lambda_3 = torch.split(bar_coords, 1, dim = -1)
+            lambda_1, lambda_2, lambda_3 = torch.split(bar_coords, 1, dim = -2)
             
-            grad_lambda_1, grad_lambda_2, grad_lambda_3 = torch.split(self.barycentric_grad, 1, dim = 0)
+            grad_lambda_1, grad_lambda_2, grad_lambda_3 = torch.split(self.barycentric_grad, 1, dim = -2)
                     
             if self.P_order == 2:
                 
-                v = torch.stack([lambda_1 * (2 * lambda_1 - 1),
+                v = torch.concat([lambda_1 * (2 * lambda_1 - 1),
                                  lambda_2 * (2 * lambda_2 - 1),
                                  lambda_3 * (2 * lambda_3 - 1),
                                  4 * lambda_1 * lambda_2,
                                  4 * lambda_2 * lambda_3,
                                  4 * lambda_3 * lambda_1], dim = -2)
                 
-                v_grad = torch.stack([(4 * lambda_1 - 1) * grad_lambda_1,
+                v_grad = torch.concat([(4 * lambda_1 - 1) * grad_lambda_1,
                                       (4 * lambda_2 - 1) * grad_lambda_2,
                                       (4 * lambda_3 - 1) * grad_lambda_3,
                                       4 * (lambda_2 * grad_lambda_1 + lambda_1 * grad_lambda_2),
@@ -246,69 +296,51 @@ class Elements:
 
         return v, v_grad
                 
-    def compute_gauss_values(self, int_order: int):
+    def compute_gauss_values(self):
         
-        if int_order == 1: 
+        if self.int_order == 1: 
             
-            self.gaussian_nodes_x = torch.tensor([[1/3]])
+            gaussian_nodes = torch.tensor([[1/3, 1/3]])
+                                                              
+            gaussian_weights = torch.tensor([[[1.]]])
+            
+        if self.int_order == 2:
+            
+            gaussian_nodes = torch.tensor([[1/6, 1/6], 
+                                           [2/3, 1/6], 
+                                           [1/6, 2/3]])
+                                                              
+            gaussian_weights = torch.tensor([[[1/3]], 
+                                             [[1/3]], 
+                                             [[1/3]]])
+            
+        if self.int_order == 3: 
+            
+            gaussian_nodes = torch.tensor([[1/3, 1/3], 
+                                           [0.6, 0.2], 
+                                           [0.2, 0.6],
+                                           [0.2, 0.2]])
                                                   
-            self.gaussian_nodes_y = torch.tensor([[1/3]])
             
-            self.gaussian_weights = torch.tensor([[[1.]]])
+            gaussian_weights = torch.tensor([[[-9/16]],
+                                             [[25/48]],
+                                             [[25/48]],
+                                             [[25/48]]])
             
-        if int_order == 2:
-            
-            self.gaussian_nodes_x = torch.tensor([[1/6], [2/3], [1/6]])
-                                                  
-            self.gaussian_nodes_y = torch.tensor([[1/6], [1/6], [2/3]])
-            
-            self.gaussian_weights = torch.tensor([[[1/3]], [[1/3]], [[1/3]]])
-            
-        if int_order == 3: 
-            
-            self.gaussian_nodes_x = torch.tensor([[1/3], [0.6], [0.2], [0.2]])
-                                                  
-            self.gaussian_nodes_y = torch.tensor([[1/3], [0.2], [0.6], [0.2]])
-            
-            self.gaussian_weights = torch.tensor([[[-9/16]],
-                                                  [[25/48]],
-                                                  [[25/48]],
-                                                  [[25/48]]])
-            
-    def compute_shape_functions(self, x, y, inv_map_jacobian):
-        
-        bar_coords = self.compute_barycentric_coordinates(x, y) 
-        
-        v, v_grad = self.shape_functions_value_and_grad(bar_coords, inv_map_jacobian)
+        return gaussian_nodes, gaussian_weights
 
-        return bar_coords, v, v_grad                 
-       
-    def compute_map(self, coords4elements, nb_simplex):
-        
-        map_jacobian =  coords4elements.mT @ self.barycentric_grad
-        
-        det_map_jacobian = abs(torch.linalg.det(map_jacobian)).reshape(nb_simplex, 1, 1, 1)
-        
-        inv_map_jacobian = torch.linalg.inv(map_jacobian)
-        
-        return map_jacobian, det_map_jacobian, inv_map_jacobian
-            
-    def compute_integral_values(self, mesh: Mesh):
-        
-        self.map_jacobian, self.det_map_jacobian, self.inv_map_jacobian = self.compute_map(mesh.coords4elements, 
-                                                                                           mesh.nb_simplex)
-                
-        self.bar_coords, self.v, self.v_grad = self.compute_shape_functions(self.gaussian_nodes_x, 
-                                                                            self.gaussian_nodes_y, 
-                                                                            self.inv_map_jacobian.unsqueeze(-3))
-                        
-        self.integration_points = torch.split((self.bar_coords @ mesh.coords4elements).unsqueeze(-1), 1, dim = -2)
-                        
-    def compute_inverse_map(self, first_node, integration_points = None, inv_map_jacobian = None):
-
-        inv_map = inv_map_jacobian @ (integration_points - first_node) 
-                
-        return inv_map
+    def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
+        a = map_jacobian[..., [[0]], 0]
+        b = map_jacobian[..., [[0]], 1]
+        c = map_jacobian[..., [[1]], 0]
+        d = map_jacobian[..., [[1]], 1]
+    
+        det_map_jacobian = a * d - b * c
+    
+        inv_map_jacobian = (1 / det_map_jacobian) * torch.concat([torch.concat([d, -b], dim = -1),
+                                                                  torch.concat([-c, a], dim = -1)], dim = -2)
+    
+        return det_map_jacobian, inv_map_jacobian
 
 class Interior_Facet_Basis:
     def __init__(self, 
