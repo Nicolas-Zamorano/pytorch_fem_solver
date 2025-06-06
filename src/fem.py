@@ -342,78 +342,31 @@ class Element_Tri(Abstract_Element):
     
         return det_map_jacobian, inv_map_jacobian
 
-class Interior_Facet_Basis:
-    def __init__(self, 
-                 mesh: Mesh,
-                 elements: Elements_1D):
+class Abstract_Basis(ABC):
+    def __init__(self,
+                 mesh: Abstract_Mesh,
+                 elements: Abstract_Element):
         
         self.elements = elements
         self.mesh = mesh
         
-        self.compute_dofs(mesh)
-
-        self.elements.compute_integral_values(mesh.coords4nodes[mesh.nodes4inner_edges])
+        self.v, self.v_grad, self.integration_points, self.dx = elements.compute_integral_values(mesh.coords4elements)
         
-    def compute_dofs(self, mesh: Mesh):
-                        
-        if self.elements.P_order == 1:
-            
-            self.update_dofs_values(mesh.coords4nodes, mesh.nodes4inner_edges, mesh.nodes4boundary)
-            
-    def update_dofs_values(self, coords4dofs, nodes4dofs, nodes4boundary_dofs):
-        
-        self.coords4global_dofs = coords4dofs
-        self.global_dofs4elements = nodes4dofs
-        self.nodes4boundary_dofs = nodes4boundary_dofs
+        self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(mesh.coords4nodes, 
+                                                                                                         mesh.nodes4elements, 
+                                                                                                         mesh.nodes4boundary,
+                                                                                                         mesh.mesh_parameters,
+                                                                                                         mesh.edges_parameters,
+                                                                                                         elements.P_order,)
 
         self.coords4elements = self.coords4global_dofs[self.global_dofs4elements]
-                
-        self.nb_global_dofs, self.nb_dimensions = self.coords4global_dofs.shape
-        self.nb_elements, self.nb_local_dofs = self.global_dofs4elements.shape
-        
-        self.rows_idx = self.global_dofs4elements.repeat(1, self.nb_local_dofs, 1).reshape(-1)
-        self.cols_idx = self.global_dofs4elements.repeat_interleave(self.nb_local_dofs, 1).reshape(-1)
-        
-        self.form_idx = self.global_dofs4elements.reshape(-1)
-                
-        self.inner_dofs = torch.arange(self.nb_global_dofs)[~torch.isin(torch.arange(self.nb_global_dofs), self.nodes4boundary_dofs)]
-     
-    def integrate_functional(self, function, *args, **kwargs):
-                
-        integral_value = (2. * self.elements.gaussian_weights.squeeze(-1) * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian.unsqueeze(-1)).sum(-2)
-                        
-        return integral_value    
-    
-class Basis:
-    def __init__(self, 
-                 mesh: Mesh,
-                 elements: Elements):
-        
-        self.elements = elements
-        self.mesh = mesh
-        
-        self.compute_dofs(mesh)
 
-        self.elements.compute_integral_values(self.mesh)
-    
-    def compute_new_dofs(self, mesh):
-        
-        if self.elements.P_order == 2:
-            
-            new_coords4dofs = (mesh.coords4nodes[mesh.nodes4unique_edges]).mean(-2)
-            new_nodes4dofs = mesh.edges_idx.reshape(mesh.nb_simplex, 3) + mesh.nb_nodes
-            new_boundary_dofs = mesh.nodes_idx4boundary_edges.squeeze(-1) + mesh.nb_nodes
-            
-        return new_coords4dofs, new_nodes4dofs, new_boundary_dofs
-            
-    def update_dofs_values(self, coords4dofs, nodes4dofs, nodes4boundary_dofs):
-        
-        self.coords4global_dofs = coords4dofs
-        self.global_dofs4elements = nodes4dofs
-        self.nodes4boundary_dofs = nodes4boundary_dofs
+        self.basis_parameters = self.compute_basis_parameters(self.coords4global_dofs, 
+                                                              self.global_dofs4elements, 
+                                                              self.nodes4boundary_dofs)
 
-        self.coords4elements = self.coords4global_dofs[self.global_dofs4elements]
-                
+    def update_dofs_values(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
+        
         self.nb_global_dofs, self.nb_dimensions = self.coords4global_dofs.shape
         self.nb_elements, self.nb_local_dofs = self.global_dofs4elements.shape
         
@@ -424,58 +377,98 @@ class Basis:
                 
         self.inner_dofs = torch.arange(self.nb_global_dofs)[~torch.isin(torch.arange(self.nb_global_dofs), self.nodes4boundary_dofs)]
     
-    def compute_dofs(self, mesh: Mesh):
-                
-        if self.elements.P_order == 1:
-            
-            self.update_dofs_values(mesh.coords4nodes, mesh.nodes4elements, mesh.nodes4boundary)
-            
-        else:
-            
-            new_coords4dofs, new_nodes4dofs, new_nodes4boundary_dofs = self.compute_new_dofs(mesh)
-            
-            coords4dofs = torch.cat([mesh.coords4nodes, new_coords4dofs], dim = -2)
-            nodes4dofs = torch.cat([mesh.nodes4elements, new_nodes4dofs], dim = -1)
-            nodes4boundary_dofs = torch.cat([mesh.nodes4boundary, new_nodes4boundary_dofs], dim = -1)
-            
-            self.update_dofs_values(coords4dofs, nodes4dofs, nodes4boundary_dofs)
-
     def integrate_functional(self, function, *args, **kwargs):
                 
-        integral_value = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
+        integral_value = (function(self, *args, **kwargs) * self.dx).sum(-3)
                         
         return integral_value
-        
-    def integrate_lineal_form(self, function,  *args, **kwargs):
-        
-        integral_value = torch.zeros(self.nb_global_dofs, 1)
-        
-        integrand_value = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
-        
-        integral_value.index_put_((self.form_idx,), 
-                              integrand_value.reshape(-1, 1),
-                              accumulate = True)
-                
-        return integral_value
-        
+            
     def integrate_bilineal_form(self, function, *args, **kwargs):
         
-        global_matrix = torch.zeros(self.nb_global_dofs, self.nb_global_dofs)
+        global_matrix = torch.zeros(self.basis_parameters["bilinear_form_shape"])
         
-        local_matrix = (0.5 * self.elements.gaussian_weights * function(self.elements, *args, **kwargs) * self.elements.det_map_jacobian).sum(-3)
+        local_matrix = (function(self, *args, **kwargs) * self.dx).sum(-3)
         
-        global_matrix.index_put_((self.rows_idx, self.cols_idx), 
+        global_matrix.index_put_(self.basis_parameters["bilinear_form_idx"], 
                               local_matrix.reshape(-1),
                               accumulate = True)
         
         return global_matrix
+    
+    def integrate_lineal_form(self, function,  *args, **kwargs):
+        
+        integral_value = torch.zeros(self.basis_parameters["linear_form_shape"])
+        
+        integrand_value = (function(self, *args, **kwargs) * self.dx).sum(-3)
+        
+        integral_value.index_put_(self.basis_parameters["linear_form_idx"], 
+                              integrand_value.reshape(-1, 1),
+                              accumulate = True)
                 
+        return integral_value
+    
+    @abstractmethod
+    def compute_dofs(self, mesh):
+        raise NotImplementedError
+        
+    @abstractmethod
+    def compute_basis_parameters(self):
+        raise NotImplementedError
+
+class Basis(Abstract_Basis):
+    def __init__(self, 
+                 mesh: Abstract_Mesh,
+                 elements: Abstract_Element):
+        
+        super().__init__(mesh, 
+                         elements)
+    
+    def compute_dofs(self, coords4nodes, nodes4elements, nodes4boundary, mesh_parameters, edges_parameters, P_order):
+        
+        if P_order == 1:
+            
+            coords4global_dofs = coords4nodes
+            global_dofs4elements = nodes4elements
+            nodes4boundary_dofs = nodes4boundary
+        
+        if P_order == 2:
+            
+            new_coords4dofs = (coords4nodes[edges_parameters["nodes4unique_edges"]]).mean(-2)
+            new_nodes4dofs = edges_parameters["edges_idx"].reshape(mesh_parameters["nb_simplex"], 1, 3) + mesh_parameters["nb_nodes"]
+            new_nodes4boundary_dofs = edges_parameters["nodes_idx4boundary_edges"].squeeze(-1) + mesh_parameters["nb_nodes"]
+            
+            coords4global_dofs = torch.cat([coords4nodes, new_coords4dofs], dim = -2)
+            global_dofs4elements = torch.cat([nodes4elements, new_nodes4dofs], dim = -1)
+            nodes4boundary_dofs = torch.cat([nodes4boundary, new_nodes4boundary_dofs], dim = -1)
+            
+        return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
+            
+    def compute_basis_parameters(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
+        
+        nb_global_dofs = coords4global_dofs.shape[-2]
+        nb_local_dofs = global_dofs4elements.shape[-1]
+        
+        inner_dofs = torch.arange(nb_global_dofs)[~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)]
+
+        rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
+        cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
+        
+        form_idx = global_dofs4elements.reshape(-1)
+
+        basis_parameters = {"bilinear_form_shape" : (nb_global_dofs, nb_global_dofs),
+                            "bilinear_form_idx": (rows_idx, cols_idx),
+                            "linear_form_shape": (nb_global_dofs, 1),
+                            "linear_form_idx": (form_idx,),
+                            "inner_dofs": inner_dofs}
+
+        return basis_parameters                
+                    
     def interpolate(self, basis, tensor = None):
         
         if basis == self:
-            dofs_idx = self.global_dofs4elements.unsqueeze(-3) 
-            v = self.elements.v
-            v_grad = self.elements.v_grad()
+            dofs_idx = self.global_dofs4elements
+            v = self.v
+            v_grad = self.v_grad
             
         else:
         
@@ -491,19 +484,16 @@ class Basis:
                 
                 dofs_idx = basis.mesh.nodes4elements[elements_mask].unsqueeze(-2)
                         
-            coords4elements_first_node = self.coords4elements[:, [0], :][elements_mask].unsqueeze(-1)
-    
-            integration_points = torch.concat(basis.elements.integration_points, dim = -2)
-    
-            inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask].unsqueeze(-3)
+            coords4elements_first_node = self.coords4elements[:, [0], :][elements_mask]
+        
+            inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
     
             
             new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
-                                                                        integration_points, 
+                                                                        basis.integration_points, 
                                                                         inv_map_jacobian)
             
-            _, v, v_grad = self.elements.compute_shape_functions(*torch.unbind(new_integrations_points,dim = -2), 
-                                                                          inv_map_jacobian)
+            _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points, inv_map_jacobian)
                     
         if tensor != None:
             
@@ -522,3 +512,31 @@ class Basis:
             interpolator_grad = lambda function : (function(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
             
             return interpolator, interpolator_grad
+        
+class Interior_Facet_Basis(Abstract_Basis):
+    def __init__(self, 
+                 mesh: Abstract_Mesh,
+                 elements: Element_Line):
+
+        super().__init__(mesh, 
+                         elements)
+
+    def compute_basis_parameters(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
+        
+        nb_global_dofs = coords4global_dofs.shape[-2]
+        nb_local_dofs = global_dofs4elements.shape[-1]
+        
+        inner_dofs = torch.arange(nb_global_dofs)[~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)]
+
+        rows_idx = global_dofs4elements.repeat(1, nb_local_dofs).reshape(-1)
+        cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
+        
+        form_idx = global_dofs4elements.reshape(-1)
+
+        basis_parameters = {"bilinear_form_shape" : (nb_global_dofs, nb_global_dofs),
+                            "bilinear_form_idx": (rows_idx, cols_idx),
+                            "linear_form_shape": (nb_global_dofs, 1),
+                            "linear_form_idx": (form_idx),
+                            "inner_dofs": inner_dofs}
+
+        return basis_parameters       
