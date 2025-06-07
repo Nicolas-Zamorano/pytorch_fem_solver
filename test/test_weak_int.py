@@ -4,14 +4,14 @@ import math
 import matplotlib.pyplot as plt
 
 from Neural_Network import Neural_Network
-from fem import Mesh, Elements, Basis
+from fem import Mesh_Tri, Element_Tri, Basis
 from datetime import datetime
 
 import skfem
 
-torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
-torch.cuda.empty_cache()
-torch.set_default_dtype(torch.float64)
+# torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
+# torch.cuda.empty_cache()
+# torch.set_default_dtype(torch.float64)
 
 #---------------------- Neural Network Functions ----------------------#
 
@@ -77,9 +77,9 @@ mesh_sk_H = skfem.MeshTri1().refined(k_ref)
 
 mesh_sk_h = mesh_sk_H.refined(k_test)
 
-V_h = Basis(Mesh(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T), Elements(P_order = k_test, int_order = q))
+V_H = Basis(Mesh_Tri(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T), Element_Tri(P_order = k_int, int_order = q))
 
-V_H = Basis(Mesh(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T), Elements(P_order = k_int, int_order = q))
+V_h = Basis(Mesh_Tri(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T), Element_Tri(P_order = k_test, int_order = q))
 
 I_H, I_H_grad = V_H.interpolate(V_h)
 
@@ -93,14 +93,14 @@ I_H_NN_grad = lambda x, y : I_H_grad(NN)
 
 rhs = lambda x, y: 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
-def residual(elements: Elements, NN_gradient):
+def residual(basis, NN_gradient):
     
-    x, y = elements.integration_points
+    x, y = basis.integration_points
     
     NN_grad = NN_gradient(x, y)
     
-    v = elements.v
-    v_grad = elements.v_grad
+    v = basis.v
+    v_grad = basis.v_grad
     rhs_value = rhs(x, y)
             
     return rhs_value * v - (v_grad @ NN_grad.mT)
@@ -118,32 +118,25 @@ def residual(elements: Elements, NN_gradient):
 
 #---------------------- Error Parameters ----------------------#
 
+exact = lambda x, y: torch.sin(math.pi * x) * torch.sin(math.pi * y)
+exact_dx = lambda x, y: math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
+exact_dy = lambda x, y: math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
 
-def H1_exact(elements: Elements):
+def H1_exact(basis):
     
-    x, y = elements.integration_points
+    x, y = basis.integration_points
     
-    exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
-    
-    exact_dx = math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
-    exact_dy = math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
-    
-    return exact_dx**2 + exact_dy**2 + exact**2
+    return exact_dx(x, y)**2 + exact_dy(x, y)**2 + exact(x, y)**2
 
-def H1_norm(elements: Elements, NN, NN_gradiant):
+def H1_norm(basis):
    
-    x, y = elements.integration_points
+    x, y = basis.integration_points
     
-    NN_dx, NN_dy = torch.split(NN_gradiant(x, y), 1 , dim = -1)
+    NN_dx, NN_dy = torch.split(NN_gradiant(NN, x, y), 1 , dim = -1)
 
-    exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
+    L2_error = (exact(x,y) - NN(x, y))**2
     
-    exact_dx = math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
-    exact_dy = math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
-
-    L2_error = (exact - NN(x,y))**2
-    
-    H1_0_error = (exact_dx - NN_dx)**2 + (exact_dy - NN_dy)**2
+    H1_0_error = (exact_dx(x,y) - NN_dx)**2 + (exact_dy(x,y) - NN_dy)**2
     
     return L2_error + H1_0_error 
     
