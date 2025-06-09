@@ -1,10 +1,10 @@
 import torch 
 import skfem
-from fem import Mesh, Elements, Basis, Elements_1D, Interior_Facet_Basis
+from fem import Mesh_Tri, Element_Tri, Basis, Element_Line, Interior_Facet_Basis
 from skfem.helpers import grad, dot
 # from numpy.linalg import norm
 
-mesh_sk = skfem.MeshTri1().refined(5)
+mesh_sk = skfem.MeshTri1().refined(2)
 
 elem_sk = skfem.ElementTriP1()
 
@@ -48,26 +48,26 @@ coords4nodes = torch.tensor(mesh_sk.p).T
 
 nodes4elements = torch.tensor(mesh_sk.t).T
 
-mesh = Mesh(coords4nodes, nodes4elements)
+mesh = Mesh_Tri(coords4nodes, nodes4elements)
 
-elements = Elements(P_order = 1, 
+elements = Element_Tri(P_order = 1, 
                     int_order = 2)
 
 V = Basis(mesh, elements)
 
-def a(elements: Elements):
+def a(elements):
     return elements.v_grad @ elements.v_grad.mT
 
-def l(elements: Elements):
+def l(elements):
     return f(*elements.integration_points) * elements.v
 
-A = V.integrate_bilineal_form(a)[V.inner_dofs, :][:, V.inner_dofs]
-b = V.integrate_lineal_form(l)[V.inner_dofs]
+A = V.reduce(V.integrate_bilineal_form(a))
+b = V.reduce(V.integrate_lineal_form(l))
 
-u = torch.zeros(V.nb_global_dofs, 1)
-u[V.inner_dofs] = torch.linalg.solve(A,b)
+u = torch.zeros(V.basis_parameters["linear_form_shape"])
+u[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
 
-V_inner_edges = Interior_Facet_Basis(mesh, Elements_1D(P_order = 1, int_order = 2))
+V_inner_edges = Interior_Facet_Basis(mesh, Element_Line(P_order = 1, int_order = 2))
 
 I_u, I_u_grad = V.interpolate(V_inner_edges, u)
 
@@ -90,7 +90,7 @@ print("Values of I_u_grad_sk", I_u_grad_sk_values.numpy(),"Repeat:", I_u_grad_sk
 print("I_u error norm:", (torch.norm(I_u.squeeze(-1).squeeze(-1).mT - I_u_sk)/torch.norm(I_u_sk)).item())
 print("I_u_grad  norm:", (torch.norm(I_u_grad - I_u_grad_sk)/torch.norm(I_u_grad)).item())
 
-def jump(elements: Elements, h_E, n_E, I_u_grad):
+def jump(elements, h_E, n_E, I_u_grad):
     I_u_grad_plus, I_u_grad_minus = torch.split(I_u_grad, 1, dim = -3)
     return h_E * ((I_u_grad_plus * n_E).sum(-1, keepdim=True) + (I_u_grad_minus * -n_E).sum(-1, keepdim=True))**2
 
