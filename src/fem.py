@@ -527,8 +527,36 @@ class Interior_Facet_Basis(Abstract_Basis):
                  mesh: Abstract_Mesh,
                  elements: Element_Line):
 
-        super().__init__(mesh, 
-                         elements)
+        self.elements = elements
+        self.mesh = mesh
+        
+        coords4nodes = mesh.coords4nodes[mesh.edges_parameters["nodes4inner_edges"]]
+        nodes4elements = mesh.edges_parameters["elements4inner_edges"]
+        coords4elements = coords4nodes[nodes4elements]
+            
+        self.v, self.v_grad, self.integration_points, self.dx = elements.compute_integral_values(coords4elements)
+        
+        self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(coords4nodes, 
+                                                                                                         nodes4elements, 
+                                                                                                         mesh.nodes4boundary,
+                                                                                                         mesh.mesh_parameters,
+                                                                                                         mesh.edges_parameters,
+                                                                                                         elements.P_order)
+
+        self.coords4elements = self.coords4global_dofs[self.global_dofs4elements]
+
+        self.basis_parameters = self.compute_basis_parameters(self.coords4global_dofs, 
+                                                              self.global_dofs4elements, 
+                                                              self.nodes4boundary_dofs)
+        
+    def compute_dofs(self, coords4nodes, nodes4elements, nodes4boundary, mesh_parameters, edges_parameters, P_order):
+        
+        if P_order == 1:
+            coords4global_dofs = coords4nodes
+            global_dofs4elements = nodes4elements
+            nodes4boundary_dofs = nodes4boundary
+            
+        return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
 
     def compute_basis_parameters(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
         
