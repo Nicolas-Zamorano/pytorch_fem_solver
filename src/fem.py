@@ -454,14 +454,22 @@ class Basis(Abstract_Basis):
         cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
         
         form_idx = global_dofs4elements.reshape(-1)
-
+        
         basis_parameters = {"bilinear_form_shape" : (nb_global_dofs, nb_global_dofs),
                             "bilinear_form_idx": (rows_idx, cols_idx),
                             "linear_form_shape": (nb_global_dofs, 1),
                             "linear_form_idx": (form_idx,),
-                            "inner_dofs": inner_dofs}
+                            "inner_dofs": (inner_dofs)}
 
         return basis_parameters                
+        return basis_parameters    
+
+    def reduce(self, tensor):
+        idx = self.basis_parameters["inner_dofs"]
+        if tensor.shape[-1] != 1:
+            return tensor[idx, :][:, idx]
+        else:
+            return tensor[idx]
                     
     def interpolate(self, basis, tensor = None):
         
