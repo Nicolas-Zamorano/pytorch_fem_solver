@@ -27,10 +27,10 @@ class Abstract_Mesh(ABC):
         elements_diameter = torch.min(torch.norm(coords4edges[..., 1, :] - coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2)[0]       
         
         nodes4unique_edges, edges_idx, boundary_mask = torch.unique(nodes4edges.reshape(-1, mesh_parameters["nb_dimensions"]).mT, 
-                                                                              return_inverse = True, 
-                                                                              sorted = False, 
-                                                                              return_counts = True, 
-                                                                              dim = -1)
+                                                                    return_inverse = True, 
+                                                                    sorted = False, 
+                                                                    return_counts = True, 
+                                                                    dim = -1)
         
         nodes4unique_edges = nodes4unique_edges.mT
                 
@@ -47,6 +47,7 @@ class Abstract_Mesh(ABC):
                             "edges_idx": edges_idx,
                             "nodes4unique_edges": nodes4unique_edges,
                             "elements4boundary_edges": elements4boundary_edges,
+                            "nodes4inner_edges": nodes4inner_edges,
                             "elements4inner_edges": elements4inner_edges,
                             "nodes_idx4boundary_edges": nodes_idx4boundary_edges}
  
