@@ -86,15 +86,15 @@ class Mesh_Tri(Abstract_Mesh):
         cada entrada i indica a qué triángulo del mallado grueso pertenece 
         el triángulo i del mallado fino.
         """
-        c4e_h = fine_mesh.coords4elements        # (n_elem_h, 3, 2)
-        c4e_H = self.coords4elements      # (n_elem_H, 3, 2)
-        centroids_h = c4e_h.mean(dim = -2)          # (n_elem_h, 2)
+        c4e_h = fine_mesh.coords4elements        # (n_elem_h, 1, 3, 2)
+        c4e_H = self.coords4elements             # (n_elem_H, 1, 3, 2)
+        centroids_h = c4e_h.mean(dim = -2).squeeze(1)  # (n_elem_h, 2)
     
         # Expandimos para broadcasting
         P = centroids_h[:, None, :]              # (n_elem_h, 1, 2)
-        A = c4e_H[None, :, 0, :]                 # (1, n_elem_H, 2)
-        B = c4e_H[None, :, 1, :]
-        C = c4e_H[None, :, 2, :]
+        A = c4e_H[:, 0, 0, :][None, :, :]         # (1, n_elem_H, 2)
+        B = c4e_H[:, 0, 1, :][None, :, :]
+        C = c4e_H[:, 0, 2, :][None, :, :]
     
         v0 = C - A                               # (1, n_elem_H, 2)
         v1 = B - A
