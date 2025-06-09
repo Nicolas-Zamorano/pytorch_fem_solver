@@ -327,6 +327,22 @@ class Element_Tri(Abstract_Element):
                                              [[25/48]],
                                              [[25/48]]])
             
+        if self.int_order == 4:
+            
+            gaussian_nodes = torch.tensor([[0.816847572980459,  0.091576213509771],
+                                           [0.091576213509771,  0.816847572980459],
+                                           [0.091576213509771,  0.091576213509771],
+                                           [0.108103018168070,  0.445948490915965],
+                                           [0.445948490915965,  0.108103018168070],
+                                           [0.445948490915965,  0.445948490915965]])
+            
+            gaussian_weights = torch.tensor([[[0.109951743655322]],
+                                             [[0.109951743655322]],
+                                             [[0.109951743655322]],
+                                             [[0.223381589678011]],
+                                             [[0.223381589678011]],
+                                             [[0.223381589678011]]])
+            
         return gaussian_nodes, gaussian_weights
 
     def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
@@ -349,7 +365,7 @@ class Abstract_Basis(ABC):
         
         self.elements = elements
         self.mesh = mesh
-        
+            
         self.v, self.v_grad, self.integration_points, self.dx = elements.compute_integral_values(mesh.coords4elements)
         
         self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(mesh.coords4nodes, 
