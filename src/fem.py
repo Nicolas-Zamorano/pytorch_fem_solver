@@ -121,8 +121,6 @@ class Mesh_Tri(Abstract_Mesh):
         # Para cada triángulo fino, buscamos el primer triángulo grueso que lo contiene
         candidates = inside.nonzero(as_tuple=False)  # shape (n_matches, 2)
     
-        # candidates[i, 0] es índice en T_h, candidates[i, 1] es índice en T_H
-        # Queremos quedarnos con el primer T_H válido para cada T_h
         seen = torch.zeros(c4e_h.shape[0], dtype = torch.bool)
         for i in range(candidates.shape[0]):
             idx_h, idx_H = candidates[i]
@@ -145,9 +143,9 @@ class Abstract_Element(ABC):
         
     def compute_integral_values(self, coords4elements: torch.Tensor):
         
-        det_map_jacobian, inv_map_jacobian = self.compute_map(coords4elements)
+        det_map_jacobian, self.inv_map_jacobian = self.compute_map(coords4elements)
                 
-        bar_coords, v, v_grad = self.compute_shape_functions(self.gaussian_nodes, inv_map_jacobian)
+        bar_coords, v, v_grad = self.compute_shape_functions(self.gaussian_nodes, self.inv_map_jacobian)
                         
         integration_points = torch.split(bar_coords.mT @ coords4elements, 1, dim = -1)
                         
@@ -174,7 +172,9 @@ class Abstract_Element(ABC):
     @staticmethod
     def compute_inverse_map(first_node: torch.Tensor, integration_points: torch.Tensor, inv_map_jacobian: torch.Tensor):
 
-        inv_map = inv_map_jacobian @ (integration_points - first_node) 
+        integration_points = torch.concat(integration_points, dim = -1)        
+
+        inv_map = (integration_points - first_node) @ inv_map_jacobian.mT
                 
         return inv_map
 
