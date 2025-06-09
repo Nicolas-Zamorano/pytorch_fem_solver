@@ -132,6 +132,7 @@ class Mesh_Tri(Abstract_Mesh):
     
         return mapping
 
+
 class Abstract_Element(ABC):
     def __init__(self,
                  P_order: int,
@@ -381,21 +382,9 @@ class Abstract_Basis(ABC):
                                                               self.global_dofs4elements, 
                                                               self.nodes4boundary_dofs)
 
-    def update_dofs_values(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
-        
-        self.nb_global_dofs, self.nb_dimensions = self.coords4global_dofs.shape
-        self.nb_elements, self.nb_local_dofs = self.global_dofs4elements.shape
-        
-        self.rows_idx = self.global_dofs4elements.repeat(1, self.nb_local_dofs).reshape(-1)
-        self.cols_idx = self.global_dofs4elements.repeat_interleave(self.nb_local_dofs).reshape(-1)
-        
-        self.form_idx = self.global_dofs4elements.reshape(-1)
-                
-        self.inner_dofs = torch.arange(self.nb_global_dofs)[~torch.isin(torch.arange(self.nb_global_dofs), self.nodes4boundary_dofs)]
-    
     def integrate_functional(self, function, *args, **kwargs):
                 
-        integral_value = (function(self, *args, **kwargs) * self.dx).sum(-3)
+        integral_value = (function(self, *args, **kwargs) * self.dx).sum(-3).sum(-2)
                         
         return integral_value
             
@@ -477,7 +466,6 @@ class Basis(Abstract_Basis):
                             "linear_form_idx": (form_idx,),
                             "inner_dofs": (inner_dofs)}
 
-        return basis_parameters                
         return basis_parameters    
 
     def reduce(self, tensor):
