@@ -4,11 +4,11 @@ from fem import Mesh_Tri, Element_Tri, Basis, Element_Line, Interior_Facet_Basis
 from skfem.helpers import grad, dot
 # from numpy.linalg import norm
 
-mesh_sk = skfem.MeshTri1().refined(2)
+mesh_sk = skfem.MeshTri1().refined(1)
 
 elem_sk = skfem.ElementTriP1()
 
-V_sk = skfem.Basis(mesh_sk, elem_sk)
+V_sk = skfem.Basis(mesh_sk, elem_sk, intorder = 1)
 
 f = lambda x, y : 1.
 
@@ -30,8 +30,8 @@ i_range = [0,1]
 fbasis = [skfem.InteriorFacetBasis(mesh_sk, elem_sk, side = i, use_torch=True) for i in i_range]
 w = {"u" + str(i + 1): fbasis[i].interpolate(u_sk) for i in i_range}
 
-I_u_sk = torch.stack([torch.tensor(w["u1"]), torch.tensor(w["u1"])], dim = -1)
-I_u_grad_sk = torch.stack([torch.tensor(grad(w["u1"])).permute(1,2,0), torch.tensor(grad(w["u1"])).permute(1,2,0)], dim = -1)
+I_u_sk = torch.stack([torch.tensor(w["u1"]), torch.tensor(w["u2"])], dim = -1)
+I_u_grad_sk = torch.stack([torch.tensor(grad(w["u1"])).permute(1,2,0), torch.tensor(grad(w["u2"])).permute(1,2,0)], dim = -1)
 
 @skfem.Functional
 def jump_sk(w):
@@ -51,7 +51,7 @@ nodes4elements = torch.tensor(mesh_sk.t).T
 mesh = Mesh_Tri(coords4nodes, nodes4elements)
 
 elements = Element_Tri(P_order = 1, 
-                    int_order = 2)
+                    int_order = 1)
 
 V = Basis(mesh, elements)
 
@@ -71,29 +71,26 @@ V_inner_edges = Interior_Facet_Basis(mesh, Element_Line(P_order = 1, int_order =
 
 I_u, I_u_grad = V.interpolate(V_inner_edges, u)
 
-h_E = V.mesh.inner_edges_length.unsqueeze(-1).unsqueeze(-1)
-n_E = V.mesh.normal4inner_edges.unsqueeze(-2).unsqueeze(-2)
+h_E = V.mesh.edges_parameters["inner_edges_length"].unsqueeze(-2)
+n_E = V.mesh.edges_parameters["normal4inner_edges"].unsqueeze(-2)
 
 I_u_values, I_u_count = torch.unique(I_u.reshape(-1), return_counts=True)
 I_u_sk_values, I_u_sk_count = torch.unique(I_u_sk.reshape(-1), return_counts=True)
 
-print("Values of I_u   ", I_u_values.numpy(),"Repeat:", I_u_count.numpy())
-print("Values of I_u_sk", I_u_sk_values.numpy(),"Repeat:", I_u_sk_count.numpy())
-
 I_u_grad_values, I_u_grad_count = torch.unique(I_u_grad.reshape(-1), return_counts=True)
 I_u_grad_sk_values, I_u_grad_sk_count = torch.unique(I_u_grad_sk.reshape(-1), return_counts=True)
 
-print("Values of I_u_grad   ", I_u_grad_values.numpy(),"Repeat:", I_u_grad_count.numpy())
-print("Values of I_u_grad_sk", I_u_grad_sk_values.numpy(),"Repeat:", I_u_grad_sk_count.numpy())
-
-
-print("I_u error norm:", (torch.norm(I_u.squeeze(-1).squeeze(-1).mT - I_u_sk)/torch.norm(I_u_sk)).item())
-print("I_u_grad  norm:", (torch.norm(I_u_grad - I_u_grad_sk)/torch.norm(I_u_grad)).item())
+print("Values of         I_u:", I_u_values.numpy(),"Repeat:", I_u_count.numpy())
+print("Values of      I_u_sk:", I_u_sk_values.numpy(),"Repeat:", I_u_sk_count.numpy())
+print("Values of    I_u_grad:", I_u_grad_values.numpy(),"Repeat:", I_u_grad_count.numpy())
+print("Values of I_u_grad_sk:", I_u_grad_sk_values.numpy(),"Repeat:", I_u_grad_sk_count.numpy())
+print("I_u error        norm:", (torch.norm(I_u.squeeze(-1).squeeze(-1).mT - I_u_sk)/torch.norm(I_u_sk)).item())
+print("I_u_grad         norm:", (torch.norm(I_u_grad.squeeze(-2) - I_u_grad_sk.mT)/torch.norm(I_u_grad_sk)).item())
 
 def jump(elements, h_E, n_E, I_u_grad):
-    I_u_grad_plus, I_u_grad_minus = torch.split(I_u_grad, 1, dim = -3)
+    I_u_grad_plus, I_u_grad_minus = torch.unbind(I_u_grad, dim = -4)
     return h_E * ((I_u_grad_plus * n_E).sum(-1, keepdim=True) + (I_u_grad_minus * -n_E).sum(-1, keepdim=True))**2
 
-eta_E = V_inner_edges.integrate_functional(jump, h_E, n_E, I_u_grad).reshape(-1)
+eta_E = V_inner_edges.integrate_functional(jump, h_E, n_E, I_u_grad).squeeze(-1)
 
-print("eta_E     norm:", (torch.norm(eta_E - eta_E_sk)/torch.norm(eta_E_sk)).item())
+print("eta_E            norm:", (torch.norm(eta_E - eta_E_sk)/torch.norm(eta_E_sk)).item())
