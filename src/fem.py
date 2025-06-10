@@ -499,32 +499,45 @@ class Basis(Abstract_Basis):
                     
     def interpolate(self, basis, tensor = None):
         
-        if basis == self:
-            elements_mask = slice(None) 
-            
+        if basis == self:            
             dofs_idx = self.global_dofs4elements
+            
+            v = self.v
+            v_grad = self.v_grad
             
         if basis.__class__ == Basis:
             
             elements_mask = self.mesh.map_fine_mesh(basis.mesh)
             
             dofs_idx = self.global_dofs4elements[elements_mask]
+            
+            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
+        
+            inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+
+            new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+                                                                        basis.integration_points, 
+                                                                        inv_map_jacobian)
+            
+            _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-2), inv_map_jacobian)
 
         if basis.__class__ == Interior_Facet_Basis: 
 
-            elements_mask = basis.mesh.elements4inner_edges
+            elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
             
             dofs_idx = basis.mesh.nodes4elements[elements_mask]
                     
-        coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
-    
-        inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
-
-        new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
-                                                                    basis.integration_points, 
-                                                                    inv_map_jacobian)
+            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
         
-        _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-2), inv_map_jacobian)
+            inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+            
+            integration_points = torch.split(torch.cat(basis.integration_points, dim = -1).unsqueeze(-4), 1, dim = -1)
+
+            new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+                                                                        integration_points, 
+                                                                        inv_map_jacobian)
+            
+            _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-3), inv_map_jacobian)
                 
         if tensor != None:
             
