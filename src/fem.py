@@ -27,31 +27,50 @@ class Abstract_Mesh(ABC):
         elements_diameter = torch.min(torch.norm(coords4edges[..., 1, :] - coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2)[0]       
         
         nodes4unique_edges, edges_idx, boundary_mask = torch.unique(nodes4edges.reshape(-1, mesh_parameters["nb_dimensions"]).mT, 
-                                                                              return_inverse = True, 
-                                                                              sorted = False, 
-                                                                              return_counts = True, 
-                                                                              dim = -1)
+                                                                    return_inverse = True, 
+                                                                    sorted = False, 
+                                                                    return_counts = True, 
+                                                                    dim = -1)
         
-        nodes4unique_edges = nodes4unique_edges.mT
+        nodes4unique_edges = nodes4unique_edges.mT.unsqueeze(-2)
                 
         nodes4boundary_edges = nodes4unique_edges[boundary_mask == 1]
         nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
         
-        elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1).float().argmax(dim = -1) 
-        elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-3).unsqueeze(-1)).any(dim = -2).all(dim = -1))[:, 1].reshape(-1, mesh_parameters["nb_dimensions"])
+        elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
+        elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1))[:, 1].reshape(-1, mesh_parameters["nb_dimensions"])
         
         nodes4boundary = torch.unique(nodes4boundary_edges)
-        nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges.unsqueeze(-2) == nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
+        nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges == nodes4boundary_edges.transpose(-2,-3)).all(dim = -1).any(dim = -1))
+
+        # compute inner edges normal vector
+        
+        coords4inner_edges = coords4nodes[nodes4inner_edges]
+
+        inner_edges_vector = coords4inner_edges[..., 1, :] - coords4inner_edges[..., 0, :]
+        
+        inner_edges_length = torch.norm(inner_edges_vector, dim = -1, keepdim = True)
+                
+        normal4inner_edges = inner_edges_vector[..., [1, 0]] * torch.tensor([-1., 1.])/ inner_edges_length
+                
+        inner_elements_centroid = self.coords4elements[elements4inner_edges].mean(dim = -2)
+        
+        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., 1, :, :] - inner_elements_centroid[..., 0,:, :])).sum(dim = -1)
+
+        normal4inner_edges[inner_direction_mask < 0] *= -1
 
         edges_parameters = {"nodes4edges": nodes4edges,
                             "edges_idx": edges_idx,
                             "nodes4unique_edges": nodes4unique_edges,
                             "elements4boundary_edges": elements4boundary_edges,
+                            "nodes4inner_edges": nodes4inner_edges,
                             "elements4inner_edges": elements4inner_edges,
-                            "nodes_idx4boundary_edges": nodes_idx4boundary_edges}
+                            "nodes_idx4boundary_edges": nodes_idx4boundary_edges,
+                            "inner_edges_length": inner_edges_length,
+                            "normal4inner_edges": normal4inner_edges}
  
         return elements_diameter, nodes4boundary, edges_parameters
-       
+    
     @abstractmethod
     def compute_mesh_parameters(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
         raise NotImplementedError
@@ -242,9 +261,13 @@ class Element_Line(Abstract_Element):
         
         return v, v_grad
     
-    def compute_det_and_inv_map(map_jacobian):
+    def compute_det_and_inv_map(self, map_jacobian):
 
-        raise NotImplementedError 
+        det_map_jacobian = torch.linalg.norm(map_jacobian, dim = -2, keepdim = True)
+        
+        inv_map_jacobian = 1./det_map_jacobian
+        
+        return det_map_jacobian, inv_map_jacobian
     
 class Element_Tri(Abstract_Element):
     def __init__(self,
@@ -252,8 +275,8 @@ class Element_Tri(Abstract_Element):
                  int_order: int):
         
         self.compute_barycentric_coordinates = lambda x: torch.stack([1.0 - x[..., [0]] - x[..., [1]], 
-                                                                       x[..., [0]], 
-                                                                       x[..., [1]]], dim = -2)
+                                                                      x[..., [0]], 
+                                                                      x[..., [1]]], dim = -2)
         
         self.barycentric_grad = torch.tensor([[-1.0, -1.0],
                                               [ 1.0,  0.0],
@@ -441,7 +464,7 @@ class Basis(Abstract_Basis):
             new_nodes4dofs = edges_parameters["edges_idx"].reshape(mesh_parameters["nb_simplex"], 1, 3) + mesh_parameters["nb_nodes"]
             new_nodes4boundary_dofs = edges_parameters["nodes_idx4boundary_edges"].squeeze(-1) + mesh_parameters["nb_nodes"]
             
-            coords4global_dofs = torch.cat([coords4nodes, new_coords4dofs], dim = -2)
+            coords4global_dofs = torch.cat([coords4nodes, new_coords4dofs.squeeze(-2)], dim = -2)
             global_dofs4elements = torch.cat([nodes4elements, new_nodes4dofs], dim = -1)
             nodes4boundary_dofs = torch.cat([nodes4boundary, new_nodes4boundary_dofs], dim = -1)
             
@@ -476,32 +499,45 @@ class Basis(Abstract_Basis):
                     
     def interpolate(self, basis, tensor = None):
         
-        if basis == self:
-            elements_mask = slice(None) 
-            
+        if basis == self:            
             dofs_idx = self.global_dofs4elements
+            
+            v = self.v
+            v_grad = self.v_grad
             
         if basis.__class__ == Basis:
             
             elements_mask = self.mesh.map_fine_mesh(basis.mesh)
             
             dofs_idx = self.global_dofs4elements[elements_mask]
+            
+            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
+        
+            inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+
+            new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+                                                                        basis.integration_points, 
+                                                                        inv_map_jacobian)
+            
+            _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-2), inv_map_jacobian)
 
         if basis.__class__ == Interior_Facet_Basis: 
 
-            elements_mask = basis.mesh.elements4inner_edges
+            elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
             
             dofs_idx = basis.mesh.nodes4elements[elements_mask]
                     
-        coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
-    
-        inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
-
-        new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
-                                                                    basis.integration_points, 
-                                                                    inv_map_jacobian)
+            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
         
-        _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-2), inv_map_jacobian)
+            inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+            
+            integration_points = torch.split(torch.cat(basis.integration_points, dim = -1).unsqueeze(-4), 1, dim = -1)
+
+            new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+                                                                        integration_points, 
+                                                                        inv_map_jacobian)
+            
+            _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-3), inv_map_jacobian)
                 
         if tensor != None:
             
@@ -526,8 +562,36 @@ class Interior_Facet_Basis(Abstract_Basis):
                  mesh: Abstract_Mesh,
                  elements: Element_Line):
 
-        super().__init__(mesh, 
-                         elements)
+        self.elements = elements
+        self.mesh = mesh
+        
+        nodes4elements = mesh.edges_parameters["nodes4inner_edges"]
+        coords4nodes = mesh.coords4nodes
+        coords4elements = mesh.coords4nodes[nodes4elements]
+            
+        self.v, self.v_grad, self.integration_points, self.dx = elements.compute_integral_values(coords4elements)
+        
+        self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(coords4nodes, 
+                                                                                                         nodes4elements, 
+                                                                                                         mesh.nodes4boundary,
+                                                                                                         mesh.mesh_parameters,
+                                                                                                         mesh.edges_parameters,
+                                                                                                         elements.P_order)
+
+        self.coords4elements = self.coords4global_dofs[self.global_dofs4elements]
+
+        self.basis_parameters = self.compute_basis_parameters(self.coords4global_dofs, 
+                                                              self.global_dofs4elements, 
+                                                              self.nodes4boundary_dofs)
+        
+    def compute_dofs(self, coords4nodes, nodes4elements, nodes4boundary, mesh_parameters, edges_parameters, P_order):
+        
+        if P_order == 1:
+            coords4global_dofs = coords4nodes
+            global_dofs4elements = nodes4elements
+            nodes4boundary_dofs = nodes4boundary
+            
+        return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
 
     def compute_basis_parameters(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
         
@@ -536,15 +600,15 @@ class Interior_Facet_Basis(Abstract_Basis):
         
         inner_dofs = torch.arange(nb_global_dofs)[~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)]
 
-        rows_idx = global_dofs4elements.repeat(1, nb_local_dofs).reshape(-1)
+        rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
         cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
         
         form_idx = global_dofs4elements.reshape(-1)
-
+        
         basis_parameters = {"bilinear_form_shape" : (nb_global_dofs, nb_global_dofs),
                             "bilinear_form_idx": (rows_idx, cols_idx),
                             "linear_form_shape": (nb_global_dofs, 1),
-                            "linear_form_idx": (form_idx),
-                            "inner_dofs": inner_dofs}
+                            "linear_form_idx": (form_idx,),
+                            "inner_dofs": (inner_dofs)}
 
-        return basis_parameters       
+        return basis_parameters    
