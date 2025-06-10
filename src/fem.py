@@ -552,9 +552,9 @@ class Interior_Facet_Basis(Abstract_Basis):
         self.elements = elements
         self.mesh = mesh
         
-        coords4nodes = mesh.coords4nodes[mesh.edges_parameters["nodes4inner_edges"]]
-        nodes4elements = mesh.edges_parameters["elements4inner_edges"]
-        coords4elements = coords4nodes[nodes4elements]
+        nodes4elements = mesh.edges_parameters["nodes4inner_edges"]
+        coords4nodes = mesh.coords4nodes
+        coords4elements = mesh.coords4nodes[nodes4elements]
             
         self.v, self.v_grad, self.integration_points, self.dx = elements.compute_integral_values(coords4elements)
         
@@ -587,15 +587,15 @@ class Interior_Facet_Basis(Abstract_Basis):
         
         inner_dofs = torch.arange(nb_global_dofs)[~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)]
 
-        rows_idx = global_dofs4elements.repeat(1, nb_local_dofs).reshape(-1)
+        rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
         cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
         
         form_idx = global_dofs4elements.reshape(-1)
-
+        
         basis_parameters = {"bilinear_form_shape" : (nb_global_dofs, nb_global_dofs),
                             "bilinear_form_idx": (rows_idx, cols_idx),
                             "linear_form_shape": (nb_global_dofs, 1),
-                            "linear_form_idx": (form_idx),
-                            "inner_dofs": inner_dofs}
+                            "linear_form_idx": (form_idx,),
+                            "inner_dofs": (inner_dofs)}
 
-        return basis_parameters       
+        return basis_parameters    
