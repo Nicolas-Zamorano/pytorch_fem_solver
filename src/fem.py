@@ -55,7 +55,7 @@ class Abstract_Mesh(ABC):
                 
         inner_elements_centroid = self.coords4elements[elements4inner_edges].mean(dim = -2)
         
-        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., 1, :] - inner_elements_centroid[..., 0, :])).sum(dim = -1)
+        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., 1, :, :] - inner_elements_centroid[..., 0,:, :])).sum(dim = -1)
 
         normal4inner_edges[inner_direction_mask < 0] *= -1
 
@@ -66,6 +66,7 @@ class Abstract_Mesh(ABC):
                             "nodes4inner_edges": nodes4inner_edges,
                             "elements4inner_edges": elements4inner_edges,
                             "nodes_idx4boundary_edges": nodes_idx4boundary_edges,
+                            "inner_edges_length": inner_edges_length,
                             "normal4inner_edges": normal4inner_edges}
  
         return elements_diameter, nodes4boundary, edges_parameters
