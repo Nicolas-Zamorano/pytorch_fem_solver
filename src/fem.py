@@ -261,9 +261,13 @@ class Element_Line(Abstract_Element):
         
         return v, v_grad
     
-    def compute_det_and_inv_map(map_jacobian):
+    def compute_det_and_inv_map(self, map_jacobian):
 
-        raise NotImplementedError 
+        det_map_jacobian = torch.linalg.norm(map_jacobian, dim = -2, keepdim = True)
+        
+        inv_map_jacobian = 1./det_map_jacobian
+        
+        return det_map_jacobian, inv_map_jacobian
     
 class Element_Tri(Abstract_Element):
     def __init__(self,
