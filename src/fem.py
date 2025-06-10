@@ -275,8 +275,8 @@ class Element_Tri(Abstract_Element):
                  int_order: int):
         
         self.compute_barycentric_coordinates = lambda x: torch.stack([1.0 - x[..., [0]] - x[..., [1]], 
-                                                                       x[..., [0]], 
-                                                                       x[..., [1]]], dim = -2)
+                                                                      x[..., [0]], 
+                                                                      x[..., [1]]], dim = -2)
         
         self.barycentric_grad = torch.tensor([[-1.0, -1.0],
                                               [ 1.0,  0.0],
@@ -464,7 +464,7 @@ class Basis(Abstract_Basis):
             new_nodes4dofs = edges_parameters["edges_idx"].reshape(mesh_parameters["nb_simplex"], 1, 3) + mesh_parameters["nb_nodes"]
             new_nodes4boundary_dofs = edges_parameters["nodes_idx4boundary_edges"].squeeze(-1) + mesh_parameters["nb_nodes"]
             
-            coords4global_dofs = torch.cat([coords4nodes, new_coords4dofs], dim = -2)
+            coords4global_dofs = torch.cat([coords4nodes, new_coords4dofs.squeeze(-2)], dim = -2)
             global_dofs4elements = torch.cat([nodes4elements, new_nodes4dofs], dim = -1)
             nodes4boundary_dofs = torch.cat([nodes4boundary, new_nodes4boundary_dofs], dim = -1)
             
