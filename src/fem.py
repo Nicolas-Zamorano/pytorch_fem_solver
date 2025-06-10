@@ -37,8 +37,8 @@ class Abstract_Mesh(ABC):
         nodes4boundary_edges = nodes4unique_edges[boundary_mask == 1]
         nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
         
-        elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-2) == nodes4elements.unsqueeze(-4).mT).any(dim = -2).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
-        elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-2) == nodes4elements.unsqueeze(-4).mT).any(dim = -2).all(dim = -1))[:, 1].reshape(-1, mesh_parameters["nb_dimensions"])
+        elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
+        elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1))[:, 1].reshape(-1, mesh_parameters["nb_dimensions"])
         
         nodes4boundary = torch.unique(nodes4boundary_edges)
         nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges.unsqueeze(-2) == nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
