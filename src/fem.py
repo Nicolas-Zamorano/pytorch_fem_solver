@@ -43,16 +43,33 @@ class Abstract_Mesh(ABC):
         nodes4boundary = torch.unique(nodes4boundary_edges)
         nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges.unsqueeze(-2) == nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
 
+        # compute inner edges normal vector
+        
+        coords4inner_edges = coords4nodes[nodes4inner_edges]
+
+        inner_edges_vector = coords4inner_edges[..., 1, :] - coords4inner_edges[..., 0, :]
+        
+        inner_edges_length = torch.norm(inner_edges_vector, dim = -1, keepdim = True)
+                
+        normal4inner_edges = inner_edges_vector[..., [1, 0]] * torch.tensor([-1., 1.])/ inner_edges_length
+                
+        inner_elements_centroid = self.coords4elements[elements4inner_edges].mean(dim = -2)
+        
+        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., 1, :] - inner_elements_centroid[..., 0, :])).sum(dim = -1)
+
+        normal4inner_edges[inner_direction_mask < 0] *= -1
+
         edges_parameters = {"nodes4edges": nodes4edges,
                             "edges_idx": edges_idx,
                             "nodes4unique_edges": nodes4unique_edges,
                             "elements4boundary_edges": elements4boundary_edges,
                             "nodes4inner_edges": nodes4inner_edges,
                             "elements4inner_edges": elements4inner_edges,
-                            "nodes_idx4boundary_edges": nodes_idx4boundary_edges}
+                            "nodes_idx4boundary_edges": nodes_idx4boundary_edges,
+                            "normal4inner_edges": normal4inner_edges}
  
         return elements_diameter, nodes4boundary, edges_parameters
-       
+    
     @abstractmethod
     def compute_mesh_parameters(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
         raise NotImplementedError
