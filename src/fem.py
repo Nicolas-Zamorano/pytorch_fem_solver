@@ -41,7 +41,7 @@ class Abstract_Mesh(ABC):
         elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1))[:, 1].reshape(-1, mesh_parameters["nb_dimensions"])
         
         nodes4boundary = torch.unique(nodes4boundary_edges)
-        nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges.unsqueeze(-2) == nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
+        nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges == nodes4boundary_edges.transpose(-2,-3)).all(dim = -1).any(dim = -1))
 
         # compute inner edges normal vector
         
