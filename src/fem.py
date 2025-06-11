@@ -3,21 +3,29 @@ from abc import ABC, abstractmethod
 
 class Abstract_Mesh(ABC):
     def __init__(self,
-                 coords4nodes: torch.Tensor,
-                 nodes4elements: torch.Tensor):
+                 coords4nodes: torch.Tensor = None,
+                 nodes4elements: torch.Tensor = None,
+                 triangulation: dict = None):
         
-       self.coords4nodes = coords4nodes
-       self.nodes4elements = nodes4elements.unsqueeze(-2)
-       
-       self.coords4elements = self.coords4nodes[self.nodes4elements]
-       
-       self.mesh_parameters = self.compute_mesh_parameters(self.coords4nodes, 
+        if coords4nodes != None: 
+            
+            self.coords4nodes = coords4nodes
+            self.nodes4elements = nodes4elements.unsqueeze(-2)
+        
+        else:
+        
+            self.coords4nodes = torch.tensor(triangulation["vertices"])
+            self.nodes4elements = torch.tensor(triangulation["triangles"]).unsqueeze(-2)
+        
+        self.coords4elements = self.coords4nodes[self.nodes4elements]
+        
+        self.mesh_parameters = self.compute_mesh_parameters(self.coords4nodes, 
                                                            self.nodes4elements)
        
-       self.elements_diameter, self.nodes4boundary, self.edges_parameters = self.compute_edges_values(self.coords4nodes, 
-                                                                                                      self.nodes4elements, 
-                                                                                                      self.mesh_parameters)
-           
+        self.elements_diameter, self.nodes4boundary, self.edges_parameters = self.compute_edges_values(self.coords4nodes, 
+                                                                                                       self.nodes4elements, 
+                                                                                                       self.mesh_parameters)
+               
     def compute_edges_values(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor, mesh_parameters: torch.Tensor):
     
         nodes4edges = nodes4elements[..., self.edges_permutations]
@@ -28,7 +36,7 @@ class Abstract_Mesh(ABC):
         
         nodes4unique_edges, edges_idx, boundary_mask = torch.unique(nodes4edges.reshape(-1, mesh_parameters["nb_dimensions"]).mT, 
                                                                     return_inverse = True, 
-                                                                    sorted = False, 
+                                                                    sorted = True, 
                                                                     return_counts = True, 
                                                                     dim = -1)
         
@@ -77,15 +85,17 @@ class Abstract_Mesh(ABC):
 
 class Mesh_Tri(Abstract_Mesh):
     def __init__(self, 
-                 coords4nodes: torch.Tensor, 
-                 nodes4elements: torch.Tensor):
+                 coords4nodes: torch.Tensor = None, 
+                 nodes4elements: torch.Tensor = None,
+                 triangulation: dict = None):
 
         self.edges_permutations = torch.tensor([[0, 1], 
                                                 [1, 2], 
                                                 [0, 2]])
         
         super().__init__(coords4nodes, 
-                         nodes4elements)
+                         nodes4elements,
+                         triangulation)
 
     @staticmethod
     def compute_mesh_parameters(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
@@ -486,7 +496,7 @@ class Basis(Abstract_Basis):
                             "bilinear_form_idx": (rows_idx, cols_idx),
                             "linear_form_shape": (nb_global_dofs, 1),
                             "linear_form_idx": (form_idx,),
-                            "inner_dofs": (inner_dofs)}
+                            "inner_dofs": inner_dofs}
 
         return basis_parameters    
 

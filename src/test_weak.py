@@ -2,16 +2,16 @@ import torch
 import math
 
 import matplotlib.pyplot as plt
+import triangle as tr
 
 from Neural_Network import Neural_Network
 from fem import Mesh_Tri, Element_Tri, Basis
 from datetime import datetime
 
-import skfem
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()
-# torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float64)
 
 #---------------------- Neural Network Functions ----------------------#
 
@@ -56,6 +56,8 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
 
 #---------------------- FEM Parameters ----------------------#
 
+import skfem 
+
 mesh_sk = skfem.MeshTri1().refined(4)
 
 coords4nodes = torch.tensor(mesh_sk.p).T
@@ -63,6 +65,14 @@ coords4nodes = torch.tensor(mesh_sk.p).T
 nodes4elements = torch.tensor(mesh_sk.t).T
 
 mesh = Mesh_Tri(coords4nodes, nodes4elements)
+
+mesh_data = tr.triangulate({"vertices":[[0., 0.],
+                                        [1., 0.],
+                                        [0., 1.],
+                                        [1., 1.]]}, 
+                            "qa0.2")
+
+mesh = Mesh_Tri(triangulation = mesh_data)
 
 elements = Element_Tri(P_order = 1, 
                        int_order = 4)
