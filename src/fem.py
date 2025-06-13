@@ -57,7 +57,7 @@ class Abstract_Mesh(ABC):
         
         coords4inner_edges = coords4nodes[nodes4inner_edges]
 
-        inner_edges_vector = coords4inner_edges[..., 1, :] - coords4inner_edges[..., 0, :]
+        inner_edges_vector = coords4inner_edges[..., [1], :] - coords4inner_edges[..., [0], :]
         
         inner_edges_length = torch.norm(inner_edges_vector, dim = -1, keepdim = True)
                 
@@ -65,7 +65,7 @@ class Abstract_Mesh(ABC):
                 
         inner_elements_centroid = self.coords4elements[elements4inner_edges].mean(dim = -2)
         
-        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., 1, :, :] - inner_elements_centroid[..., 0,:, :])).sum(dim = -1)
+        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., [1], :, :] - inner_elements_centroid[..., [0],:, :])).sum(dim = -1)
 
         normal4inner_edges[inner_direction_mask < 0] *= -1
 
