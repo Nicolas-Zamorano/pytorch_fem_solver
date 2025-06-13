@@ -5,20 +5,11 @@ torch.set_default_dtype(torch.float64)
 
 class Abstract_Mesh(ABC):
     def __init__(self,
-                 coords4nodes: torch.Tensor = None,
-                 nodes4elements: torch.Tensor = None,
-                 triangulation: dict = None):
+                 triangulation: dict):
         
-        if coords4nodes != None: 
-            
-            self.coords4nodes = coords4nodes
-            self.nodes4elements = nodes4elements.unsqueeze(-2)
-        
-        else:
-        
-            self.coords4nodes = torch.tensor(triangulation["vertices"])
-            self.nodes4elements = torch.tensor(triangulation["triangles"]).unsqueeze(-2)
-        
+        self.coords4nodes = torch.tensor(triangulation["vertices"])
+        self.nodes4elements = torch.tensor(triangulation["triangles"]).unsqueeze(-2)
+
         self.coords4elements = self.coords4nodes[self.nodes4elements]
         
         self.mesh_parameters = self.compute_mesh_parameters(self.coords4nodes, 
@@ -26,31 +17,30 @@ class Abstract_Mesh(ABC):
        
         self.elements_diameter, self.nodes4boundary, self.edges_parameters = self.compute_edges_values(self.coords4nodes, 
                                                                                                        self.nodes4elements, 
-                                                                                                       self.mesh_parameters)
+                                                                                                       self.mesh_parameters,
+                                                                                                       triangulation)
                
-    def compute_edges_values(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor, mesh_parameters: torch.Tensor):
+    def compute_edges_values(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor, mesh_parameters: torch.Tensor, triangulation: dict):
     
-        nodes4edges = nodes4elements[..., self.edges_permutations]
+                        
+        nodes4edges, _ = torch.sort(nodes4elements[..., self.edges_permutations], dim = -1)
         
         coords4edges = coords4nodes[nodes4edges]
-                        
-        elements_diameter = torch.min(torch.norm(coords4edges[..., 1, :] - coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2)[0]       
         
-        nodes4unique_edges, edges_idx, boundary_mask = torch.unique(nodes4edges.reshape(-1, mesh_parameters["nb_dimensions"]).mT, 
-                                                                    return_inverse = True, 
-                                                                    sorted = True, 
-                                                                    return_counts = True, 
-                                                                    dim = -1)
+        elements_diameter = torch.min(torch.norm(coords4edges[..., 1, :] - coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2, keepdim = True)[0]       
         
-        nodes4unique_edges = nodes4unique_edges.mT.unsqueeze(-2)
-                
+        nodes4unique_edges = torch.tensor(triangulation["edges"]).unsqueeze(-2)
+        boundary_mask = torch.tensor(triangulation["edge_markers"]).squeeze(-1)
+        
+        edges_idx = self.get_edges_idx(nodes4elements, nodes4unique_edges)
+
         nodes4boundary_edges = nodes4unique_edges[boundary_mask == 1]
         nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
-        
+        nodes4boundary = torch.nonzero(torch.tensor(triangulation["vertex_markers"]).squeeze(-1) == 1)
+                    
         elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
         elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1))[:, 1].reshape(-1, mesh_parameters["nb_dimensions"])
         
-        nodes4boundary = torch.unique(nodes4boundary_edges)
         nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges == nodes4boundary_edges.transpose(-2,-3)).all(dim = -1).any(dim = -1))
 
         # compute inner edges normal vector
@@ -87,17 +77,13 @@ class Abstract_Mesh(ABC):
 
 class Mesh_Tri(Abstract_Mesh):
     def __init__(self, 
-                 coords4nodes: torch.Tensor = None, 
-                 nodes4elements: torch.Tensor = None,
-                 triangulation: dict = None):
+                 triangulation: dict):
 
         self.edges_permutations = torch.tensor([[0, 1], 
                                                 [1, 2], 
                                                 [0, 2]])
         
-        super().__init__(coords4nodes, 
-                         nodes4elements,
-                         triangulation)
+        super().__init__(triangulation)
 
     @staticmethod
     def compute_mesh_parameters(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
