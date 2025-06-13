@@ -1,6 +1,8 @@
 import torch
 from abc import ABC, abstractmethod
 
+torch.set_default_dtype(torch.float64)
+
 class Abstract_Mesh(ABC):
     def __init__(self,
                  coords4nodes: torch.Tensor = None,
@@ -158,6 +160,36 @@ class Mesh_Tri(Abstract_Mesh):
                 seen[idx_h] = True
     
         return mapping
+    
+    def get_edges_idx(self, nodes4elements, nodes4unique_edges):
+            # 1. Obtener los 3 edges de cada triángulo
+            i0 = nodes4elements[..., 0]
+            i1 = nodes4elements[..., 1]
+            i2 = nodes4elements[..., 2]
+        
+            # Cada edge como par ordenado (min, max)
+            tri_edges = torch.stack([
+                torch.cat([torch.min(i0, i1), torch.max(i0, i1)], dim=1),
+                torch.cat([torch.min(i1, i2), torch.max(i1, i2)], dim=1),
+                torch.cat([torch.min(i2, i0), torch.max(i2, i0)], dim=1),
+            ], dim=1)  # (n_triangles, 3, 2)
+        
+            # 2. Convertimos cada par (a,b) en una clave única: a * M + b
+            M = nodes4elements.max().item() + 1  # M debe ser mayor al número de nodos
+            tri_keys = tri_edges[:, :, [0]] * M + tri_edges[:, :, [1]]  # (n_triangles, 3)
+        
+            # 3. Hacer lo mismo con edges únicos
+            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values).squeeze(-1)  # (n_unique_edges,)
+            
+            # 4. Crear tabla de búsqueda
+            sorted_keys, sorted_idx = torch.sort(edge_keys)  # Necesario para searchsorted
+            flat_tri_keys = tri_keys.flatten()  # (n_triangles * 3,)
+            
+            # 5. Buscar cada key en sorted_keys
+            edge_pos = torch.searchsorted(sorted_keys, flat_tri_keys)
+            edge_indices = sorted_idx[edge_pos].reshape(tri_keys.shape)  # (n_triangles, 3)
+        
+            return edge_indices.mT
 
 class Abstract_Element(ABC):
     def __init__(self,
