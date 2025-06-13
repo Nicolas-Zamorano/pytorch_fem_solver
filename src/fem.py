@@ -1,53 +1,53 @@
 import torch
 from abc import ABC, abstractmethod
 
+torch.set_default_dtype(torch.float64)
+
 class Abstract_Mesh(ABC):
     def __init__(self,
-                 coords4nodes: torch.Tensor,
-                 nodes4elements: torch.Tensor):
+                 triangulation: dict):
         
-       self.coords4nodes = coords4nodes
-       self.nodes4elements = nodes4elements.unsqueeze(-2)
-       
-       self.coords4elements = self.coords4nodes[self.nodes4elements]
-       
-       self.mesh_parameters = self.compute_mesh_parameters(self.coords4nodes, 
+        self.coords4nodes = torch.tensor(triangulation["vertices"])
+        self.nodes4elements = torch.tensor(triangulation["triangles"]).unsqueeze(-2)
+
+        self.coords4elements = self.coords4nodes[self.nodes4elements]
+        
+        self.mesh_parameters = self.compute_mesh_parameters(self.coords4nodes, 
                                                            self.nodes4elements)
        
-       self.elements_diameter, self.nodes4boundary, self.edges_parameters = self.compute_edges_values(self.coords4nodes, 
-                                                                                                      self.nodes4elements, 
-                                                                                                      self.mesh_parameters)
-           
-    def compute_edges_values(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor, mesh_parameters: torch.Tensor):
+        self.elements_diameter, self.nodes4boundary, self.edges_parameters = self.compute_edges_values(self.coords4nodes, 
+                                                                                                       self.nodes4elements, 
+                                                                                                       self.mesh_parameters,
+                                                                                                       triangulation)
+               
+    def compute_edges_values(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor, mesh_parameters: torch.Tensor, triangulation: dict):
     
-        nodes4edges = nodes4elements[..., self.edges_permutations]
+                        
+        nodes4edges, _ = torch.sort(nodes4elements[..., self.edges_permutations], dim = -1)
         
         coords4edges = coords4nodes[nodes4edges]
-                        
-        elements_diameter = torch.min(torch.norm(coords4edges[..., 1, :] - coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2)[0]       
         
-        nodes4unique_edges, edges_idx, boundary_mask = torch.unique(nodes4edges.reshape(-1, mesh_parameters["nb_dimensions"]).mT, 
-                                                                    return_inverse = True, 
-                                                                    sorted = False, 
-                                                                    return_counts = True, 
-                                                                    dim = -1)
+        elements_diameter = torch.min(torch.norm(coords4edges[..., 1, :] - coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2, keepdim = True)[0]       
         
-        nodes4unique_edges = nodes4unique_edges.mT.unsqueeze(-2)
-                
+        nodes4unique_edges = torch.tensor(triangulation["edges"]).unsqueeze(-2)
+        boundary_mask = torch.tensor(triangulation["edge_markers"]).squeeze(-1)
+        
+        edges_idx = self.get_edges_idx(nodes4elements, nodes4unique_edges)
+
         nodes4boundary_edges = nodes4unique_edges[boundary_mask == 1]
         nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
-        
+        nodes4boundary = torch.nonzero(torch.tensor(triangulation["vertex_markers"]).squeeze(-1) == 1)
+                    
         elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
         elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1))[:, 1].reshape(-1, mesh_parameters["nb_dimensions"])
         
-        nodes4boundary = torch.unique(nodes4boundary_edges)
         nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges == nodes4boundary_edges.transpose(-2,-3)).all(dim = -1).any(dim = -1))
 
         # compute inner edges normal vector
         
         coords4inner_edges = coords4nodes[nodes4inner_edges]
 
-        inner_edges_vector = coords4inner_edges[..., 1, :] - coords4inner_edges[..., 0, :]
+        inner_edges_vector = coords4inner_edges[..., [1], :] - coords4inner_edges[..., [0], :]
         
         inner_edges_length = torch.norm(inner_edges_vector, dim = -1, keepdim = True)
                 
@@ -55,7 +55,7 @@ class Abstract_Mesh(ABC):
                 
         inner_elements_centroid = self.coords4elements[elements4inner_edges].mean(dim = -2)
         
-        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., 1, :, :] - inner_elements_centroid[..., 0,:, :])).sum(dim = -1)
+        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., [1], :, :] - inner_elements_centroid[..., [0],:, :])).sum(dim = -1)
 
         normal4inner_edges[inner_direction_mask < 0] *= -1
 
@@ -77,15 +77,13 @@ class Abstract_Mesh(ABC):
 
 class Mesh_Tri(Abstract_Mesh):
     def __init__(self, 
-                 coords4nodes: torch.Tensor, 
-                 nodes4elements: torch.Tensor):
+                 triangulation: dict):
 
         self.edges_permutations = torch.tensor([[0, 1], 
                                                 [1, 2], 
                                                 [0, 2]])
         
-        super().__init__(coords4nodes, 
-                         nodes4elements)
+        super().__init__(triangulation)
 
     @staticmethod
     def compute_mesh_parameters(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
@@ -148,6 +146,36 @@ class Mesh_Tri(Abstract_Mesh):
                 seen[idx_h] = True
     
         return mapping
+    
+    def get_edges_idx(self, nodes4elements, nodes4unique_edges):
+            # 1. Obtener los 3 edges de cada triángulo
+            i0 = nodes4elements[..., 0]
+            i1 = nodes4elements[..., 1]
+            i2 = nodes4elements[..., 2]
+        
+            # Cada edge como par ordenado (min, max)
+            tri_edges = torch.stack([
+                torch.cat([torch.min(i0, i1), torch.max(i0, i1)], dim=1),
+                torch.cat([torch.min(i1, i2), torch.max(i1, i2)], dim=1),
+                torch.cat([torch.min(i2, i0), torch.max(i2, i0)], dim=1),
+            ], dim=1)  # (n_triangles, 3, 2)
+        
+            # 2. Convertimos cada par (a,b) en una clave única: a * M + b
+            M = nodes4elements.max().item() + 1  # M debe ser mayor al número de nodos
+            tri_keys = tri_edges[:, :, [0]] * M + tri_edges[:, :, [1]]  # (n_triangles, 3)
+        
+            # 3. Hacer lo mismo con edges únicos
+            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values).squeeze(-1)  # (n_unique_edges,)
+            
+            # 4. Crear tabla de búsqueda
+            sorted_keys, sorted_idx = torch.sort(edge_keys)  # Necesario para searchsorted
+            flat_tri_keys = tri_keys.flatten()  # (n_triangles * 3,)
+            
+            # 5. Buscar cada key en sorted_keys
+            edge_pos = torch.searchsorted(sorted_keys, flat_tri_keys)
+            edge_indices = sorted_idx[edge_pos].reshape(tri_keys.shape)  # (n_triangles, 3)
+        
+            return edge_indices.mT
 
 class Abstract_Element(ABC):
     def __init__(self,
@@ -486,7 +514,7 @@ class Basis(Abstract_Basis):
                             "bilinear_form_idx": (rows_idx, cols_idx),
                             "linear_form_shape": (nb_global_dofs, 1),
                             "linear_form_idx": (form_idx,),
-                            "inner_dofs": (inner_dofs)}
+                            "inner_dofs": inner_dofs}
 
         return basis_parameters    
 
