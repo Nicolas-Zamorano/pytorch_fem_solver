@@ -8,7 +8,7 @@ class Abstract_Mesh(ABC):
                  triangulation: dict):
         
         self.coords4nodes = torch.tensor(triangulation["vertices"])
-        self.nodes4elements = torch.tensor(triangulation["triangles"]).unsqueeze(-2)
+        self.nodes4elements = torch.tensor(triangulation["triangles"])
 
         self.coords4elements = self.coords4nodes[self.nodes4elements]
         
@@ -27,9 +27,11 @@ class Abstract_Mesh(ABC):
         
         coords4edges = coords4nodes[nodes4edges]
         
-        elements_diameter = torch.min(torch.norm(coords4edges[..., 1, :] - coords4edges[..., 0, :], dim = -1, keepdim = True), dim = -2, keepdim = True)[0]       
+        coords4edges_1, coords4edges_2 = torch.split(coords4edges, 1, dim = -2)
         
-        nodes4unique_edges = torch.tensor(triangulation["edges"]).unsqueeze(-2)
+        elements_diameter = torch.min(torch.norm(coords4edges_2 - coords4edges_1, dim = -1, keepdim = True), dim = -2, keepdim = True)[0]       
+        
+        nodes4unique_edges = torch.tensor(triangulation["edges"])
         boundary_mask = torch.tensor(triangulation["edge_markers"]).squeeze(-1)
         
         edges_idx = self.get_edges_idx(nodes4elements, nodes4unique_edges)
@@ -38,16 +40,18 @@ class Abstract_Mesh(ABC):
         nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
         nodes4boundary = torch.nonzero(torch.tensor(triangulation["vertex_markers"]).squeeze(-1) == 1)
                     
-        elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
-        elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-1) == nodes4elements.unsqueeze(-4)).any(dim = -1).all(dim = -1))[:, 1].reshape(-1, mesh_parameters["nb_dimensions"])
+        elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-1).unsqueeze(-4)).any(dim = -2).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
+        elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-1).unsqueeze(-4)).any(dim = -2).all(dim = -1), as_tuple=True)[1].reshape(-1, mesh_parameters["nb_dimensions"])
         
-        nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges == nodes4boundary_edges.transpose(-2,-3)).all(dim = -1).any(dim = -1))
+        nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges.unsqueeze(-2) == nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
 
         # compute inner edges normal vector
         
         coords4inner_edges = coords4nodes[nodes4inner_edges]
+        
+        coords4inner_edges_1, coords4inner_edges_2 = torch.split(coords4inner_edges, 1, dim = -2)
 
-        inner_edges_vector = coords4inner_edges[..., [1], :] - coords4inner_edges[..., [0], :]
+        inner_edges_vector = coords4inner_edges_2 - coords4inner_edges_1
         
         inner_edges_length = torch.norm(inner_edges_vector, dim = -1, keepdim = True)
                 
@@ -55,7 +59,9 @@ class Abstract_Mesh(ABC):
                 
         inner_elements_centroid = self.coords4elements[elements4inner_edges].mean(dim = -2)
         
-        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid[..., [1], :, :] - inner_elements_centroid[..., [0],:, :])).sum(dim = -1)
+        inner_elements_centroid_1, inner_elements_centroid_2 = torch.split(inner_elements_centroid, 1 , dim = -2)
+        
+        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid_2 - inner_elements_centroid_1)).sum(dim = -1)
 
         normal4inner_edges[inner_direction_mask < 0] *= -1
 
@@ -89,7 +95,7 @@ class Mesh_Tri(Abstract_Mesh):
     def compute_mesh_parameters(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
         
         nb_nodes, nb_dimensions = coords4nodes.shape
-        nb_simplex = nodes4elements.shape[-3]       
+        nb_simplex = nodes4elements.shape[-2]       
         
         mesh_parameters = {"nb_nodes": nb_nodes,
                            "nb_dimensions": nb_dimensions,
@@ -155,14 +161,14 @@ class Mesh_Tri(Abstract_Mesh):
         
             # Cada edge como par ordenado (min, max)
             tri_edges = torch.stack([
-                torch.cat([torch.min(i0, i1), torch.max(i0, i1)], dim=1),
-                torch.cat([torch.min(i1, i2), torch.max(i1, i2)], dim=1),
-                torch.cat([torch.min(i2, i0), torch.max(i2, i0)], dim=1),
+                torch.stack([torch.min(i0, i1), torch.max(i0, i1)], dim=1),
+                torch.stack([torch.min(i1, i2), torch.max(i1, i2)], dim=1),
+                torch.stack([torch.min(i2, i0), torch.max(i2, i0)], dim=1),
             ], dim=1)  # (n_triangles, 3, 2)
         
             # 2. Convertimos cada par (a,b) en una clave única: a * M + b
             M = nodes4elements.max().item() + 1  # M debe ser mayor al número de nodos
-            tri_keys = tri_edges[:, :, [0]] * M + tri_edges[:, :, [1]]  # (n_triangles, 3)
+            tri_keys = tri_edges[:, :, 0] * M + tri_edges[:, :, 1]  # (n_triangles, 3)
         
             # 3. Hacer lo mismo con edges únicos
             edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values).squeeze(-1)  # (n_unique_edges,)
@@ -175,7 +181,7 @@ class Mesh_Tri(Abstract_Mesh):
             edge_pos = torch.searchsorted(sorted_keys, flat_tri_keys)
             edge_indices = sorted_idx[edge_pos].reshape(tri_keys.shape)  # (n_triangles, 3)
         
-            return edge_indices.mT
+            return edge_indices
 
 class Fractures(Abstract_Mesh):
     def __init__(self, 
@@ -270,7 +276,7 @@ class Abstract_Element(ABC):
                 
         bar_coords, v, v_grad = self.compute_shape_functions(self.gaussian_nodes, self.inv_map_jacobian)
                         
-        integration_points = torch.split(bar_coords.mT @ coords4elements, 1, dim = -1)
+        integration_points = torch.split(bar_coords.mT @ coords4elements.unsqueeze(-3), 1, dim = -1)
                         
         dx = self.reference_element_area * self.gaussian_weights * det_map_jacobian 
         
@@ -474,17 +480,18 @@ class Element_Tri(Abstract_Element):
         return gaussian_nodes, gaussian_weights
 
     def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
-        a = map_jacobian[..., [[0]], 0]
-        b = map_jacobian[..., [[0]], 1]
-        c = map_jacobian[..., [[1]], 0]
-        d = map_jacobian[..., [[1]], 1]
-    
-        det_map_jacobian = a * d - b * c
-    
-        inv_map_jacobian = (1 / det_map_jacobian) * torch.concat([torch.concat([d, -b], dim = -1),
+        
+        ab, cd = torch.split(map_jacobian, 1, dim = -2)
+        
+        a, b = torch.split(ab, 1, dim = -1)
+        c, d = torch.split(cd, 1, dim = -1)
+
+        det_map_jacobian = (a * d - b * c).unsqueeze(-3)
+        
+        inv_map_jacobian = (1 / det_map_jacobian) * torch.stack([torch.concat([d, -b], dim = -1),
                                                                   torch.concat([-c, a], dim = -1)], dim = -2)
     
-        return abs(det_map_jacobian), inv_map_jacobian
+        return det_map_jacobian, inv_map_jacobian
 
 class Abstract_Basis(ABC):
     def __init__(self,
@@ -566,10 +573,10 @@ class Basis(Abstract_Basis):
         if P_order == 2:
             
             new_coords4dofs = (coords4nodes[edges_parameters["nodes4unique_edges"]]).mean(-2)
-            new_nodes4dofs = edges_parameters["edges_idx"].reshape(mesh_parameters["nb_simplex"], 1, 3) + mesh_parameters["nb_nodes"]
-            new_nodes4boundary_dofs = edges_parameters["nodes_idx4boundary_edges"].squeeze(-1) + mesh_parameters["nb_nodes"]
+            new_nodes4dofs = edges_parameters["edges_idx"].reshape(mesh_parameters["nb_simplex"], 3) + mesh_parameters["nb_nodes"]
+            new_nodes4boundary_dofs = edges_parameters["nodes_idx4boundary_edges"] + mesh_parameters["nb_nodes"]
             
-            coords4global_dofs = torch.cat([coords4nodes, new_coords4dofs.squeeze(-2)], dim = -2)
+            coords4global_dofs = torch.cat([coords4nodes, new_coords4dofs], dim = -2)
             global_dofs4elements = torch.cat([nodes4elements, new_nodes4dofs], dim = -1)
             nodes4boundary_dofs = torch.cat([nodes4boundary, new_nodes4boundary_dofs], dim = -1)
             
