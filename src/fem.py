@@ -177,6 +177,83 @@ class Mesh_Tri(Abstract_Mesh):
         
             return edge_indices.mT
 
+class Fractures(Abstract_Mesh):
+    def __init__(self, 
+                 triangulation: dict,
+                 fractures_data: torch.tensor):
+        self.edges_permutations = torch.tensor([[0, 1], 
+                                                [1, 2], 
+                                                [0, 2]])
+        
+        super().__init__(triangulation)
+        
+        self.nodes_idx4traces, self.nodes_idx4non_traces =  self.compute_new_fractures_idx(triangulation, fractures_data)
+
+    def compute_fracture_nodes(self, triangulation, fractures_data, points):
+        
+        fractures_points = fractures_data[:, :[-2], :]
+        
+        fracture_mapping_jacobian = fractures_points @ torch.tensor([[-1.0, -1.0],
+                                                                     [ 1.0,  0.0],
+                                                                     [ 0.0,  1.0]])
+        
+        fracture_map =  points @ fracture_mapping_jacobian.mT + fractures_points[:, [0], :]
+        
+        return fracture_map, fracture_mapping_jacobian
+
+    @staticmethod
+    def compute_mesh_parameters(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
+        
+        nb_nodes, nb_dimensions = coords4nodes.shape
+        nb_simplex = nodes4elements.shape[-3]       
+        
+        mesh_parameters = {"nb_nodes": nb_nodes,
+                           "nb_dimensions": nb_dimensions,
+                           "nb_simplex": nb_simplex}
+        
+        return mesh_parameters
+    
+    def  compute_new_fractures_idx(self, triangulation, fractures_data):
+        nodes_idx4fractures = torch.tensor(triangulation["vertex_markers"])
+        
+        nodes_idx4traces = torch.nonzero(nodes_idx4fractures == 2, as_tuple=True)[0]
+        
+        nodes_idx4non_traces = torch.nonzero(nodes_idx4fractures != 2, as_tuple=True)[0]
+        
+        self.mesh_parameters["nb_fractures"] = fractures_data.shape[0]
+        
+        return nodes_idx4traces, nodes_idx4non_traces
+    
+    def get_edges_idx(self, nodes4elements, nodes4unique_edges):
+            # 1. Obtener los 3 edges de cada triángulo
+            i0 = nodes4elements[..., 0]
+            i1 = nodes4elements[..., 1]
+            i2 = nodes4elements[..., 2]
+        
+            # Cada edge como par ordenado (min, max)
+            tri_edges = torch.stack([
+                torch.cat([torch.min(i0, i1), torch.max(i0, i1)], dim = 1),
+                torch.cat([torch.min(i1, i2), torch.max(i1, i2)], dim = 1),
+                torch.cat([torch.min(i2, i0), torch.max(i2, i0)], dim = 1),
+            ], dim=1)  # (n_triangles, 3, 2)
+        
+            # 2. Convertimos cada par (a,b) en una clave única: a * M + b
+            M = nodes4elements.max().item() + 1  # M debe ser mayor al número de nodos
+            tri_keys = tri_edges[:, :, [0]] * M + tri_edges[:, :, [1]]  # (n_triangles, 3)
+        
+            # 3. Hacer lo mismo con edges únicos
+            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values).squeeze(-1)  # (n_unique_edges,)
+            
+            # 4. Crear tabla de búsqueda
+            sorted_keys, sorted_idx = torch.sort(edge_keys)  # Necesario para searchsorted
+            flat_tri_keys = tri_keys.flatten()  # (n_triangles * 3,)
+            
+            # 5. Buscar cada key en sorted_keys
+            edge_pos = torch.searchsorted(sorted_keys, flat_tri_keys)
+            edge_indices = sorted_idx[edge_pos].reshape(tri_keys.shape)  # (n_triangles, 3)
+        
+            return edge_indices.mT
+        
 class Abstract_Element(ABC):
     def __init__(self,
                  P_order: int,
