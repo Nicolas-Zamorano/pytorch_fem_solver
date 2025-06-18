@@ -1,4 +1,2 @@
 *.pyc
 src/mesh.msh
-src/test_triangle_fractures.py
-src/test_triangle_interpolation.py
