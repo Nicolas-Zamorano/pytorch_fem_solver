@@ -565,16 +565,184 @@ class Element_Tri(Abstract_Element):
                                                                   torch.concat([-c, a], dim = -1)], dim = -2)
     
         return det_map_jacobian, inv_map_jacobian
+    
+    
+class Element_Fracture(Abstract_Element):
+    def __init__(self, 
+                 P_order, 
+                 int_order):
+        
+        self.compute_barycentric_coordinates = lambda x: torch.stack([1.0 - x[..., [0]] - x[..., [1]], 
+                                                                      x[..., [0]], 
+                                                                      x[..., [1]]], dim = -2)
+        
+        self.barycentric_grad = torch.tensor([[-1.0, -1.0],
+                                              [ 1.0,  0.0],
+                                              [ 0.0,  1.0]])
+        
+        self.reference_element_area = 0.5
+        
+        # self.fracture_mapping_jacobian = torch.tensor([[-1., 1., 0.],
+        #                                                [-1., 0., 1.]]) @ fractures_data[:,:3, :]
+        
+        # self.norm_fracture_mapping_jacobian = torch.norm(torch.linalg.cross(*torch.split(self.fracture_mapping_jacobian, 1, dim = -1), dim = -2), dim = -2, keepdim = True)
+        
+        super().__init__(P_order, 
+                         int_order)
+        
+        def map_c4n_to_fracture(self, points):
+            
+            map_points =  points @ self.fractures_data[:,:3,:]
+            
+            return map_points        
 
+        def map_to_fracture(self, points):
+            
+            map_points =  points @ self.fractures_data[:,:3,:]
+            
+            return map_points
+        
+        
+    def compute_integral_values(self, coords4elements: torch.Tensor, fractures_data):
+        
+        fractures_vertices = fractures_data[:,:3,:].unsqueeze(-3).unsqueeze(-3)
+        
+        bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes) 
+        
+        mapp, det_map_jacobian, self.inv_map_jacobian = self.compute_map(coords4elements, bar_coords)
+                
+        fractures_map, fractures_map_jacobian, det_fractures_map_jacobian, fractures_map_jacobian_inv = self.compute_fracture_map(mapp, fractures_vertices)
+        
+        v, v_grad = self.compute_shape_functions(bar_coords, self.inv_map_jacobian, fractures_map_jacobian_inv)
+                                
+        integration_points = torch.split(fractures_map , 1, dim = -1)
+                        
+        dx = self.reference_element_area * self.gaussian_weights * det_map_jacobian * det_fractures_map_jacobian
+        
+        return v, v_grad, integration_points, dx, fractures_map_jacobian
+    
+    def compute_fracture_map (self, mapp, fractures_vertices):
+        
+        map_bar_coords = self.compute_barycentric_coordinates(mapp).squeeze(-3)
+        
+        fractures_map = map_bar_coords.mT @ fractures_vertices
+        
+        fractures_map_jacobian = fractures_vertices.mT @ self.barycentric_grad
+        
+        det_fractures_map_jacobian = torch.norm(torch.linalg.cross(*torch.split(fractures_map_jacobian, 1, dim = -1), dim = -2), dim = -2, keepdim = True)
+        
+        fractures_map_jacobian_inv = torch.linalg.inv(fractures_map_jacobian.mT @ fractures_map_jacobian) @ fractures_map_jacobian.mT 
+        
+        return fractures_map, fractures_map_jacobian, det_fractures_map_jacobian, fractures_map_jacobian_inv
+    
+    def compute_map(self, coords4elements: torch.Tensor, bar_coords: torch.Tensor):
+        
+        mapp = bar_coords.mT @ coords4elements.unsqueeze(-3)
+        
+        map_jacobian = coords4elements.mT @ self.barycentric_grad
+        
+        det_map_jacobian, inv_map_jacobian = self.compute_det_and_inv_map(map_jacobian)
+        
+        return mapp, det_map_jacobian, inv_map_jacobian
+            
+    def compute_shape_functions(self, bar_coords, inv_map_jacobian: torch.Tensor, fractures_map_jacobian_inv):
+                
+        v, v_grad = self.shape_functions_value_and_grad(bar_coords, inv_map_jacobian, fractures_map_jacobian_inv)
+
+        return v, v_grad                 
+
+    @staticmethod
+    def compute_inverse_map(first_node: torch.Tensor, integration_points: torch.Tensor, inv_map_jacobian: torch.Tensor):
+
+        integration_points = torch.concat(integration_points, dim = -1)        
+
+        inv_map = (integration_points - first_node) @ inv_map_jacobian.mT
+                
+        return inv_map
+
+    def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor, fractures_map_jacobian_inv):
+                    
+        v = bar_coords
+        
+        v_grad = self.barycentric_grad @ inv_map_jacobian.mT @ fractures_map_jacobian_inv
+            
+        return v, v_grad
+                
+    def compute_gauss_values(self):
+        
+        if self.int_order == 1: 
+            
+            gaussian_nodes = torch.tensor([[1/3, 1/3]])
+                                                              
+            gaussian_weights = torch.tensor([[[1.]]])
+            
+        if self.int_order == 2:
+            
+            gaussian_nodes = torch.tensor([[1/6, 1/6], 
+                                           [2/3, 1/6], 
+                                           [1/6, 2/3]])
+                                                              
+            gaussian_weights = torch.tensor([[[1/3]], 
+                                             [[1/3]], 
+                                             [[1/3]]])
+            
+        if self.int_order == 3: 
+            
+            gaussian_nodes = torch.tensor([[1/3, 1/3], 
+                                           [0.6, 0.2], 
+                                           [0.2, 0.6],
+                                           [0.2, 0.2]])
+                                                  
+            
+            gaussian_weights = torch.tensor([[[-9/16]],
+                                             [[25/48]],
+                                             [[25/48]],
+                                             [[25/48]]])
+            
+        if self.int_order == 4:
+            
+            gaussian_nodes = torch.tensor([[0.816847572980459,  0.091576213509771],
+                                           [0.091576213509771,  0.816847572980459],
+                                           [0.091576213509771,  0.091576213509771],
+                                           [0.108103018168070,  0.445948490915965],
+                                           [0.445948490915965,  0.108103018168070],
+                                           [0.445948490915965,  0.445948490915965]])
+            
+            gaussian_weights = torch.tensor([[[0.109951743655322]],
+                                             [[0.109951743655322]],
+                                             [[0.109951743655322]],
+                                             [[0.223381589678011]],
+                                             [[0.223381589678011]],
+                                             [[0.223381589678011]]])
+            
+        return gaussian_nodes, gaussian_weights
+
+    @staticmethod
+    def compute_det_and_inv_map(map_jacobian: torch.Tensor):
+        
+        ab, cd = torch.split(map_jacobian, 1, dim = -2)
+        
+        a, b = torch.split(ab, 1, dim = -1)
+        c, d = torch.split(cd, 1, dim = -1)
+
+        det_map_jacobian = (a * d - b * c).unsqueeze(-3)
+        
+        inv_map_jacobian = (1 / det_map_jacobian) * torch.stack([torch.concat([d, -b], dim = -1),
+                                                                  torch.concat([-c, a], dim = -1)], dim = -2)
+    
+        return det_map_jacobian, inv_map_jacobian
+    
 class Abstract_Basis(ABC):
     def __init__(self,
                  mesh: Abstract_Mesh,
                  elements: Abstract_Element):
         
+        
+        
         self.elements = elements
         self.mesh = mesh
             
-        self.v, self.v_grad, self.integration_points, self.dx = elements.compute_integral_values(mesh.coords4elements)
+        self.v, self.v_grad, self.integration_points, self.dx,  = elements.compute_integral_values(mesh.coords4elements)
         
         self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(mesh.coords4nodes, 
                                                                                                          mesh.nodes4elements, 
@@ -614,8 +782,8 @@ class Abstract_Basis(ABC):
         integrand_value = (function(self, *args, **kwargs) * self.dx).sum(-3)
         
         integral_value.index_put_(self.basis_parameters["linear_form_idx"], 
-                              integrand_value.reshape(-1, 1),
-                              accumulate = True)
+                                  integrand_value.reshape(-1, 1),
+                                  accumulate = True)
                 
         return integral_value
     
