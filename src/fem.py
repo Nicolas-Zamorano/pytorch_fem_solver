@@ -909,6 +909,90 @@ class Basis(Abstract_Basis):
             interpolator_grad = lambda function : (function(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
             
             return interpolator, interpolator_grad
+
+class Fracture_Basis(Abstract_Basis):
+    def __init__(self,
+                 mesh: Abstract_Mesh,
+                 elements: Element_Tri):
+        
+        self.elements = elements
+        self.mesh = mesh
+        
+        self.v, self.v_grad, self.integration_points, self.dx, self.fractures_map_jacobian = elements.compute_integral_values(mesh.coords4elements, mesh.fractures_data)
+                
+        self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(mesh.coords4nodes, 
+                                                                                                         mesh.nodes4elements, 
+                                                                                                         mesh.nodes4boundary,
+                                                                                                         mesh.mesh_parameters,
+                                                                                                         mesh.edges_parameters,
+                                                                                                         elements.P_order)        
+        
+        self.coords4elements = mesh.coords4elements
+
+        self.basis_parameters = self.compute_basis_parameters(self.coords4global_dofs, 
+                                                              self.global_dofs4elements, 
+                                                              self.nodes4boundary_dofs)
+        
+    def compute_dofs(self, coords4nodes, nodes4elements, nodes4boundary, mesh_parameters, edges_parameters, P_order):
+                    
+        coords4global_dofs = coords4nodes
+        global_dofs4elements = nodes4elements
+        nodes4boundary_dofs = nodes4boundary
+        
+        return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
+
+    def compute_basis_parameters(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
+        
+        self.global_triangulation = self.mesh.build_global_triangulation(self.mesh.triangulation)
+        
+        nb_global_dofs = self.global_triangulation["vertices"].shape[-2]
+        nb_local_dofs = self.global_triangulation["triangles"].shape[-1]
+                
+        inner_dofs = torch.arange(nb_global_dofs)[~torch.isin(torch.arange(nb_global_dofs), self.global_triangulation["vertex_markers_global"])]
+
+        rows_idx = self.global_triangulation["triangles"].repeat(1, 1, nb_local_dofs).reshape(-1)
+        cols_idx = self.global_triangulation["triangles"].repeat_interleave(nb_local_dofs).reshape(-1)
+        
+        form_idx = self.global_triangulation["triangles"].reshape(-1)
+        
+        basis_parameters = {"bilinear_form_shape" : (nb_global_dofs, nb_global_dofs),
+                            "bilinear_form_idx": (rows_idx, cols_idx),
+                            "linear_form_shape": (nb_global_dofs, 1),
+                            "linear_form_idx": (form_idx,),
+                            "inner_dofs": inner_dofs}
+        
+        return basis_parameters   
+    
+    def reduce(self, tensor):
+        idx = self.basis_parameters["inner_dofs"]
+        if tensor.shape[-1] != 1:
+            return tensor[idx, :][:, idx]
+        else:
+            return tensor[idx]
+        
+    def interpolate(self, tensor):
+                 
+        triangles = self.global_triangulation['triangles']      # (N_tri, 3)
+        fracture_map = self.global_triangulation['fracture_map'] # (N_tri,)
+        N_F = fracture_map.max().item() + 1                 # número de fracturas
+        
+        # Paso 1: agrupar triángulos por fractura
+        fracture_triangles = [[] for _ in range(N_F)]
+        for i, fracture_id in enumerate(fracture_map):
+            fracture_triangles[fracture_id].append(triangles[i])
+        
+        fracture_triangles = [torch.stack(tris) if tris else torch.empty((0, 3), dtype=torch.long)
+                      for tris in fracture_triangles]
+        
+        dofs_idx = torch.stack(fracture_triangles, dim = 0).unsqueeze(-2)
+        v = self.v
+        v_grad = self.v_grad
+                        
+        interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim = True)
+            
+        interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2, keepdim = True)
+            
+        return interpolation, interpolation_grad
         
 class Interior_Facet_Basis(Abstract_Basis):
     def __init__(self, 
