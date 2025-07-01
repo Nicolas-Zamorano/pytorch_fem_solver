@@ -1,4 +1,5 @@
 import torch
+import tensordict
 from abc import ABC, abstractmethod
 
 torch.set_default_dtype(torch.float64)
@@ -7,8 +8,8 @@ class Abstract_Mesh(ABC):
     def __init__(self,
                  triangulation: dict):
         
-        self.coords4nodes = torch.tensor(triangulation["vertices"])
-        self.nodes4elements = torch.tensor(triangulation["triangles"])
+        self.coords4nodes = triangulation["vertices"]
+        self.nodes4elements = triangulation["triangles"]
 
         self.coords4elements = self.coords4nodes[self.nodes4elements]
         
@@ -31,14 +32,14 @@ class Abstract_Mesh(ABC):
         
         elements_diameter = torch.min(torch.norm(coords4edges_2 - coords4edges_1, dim = -1, keepdim = True), dim = -2, keepdim = True)[0]       
         
-        nodes4unique_edges = torch.tensor(triangulation["edges"])
-        boundary_mask = torch.tensor(triangulation["edge_markers"]).squeeze(-1)
+        nodes4unique_edges = triangulation["edges"]
+        boundary_mask = triangulation["edge_markers"].squeeze(-1)
         
         edges_idx = self.get_edges_idx(nodes4elements, nodes4unique_edges)
 
         nodes4boundary_edges = nodes4unique_edges[boundary_mask == 1]
         nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
-        nodes4boundary = torch.nonzero(torch.tensor(triangulation["vertex_markers"]).squeeze(-1) == 1)
+        nodes4boundary = torch.nonzero(triangulation["vertex_markers"])[:, [0]]
                     
         elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-1).unsqueeze(-4)).any(dim = -2).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
         elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-1).unsqueeze(-4)).any(dim = -2).all(dim = -1), as_tuple=True)[1].reshape(-1, mesh_parameters["nb_dimensions"])
@@ -109,13 +110,13 @@ class Mesh_Tri(Abstract_Mesh):
         cada entrada i indica a qué triángulo del mallado grueso pertenece 
         el triángulo i del mallado fino.
         """
-        c4e_h = fine_mesh.coords4elements        # (n_elem_h, 1, 3, 2)
-        c4e_H = self.coords4elements             # (n_elem_H, 1, 3, 2)
-        centroids_h = c4e_h.mean(dim = -2).squeeze(1)  # (n_elem_h, 2)
+        c4e_h = fine_mesh.coords4elements        # (n_elem_h, 3, 2)
+        c4e_H = self.coords4elements             # (n_elem_H, 3, 2)
+        centroids_h = c4e_h.mean(dim = -2)       # (n_elem_h, 2)
     
         # Expandimos para broadcasting
         P = centroids_h[:, None, :]              # (n_elem_h, 1, 2)
-        A = c4e_H[:, 0, 0, :][None, :, :]         # (1, n_elem_H, 2)
+        A = c4e_H[:, 0, 0, :][None, :, :]        # (1, n_elem_H, 2)
         B = c4e_H[:, 0, 1, :][None, :, :]
         C = c4e_H[:, 0, 2, :][None, :, :]
     
@@ -123,11 +124,11 @@ class Mesh_Tri(Abstract_Mesh):
         v1 = B - A
         v2 = P - A                               # (n_elem_h, n_elem_H, 2)
     
-        dot00 = (v0 * v0).sum(dim = -1)            # (1, n_elem_H)
+        dot00 = (v0 * v0).sum(dim = -1)          # (1, n_elem_H)
         dot01 = (v0 * v1).sum(dim = -1)
         dot11 = (v1 * v1).sum(dim = -1)
     
-        dot02 = (v0 * v2).sum(dim = -1)            # (n_elem_h, n_elem_H)
+        dot02 = (v0 * v2).sum(dim = -1)          # (n_elem_h, n_elem_H)
         dot12 = (v1 * v2).sum(dim = -1)
     
         denom = dot00 * dot11 - dot01 * dot01    # (1, n_elem_H)
@@ -171,7 +172,7 @@ class Mesh_Tri(Abstract_Mesh):
             tri_keys = tri_edges[:, :, 0] * M + tri_edges[:, :, 1]  # (n_triangles, 3)
         
             # 3. Hacer lo mismo con edges únicos
-            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values).squeeze(-1)  # (n_unique_edges,)
+            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values) # (n_unique_edges,)
             
             # 4. Crear tabla de búsqueda
             sorted_keys, sorted_idx = torch.sort(edge_keys)  # Necesario para searchsorted
@@ -349,7 +350,7 @@ class Abstract_Element(ABC):
                         
         integration_points = torch.split(bar_coords.mT @ coords4elements.unsqueeze(-3), 1, dim = -1)
                         
-        dx = self.reference_element_area * self.gaussian_weights * det_map_jacobian 
+        dx = self.reference_element_area * self.gaussian_weights * det_map_jacobian
         
         return v, v_grad, integration_points, dx
     
@@ -550,7 +551,8 @@ class Element_Tri(Abstract_Element):
             
         return gaussian_nodes, gaussian_weights
 
-    def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
+    @staticmethod
+    def compute_det_and_inv_map(map_jacobian: torch.Tensor):
         
         ab, cd = torch.split(map_jacobian, 1, dim = -2)
         
