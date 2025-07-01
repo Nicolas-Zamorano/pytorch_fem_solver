@@ -2,6 +2,7 @@ import torch
 import math
 
 import matplotlib.pyplot as plt
+import tensordict as td
 import triangle as tr
 
 from Neural_Network import Neural_Network
@@ -63,7 +64,9 @@ mesh_data = tr.triangulate({"vertices":[[0., 0.],
                                         [1., 1.]]}, 
                             "Dqea"+str(h))
 
-mesh = Mesh_Tri(triangulation = mesh_data)
+mesh_data_torch = td.TensorDict(mesh_data)
+
+mesh = Mesh_Tri(triangulation = mesh_data_torch)
 
 elements = Element_Tri(P_order = 2, 
                        int_order = 4)
