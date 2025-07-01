@@ -185,81 +185,152 @@ class Mesh_Tri(Abstract_Mesh):
 
 class Fractures(Abstract_Mesh):
     def __init__(self, 
-                 triangulation: dict,
-                 fractures_data: torch.tensor):
+                 triangulations: tuple,
+                 fractures_data: torch.Tensor):
+        
+        self.triangulations = triangulations
+        self.fractures_data = fractures_data
+        
         self.edges_permutations = torch.tensor([[0, 1], 
                                                 [1, 2], 
                                                 [0, 2]])
         
-        super().__init__(triangulation)
+        self.triangulation =  self.stack_triangulations(triangulations)
         
-        self.nodes_idx4traces, self.nodes_idx4non_traces =  self.compute_new_fractures_idx(triangulation, fractures_data)
+        self.coords4nodes = self.triangulation["vertices"]
+        self.nodes4elements = self.triangulation["triangles"]
 
-    def compute_fracture_nodes(self, triangulation, fractures_data, points):
+        self.coords4elements = self.coords4nodes[torch.arange(self.coords4nodes.shape[0])[:, None, None],self.nodes4elements]
         
-        fractures_points = fractures_data[:, :[-2], :]
-        
-        fracture_mapping_jacobian = fractures_points @ torch.tensor([[-1.0, -1.0],
-                                                                     [ 1.0,  0.0],
-                                                                     [ 0.0,  1.0]])
-        
-        fracture_map =  points @ fracture_mapping_jacobian.mT + fractures_points[:, [0], :]
-        
-        return fracture_map, fracture_mapping_jacobian
+        self.mesh_parameters = self.compute_mesh_parameters(self.coords4nodes, 
+                                                           self.nodes4elements)
+       
+        self.nodes4boundary = self.triangulation["nodes4boundary"]
+        self.edges_parameters = dict()
 
-    @staticmethod
-    def compute_mesh_parameters(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
+    def compute_mesh_parameters(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
+                
+        nb_fractures, nb_nodes, nb_dimensions = coords4nodes.shape
+        _, nb_simplex, nb_size4simplex = nodes4elements.shape
         
-        nb_nodes, nb_dimensions = coords4nodes.shape
-        nb_simplex = nodes4elements.shape[-3]       
         
-        mesh_parameters = {"nb_nodes": nb_nodes,
+        mesh_parameters = {"nb_fractures": nb_fractures,
+                           "nb_nodes": nb_nodes,
                            "nb_dimensions": nb_dimensions,
-                           "nb_simplex": nb_simplex}
+                           "nb_simplex": nb_simplex,
+                           "nb_size4simplex": nb_size4simplex}
         
         return mesh_parameters
+
+    def stack_triangulations(self, fracture_triangulations: tensordict.TensorDict):
+        
+        global_vertices = torch.stack([triangulation["vertices"] for triangulation in fracture_triangulations], dim = 0)
+        global_vertex_markers = torch.stack([triangulation["vertex_markers"] for triangulation in fracture_triangulations], dim = 0)
+        
+        global_triangles = torch.stack([triangulation["triangles"] for triangulation in fracture_triangulations], dim = 0)
+        
+        global_edges = torch.stack([triangulation["vertices"] for triangulation in fracture_triangulations], dim = 0)
+        global_edge_markers = torch.stack([triangulation["edge_markers"] for triangulation in fracture_triangulations], dim = 0)
+
+        global_nodes4boundary =  torch.stack([torch.nonzero(triangulation["vertex_markers"] == 1)[:, [0]] for triangulation in fracture_triangulations], dim = 0)
+
+        global_triangulation = tensordict.TensorDict(
+            dict(
+                vertices = global_vertices,
+                vertex_markers = global_vertex_markers,
+                triangles = global_triangles,
+                edges = global_edges,
+                edge_markers = global_edge_markers,
+                nodes4boundary = global_nodes4boundary)
+            , batch_size=[2,])        
+        
+        return global_triangulation
     
-    def  compute_new_fractures_idx(self, triangulation, fractures_data):
-        nodes_idx4fractures = torch.tensor(triangulation["vertex_markers"])
-        
-        nodes_idx4traces = torch.nonzero(nodes_idx4fractures == 2, as_tuple=True)[0]
-        
-        nodes_idx4non_traces = torch.nonzero(nodes_idx4fractures != 2, as_tuple=True)[0]
-        
-        self.mesh_parameters["nb_fractures"] = fractures_data.shape[0]
-        
-        return nodes_idx4traces, nodes_idx4non_traces
+    def build_global_triangulation(self, local_triangulations):
+        global_vertices = []
+        vertex_global_ids = []
+        vertex_markers_global = []
+        coord_to_global = {}  # clave: tuple(coord), exacto
+        next_vertex_id = 0
     
-    def get_edges_idx(self, nodes4elements, nodes4unique_edges):
-            # 1. Obtener los 3 edges de cada triángulo
-            i0 = nodes4elements[..., 0]
-            i1 = nodes4elements[..., 1]
-            i2 = nodes4elements[..., 2]
-        
-            # Cada edge como par ordenado (min, max)
-            tri_edges = torch.stack([
-                torch.cat([torch.min(i0, i1), torch.max(i0, i1)], dim = 1),
-                torch.cat([torch.min(i1, i2), torch.max(i1, i2)], dim = 1),
-                torch.cat([torch.min(i2, i0), torch.max(i2, i0)], dim = 1),
-            ], dim=1)  # (n_triangles, 3, 2)
-        
-            # 2. Convertimos cada par (a,b) en una clave única: a * M + b
-            M = nodes4elements.max().item() + 1  # M debe ser mayor al número de nodos
-            tri_keys = tri_edges[:, :, [0]] * M + tri_edges[:, :, [1]]  # (n_triangles, 3)
-        
-            # 3. Hacer lo mismo con edges únicos
-            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values).squeeze(-1)  # (n_unique_edges,)
-            
-            # 4. Crear tabla de búsqueda
-            sorted_keys, sorted_idx = torch.sort(edge_keys)  # Necesario para searchsorted
-            flat_tri_keys = tri_keys.flatten()  # (n_triangles * 3,)
-            
-            # 5. Buscar cada key en sorted_keys
-            edge_pos = torch.searchsorted(sorted_keys, flat_tri_keys)
-            edge_indices = sorted_idx[edge_pos].reshape(tri_keys.shape)  # (n_triangles, 3)
-        
-            return edge_indices.mT
-        
+        # Paso 1: construir lista global de vértices y mapas locales -> globales
+        for local_mesh in torch.unbind(local_triangulations, dim = -1):
+            local_vertices = local_mesh["vertices"]        # Tensor de forma (N_v, 2)
+            local_vertex_markers = local_mesh["vertex_markers"]  # Tensor (N_v,)
+            local_to_global = {}
+    
+            for local_id, coord in enumerate(local_vertices):
+                key = tuple(coord.tolist())  # convertir a tuple para usar como clave
+                marker = int(local_vertex_markers[local_id])
+
+                if local_vertex_markers[local_id].item() >= 2:  # nodo en traza
+                    if key in coord_to_global:
+                        global_id = coord_to_global[key]
+                    else:
+                        global_id = next_vertex_id
+                        coord_to_global[key] = global_id
+                        global_vertices.append(coord)
+                        next_vertex_id += 1
+                    
+                else:  # nodo exclusivo
+                    global_id = next_vertex_id
+                    coord_to_global[key] = global_id
+                    global_vertices.append(coord)
+                    next_vertex_id += 1
+    
+                    if marker == 1:
+                        vertex_markers_global.append(global_id)
+    
+                local_to_global[local_id] = global_id
+    
+            vertex_global_ids.append(local_to_global)
+    
+        global_vertices = torch.stack(global_vertices, dim=0)
+        vertex_markers_global = torch.tensor(vertex_markers_global)
+    
+        # Paso 2: reconstruir triángulos con índices globales
+        global_triangles = []
+        fracture_map = []
+        trace_map = {}  # clave: traza k, valor: lista de (fractura_id, edge_id)                    
+
+        for i, local_mesh in enumerate(local_triangulations):
+            local_to_global = vertex_global_ids[i]
+            local_triangles = local_mesh["triangles"]  # Tensor de shape (N_t, 3)
+            edge_markers = local_mesh["edge_markers"]
+            for tri in local_triangles:
+                global_tri = [local_to_global[v.item()] for v in tri]
+                global_triangles.append(torch.tensor(global_tri, dtype=torch.long))
+                fracture_map.append(i)
+            for edge_id in range(len(edge_markers)):
+                marker = int(edge_markers[edge_id])
+                if marker >= 2:  # traza
+                    if marker not in trace_map:
+                        trace_map[marker] = []
+                    trace_map[marker].append((i, edge_id))
+    
+        global_triangles = torch.stack(global_triangles, dim=0)
+        fracture_map = torch.tensor(fracture_map, dtype=torch.long)
+
+        N = len(global_vertices)
+        vertex_to_fracture = -torch.ones(N, dtype=torch.long)
+    
+        for fracture_id, local_to_global in enumerate(vertex_global_ids):
+            for local_id, global_id in local_to_global.items():
+                if vertex_to_fracture[global_id] == -1:
+                    vertex_to_fracture[global_id] = fracture_id
+    
+        return {
+            "vertices": global_vertices,            # (N_global_vertices, 2 o 3), float
+            "triangles": global_triangles,          # (N_global_triangles, 3), long
+            "fracture_map": fracture_map,           # (N_global_triangles,), long
+            "trace_map": trace_map,                 # {k: [(fractura_id, edge_id), ...]}
+            "vertex_global_ids": vertex_global_ids, # por fractura: local_id -> global_id
+            "vertex_markers_global": vertex_markers_global,
+            "vertex_to_fracture": vertex_to_fracture
+        }
+    
+    
+
 class Abstract_Element(ABC):
     def __init__(self,
                  P_order: int,
