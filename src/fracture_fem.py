@@ -1,0 +1,390 @@
+import torch
+import tensordict as td
+from fem import Abstract_Mesh, Abstract_Element, Abstract_Basis
+
+torch.set_default_dtype(torch.float64)
+
+class Fractures(Abstract_Mesh):
+    def __init__(self, 
+                 triangulations: list,
+                 fractures_3D_data: torch.Tensor):
+        
+        self.fractures_3D_data = fractures_3D_data
+        
+        self.edges_permutations = torch.tensor([[0, 1], 
+                                                [1, 2], 
+                                                [0, 2]])
+        
+        self.local_triangulations =  self.stack_triangulations(triangulations, fractures_3D_data)
+                
+        self.mesh_parameters = self.compute_mesh_parameters(self.local_triangulations)
+        self.edges_parameters = dict()
+
+    def compute_mesh_parameters(self, triangulations):
+                
+        nb_fractures, nb_nodes, nb_dimensions = triangulations["vertices"].shape
+        _, nb_simplex, nb_size4simplex = triangulations["triangles"].shape
+        
+        mesh_parameters = {"nb_fractures": nb_fractures,
+                           "nb_nodes": nb_nodes,
+                           "nb_dimensions": nb_dimensions,
+                           "nb_simplex": nb_simplex,
+                           "nb_size4simplex": nb_size4simplex}
+        
+        return mesh_parameters
+
+    def stack_triangulations(self, fracture_triangulations: list, fractures_3D_data):
+        
+        stack_vertices = torch.stack([triangulation["vertices"] for triangulation in fracture_triangulations], dim = 0)
+        stack_vertex_markers = torch.stack([triangulation["vertex_markers"] for triangulation in fracture_triangulations], dim = 0)
+        
+        stack_triangles = torch.stack([triangulation["triangles"] for triangulation in fracture_triangulations], dim = 0)
+        
+        stack_edges = torch.stack([triangulation["edges"] for triangulation in fracture_triangulations], dim = 0)
+        stack_edge_markers = torch.stack([triangulation["edge_markers"] for triangulation in fracture_triangulations], dim = 0)
+
+        stack_coords4triangles = stack_vertices[torch.arange(stack_vertices.shape[0])[:, None, None],stack_triangles]
+
+        fractures_2D_vertices = stack_vertices[:,:3, :]
+        
+        fractures_3D_vertices = fractures_3D_data [:, :3, :].mT
+
+        hat_V = torch.cat([fractures_2D_vertices.mT, torch.ones_like(fractures_3D_vertices[:,[-1],:])], dim= -2)
+
+        A_b = (fractures_3D_vertices @ torch.linalg.inv(hat_V))
+
+        # Separar A y b
+        fractures_map_jacobian = A_b[..., :2]
+        b = A_b[..., [-1]]
+        
+        fractures_map_jacobian_int = fractures_map_jacobian.unsqueeze(-3).unsqueeze(-3)
+        b_int = b.unsqueeze(-3).unsqueeze(-3)
+
+        # Definir función de mapeo
+        def fractures_map(x):
+            return (fractures_map_jacobian @ x.mT + b).mT
+        
+        def fractures_map_int(x):
+            return (fractures_map_jacobian_int @ x.mT + b_int).mT
+        
+        det_fractures_map_jacobian = torch.norm(torch.linalg.cross(*torch.split(fractures_map_jacobian, 1, dim = -1), dim = -2), dim = -2, keepdim = True)
+        
+        fractures_map_jacobian_inv = torch.linalg.inv(fractures_map_jacobian.mT @ fractures_map_jacobian) @ fractures_map_jacobian.mT 
+                
+        # xd = fractures_map(fractures_2D_vertices).squeeze(-2)
+        
+        stack_vertices_3D = fractures_map(stack_vertices)
+        
+        stack_triangulation = td.TensorDict(
+            vertices = stack_vertices,
+            vertices_3D = stack_vertices_3D,
+            vertex_markers = stack_vertex_markers,
+            triangles = stack_triangles,
+            edges = stack_edges,
+            edge_markers = stack_edge_markers,
+            fractures_map = fractures_map,
+            coords4triangles = stack_coords4triangles,
+            fractures_map_jacobian = fractures_map_jacobian,
+            det_fractures_map_jacobian = det_fractures_map_jacobian,
+            fractures_map_jacobian_inv = fractures_map_jacobian_inv,
+            fractures_map_int = fractures_map_int,
+            )
+                  
+        return stack_triangulation
+
+class Element_Fracture(Abstract_Element):
+    def __init__(self, 
+                 P_order, 
+                 int_order):
+        
+        self.barycentric_grad = torch.tensor([[-1.0, -1.0],
+                                              [ 1.0,  0.0],
+                                              [ 0.0,  1.0]])
+        
+        self.reference_element_area = 0.5
+
+        super().__init__(P_order, 
+                         int_order)
+        
+    def compute_barycentric_coordinates(self, x):
+        
+        return torch.stack([1.0 - x[..., [0]] - x[..., [1]], 
+                            x[..., [0]], 
+                            x[..., [1]]], dim = -2)
+
+    def compute_integral_values(self, coords4elements: torch.Tensor, fractures_map, fractures_map_jacobian_inv, det_fractures_map_jacobian):
+                
+        bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes) 
+        
+        gaussian_map_nodes, det_map_jacobian, self.inv_map_jacobian = self.compute_map(coords4elements, bar_coords)
+                
+        gaussian_map_3D_nodes = fractures_map(gaussian_map_nodes)
+        
+        v, v_grad = self.compute_shape_functions(bar_coords, self.inv_map_jacobian, fractures_map_jacobian_inv.unsqueeze(-3).unsqueeze(-3))
+                                
+        integration_points = torch.split(gaussian_map_3D_nodes , 1, dim = -1)
+                        
+        dx = self.reference_element_area * self.gaussian_weights * det_map_jacobian * det_fractures_map_jacobian.reshape(-1, 1, 1, 1 ,1)
+        
+        return v, v_grad, integration_points, dx
+    
+    def compute_map(self, coords4elements: torch.Tensor, bar_coords: torch.Tensor):
+        
+        mapp = bar_coords.mT @ coords4elements.unsqueeze(-3)
+        
+        map_jacobian = coords4elements.mT @ self.barycentric_grad
+        
+        det_map_jacobian, inv_map_jacobian = self.compute_det_and_inv_map(map_jacobian)
+        
+        return mapp, det_map_jacobian, inv_map_jacobian
+            
+    def compute_shape_functions(self, bar_coords, inv_map_jacobian: torch.Tensor, fractures_map_jacobian_inv):
+                
+        v, v_grad = self.shape_functions_value_and_grad(bar_coords, inv_map_jacobian, fractures_map_jacobian_inv)
+
+        return v, v_grad                 
+
+    @staticmethod
+    def compute_inverse_map(first_node: torch.Tensor, integration_points: torch.Tensor, inv_map_jacobian: torch.Tensor):
+
+        integration_points = torch.concat(integration_points, dim = -1)        
+
+        inv_map = (integration_points - first_node) @ inv_map_jacobian.mT
+                
+        return inv_map
+
+    def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor, fractures_map_jacobian_inv):
+                    
+        v = bar_coords
+        
+        v_grad = self.barycentric_grad @ inv_map_jacobian @ fractures_map_jacobian_inv
+            
+        return v, v_grad
+                
+    def compute_gauss_values(self):
+        
+        if self.int_order == 1: 
+            
+            gaussian_nodes = torch.tensor([[1/3, 1/3]])
+                                                              
+            gaussian_weights = torch.tensor([[[1.]]])
+            
+        if self.int_order == 2:
+            
+            gaussian_nodes = torch.tensor([[1/6, 1/6], 
+                                           [2/3, 1/6], 
+                                           [1/6, 2/3]])
+                                                              
+            gaussian_weights = torch.tensor([[[1/3]], 
+                                             [[1/3]], 
+                                             [[1/3]]])
+            
+        if self.int_order == 3: 
+            
+            gaussian_nodes = torch.tensor([[1/3, 1/3], 
+                                           [0.6, 0.2], 
+                                           [0.2, 0.6],
+                                           [0.2, 0.2]])
+                                                  
+            
+            gaussian_weights = torch.tensor([[[-9/16]],
+                                             [[25/48]],
+                                             [[25/48]],
+                                             [[25/48]]])
+            
+        if self.int_order == 4:
+            
+            gaussian_nodes = torch.tensor([[0.816847572980459,  0.091576213509771],
+                                           [0.091576213509771,  0.816847572980459],
+                                           [0.091576213509771,  0.091576213509771],
+                                           [0.108103018168070,  0.445948490915965],
+                                           [0.445948490915965,  0.108103018168070],
+                                           [0.445948490915965,  0.445948490915965]])
+            
+            gaussian_weights = torch.tensor([[[0.109951743655322]],
+                                             [[0.109951743655322]],
+                                             [[0.109951743655322]],
+                                             [[0.223381589678011]],
+                                             [[0.223381589678011]],
+                                             [[0.223381589678011]]])
+            
+        return gaussian_nodes, gaussian_weights
+
+    @staticmethod
+    def compute_det_and_inv_map(map_jacobian: torch.Tensor):
+        
+        ab, cd = torch.split(map_jacobian, 1, dim = -2)
+        
+        a, b = torch.split(ab, 1, dim = -1)
+        c, d = torch.split(cd, 1, dim = -1)
+
+        det_map_jacobian = (a * d - b * c).unsqueeze(-3)
+        
+        inv_map_jacobian = (1 / det_map_jacobian) * torch.stack([torch.concat([d, -b], dim = -1),
+                                                                  torch.concat([-c, a], dim = -1)], dim = -2)
+    
+        return det_map_jacobian, inv_map_jacobian
+
+class Fracture_Basis(Abstract_Basis):
+    def __init__(self,
+                 mesh: Abstract_Mesh,
+                 elements: Abstract_Element):
+        
+        self.elements = elements
+        self.mesh = mesh
+        
+        self.global_triangulation = self.build_global_triangulation(self.mesh.local_triangulations)
+        
+        self.coords4elements = self.global_triangulation["vertices_2D"][self.global_triangulation["triangles"]].reshape(mesh.mesh_parameters["nb_fractures"], -1, 3, 2)
+        
+        self.v, self.v_grad, self.integration_points, self.dx, = elements.compute_integral_values(self.coords4elements, 
+                                                                                                  mesh.local_triangulations["fractures_map_int"], 
+                                                                                                  mesh.local_triangulations["fractures_map_jacobian_inv"], 
+                                                                                                  mesh.local_triangulations["det_fractures_map_jacobian"])
+                
+        self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(self.global_triangulation)        
+        
+        self.basis_parameters = self.compute_basis_parameters(self.coords4global_dofs, 
+                                                              self.global_dofs4elements, 
+                                                              self.nodes4boundary_dofs)
+    
+    def build_global_triangulation(self, local_triangulations):
+                
+        nb_fractures, nb_vertices, nb_dim = local_triangulations["vertices"].shape
+        
+        nb_edges = local_triangulations["edges"].shape[-2]
+
+        local_triangulation_3D_coords = local_triangulations["vertices_3D"].reshape(-1,3)
+
+        global_vertices_3D, global2local_idx, counts = torch.unique(local_triangulation_3D_coords, 
+                                                                    dim = 0,
+                                                                    return_inverse = True,
+                                                                    return_counts= True
+                                                                    )
+        
+        
+        nb_global_vertices = global_vertices_3D.shape[-2]
+        
+        traces_vertices = torch.arange(nb_global_vertices)[counts != 1]
+
+        local2global_idx = torch.full((nb_global_vertices,), (nb_fractures*nb_vertices)+1, dtype = torch.int64)
+        
+        local2global_idx.scatter_reduce_(0, 
+                                         global2local_idx, 
+                                         torch.arange(nb_fractures*nb_vertices), 
+                                         reduce = "amin",
+                                         include_self = True)
+        
+        global_vertices_2D = local_triangulations["vertices"].reshape(-1,2)[local2global_idx]
+        
+        vertices_offset = torch.arange(nb_fractures)[:, None, None] * nb_vertices
+
+        global_triangles = global2local_idx[local_triangulations["triangles"] + vertices_offset].reshape(-1,3)
+
+        local_edges_2_global = global2local_idx[local_triangulations["edges"] + vertices_offset].reshape(-1,2)
+        
+        global_edges, global2local_edges_idx = torch.unique(local_edges_2_global.reshape(-1, 2), 
+                                                            dim = 0,
+                                                            return_inverse = True)
+        
+        nb_global_edges = global_edges.shape[-2]
+        
+        local2global_edges_idx = torch.full((nb_global_edges,), (nb_fractures*nb_edges)+1, dtype = torch.int64)
+        
+        local2global_edges_idx.scatter_reduce_(0, 
+                                               global2local_edges_idx, 
+                                               torch.arange(nb_fractures*nb_edges), 
+                                               reduce = "amin",
+                                               include_self = True)
+        
+        global_vertices_marker = local_triangulations["vertex_markers"].reshape(-1)[local2global_idx]
+        global_edges_marker = local_triangulations["edge_markers"].reshape(-1)[local2global_edges_idx]
+
+        global_triangulation = td.TensorDict(vertices_3D = global_vertices_3D,
+                                             vertices_2D = global_vertices_2D,
+                                             vertex_markers = global_vertices_marker,
+                                             triangles = global_triangles,
+                                             edges = global_edges,
+                                             edge_markers = global_edges_marker,
+                                             global2local_idx = global2local_idx,
+                                             local2global_idx = local2global_idx,
+                                             traces_vertices = traces_vertices
+                                             )
+        
+        return global_triangulation    
+
+    def compute_dofs(self, global_triangulation):
+                    
+        coords4global_dofs = global_triangulation["vertices_2D"]
+        global_dofs4elements = global_triangulation["triangles"]
+        nodes4boundary_dofs = torch.nonzero(global_triangulation["vertex_markers"] == 1)[:, 0]
+        
+        return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
+
+    def compute_basis_parameters(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
+                
+        nb_global_dofs = self.global_triangulation["vertices_2D"].shape[-2]
+        nb_local_dofs = self.global_triangulation["triangles"].shape[-1]
+                
+        inner_dofs = torch.arange(nb_global_dofs)[~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)]
+
+        rows_idx = self.global_triangulation["triangles"].repeat(1, 1, nb_local_dofs).reshape(-1)
+        cols_idx = self.global_triangulation["triangles"].repeat_interleave(nb_local_dofs).reshape(-1)
+        
+        form_idx = self.global_triangulation["triangles"].reshape(-1)
+        
+        basis_parameters = {"bilinear_form_shape" : (nb_global_dofs, nb_global_dofs),
+                            "bilinear_form_idx": (rows_idx, cols_idx),
+                            "linear_form_shape": (nb_global_dofs, 1),
+                            "linear_form_idx": (form_idx,),
+                            "inner_dofs": inner_dofs,
+                            "nb_dofs": nb_global_dofs}
+        
+        return basis_parameters   
+    
+    def reduce(self, tensor):
+        idx = self.basis_parameters["inner_dofs"]
+        if tensor.shape[-1] != 1:
+            return tensor[idx, :][:, idx]
+        else:
+            return tensor[idx]
+        
+    def apply_BC(self, A : torch.tensor, b : torch.tensor, g, dofs_idx = None):
+        
+        if dofs_idx == None:
+            dofs_idx = self.nodes4boundary_dofs
+        
+        coords4boundary_dofs = self.coords4global_dofs[dofs_idx] 
+        
+        A[dofs_idx, :] = 0
+                
+        A[dofs_idx, dofs_idx] = 1
+        
+        b[dofs_idx,:] = g(*torch.split(coords4boundary_dofs, 1, dim = -1))
+        
+        return A, b
+        
+    def interpolate(self, tensor, is_array: bool = True):
+
+        dofs_idx = self.global_triangulation["triangles"].reshape(self.mesh.mesh_parameters["nb_fractures"], -1, 1, 3)
+        v = self.v
+        v_grad = self.v_grad
+        
+        if is_array:
+                        
+            interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim = True)
+                
+            interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2, keepdim = True)
+                        
+        else:
+            
+            nodes = torch.split(self.global_triangulation["vertices_3D"], 1 , dim = -1)
+        
+            interpolation =  (tensor(*nodes)[dofs_idx] * v).sum(-2, keepdim = True)
+            
+            interpolation_grad = (tensor(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
+            
+        return interpolation, interpolation_grad
+
+                        
+        
