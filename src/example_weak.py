@@ -38,7 +38,7 @@ def optimizer_step(optimizer, loss_value):
 
 #---------------------- Neural Network Parameters ----------------------#
 
-epochs = 8000
+epochs = 1
 learning_rate = 0.1e-2
 decay_rate = 0.99
 decay_steps = 100
@@ -56,7 +56,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
 
 #---------------------- FEM Parameters ----------------------#
 
-h = 0.5**1
+h = 0.5**5
 
 mesh_data = tr.triangulate({"vertices":[[0., 0.],
                                         [1., 0.],
@@ -68,30 +68,30 @@ mesh_data_torch = td.TensorDict(mesh_data)
 
 mesh = Mesh_Tri(triangulation = mesh_data_torch)
 
-elements = Element_Tri(P_order = 2, 
+elements = Element_Tri(P_order = 1, 
                        int_order = 4)
 
 V = Basis(mesh, elements)
 
 fig, ax_mesh = plt.subplots()
 
-tr.plot(ax_mesh,**mesh_data)
+# tr.plot(ax_mesh,**mesh_data)
 
 #---------------------- Residual Parameters ----------------------#
 
 rhs = lambda x, y : 2. * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
-def residual(basis):
+def residual(basis, NN_gradient):
     
     x, y = basis.integration_points
     
-    NN_grad = NN_gradiant(NN, x, y)
-        
+    NN_grad = NN_gradient(x, y)
+    
     v = basis.v
     v_grad = basis.v_grad
     rhs_value = rhs(x, y)
-    
-    return rhs_value * v - v_grad @ NN_grad.mT
+            
+    return rhs_value * v - (v_grad @ NN_grad.mT)
 
 def gram_matrix(basis):
     
@@ -141,7 +141,7 @@ for epoch in range(epochs):
     print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
 
     residual_value = V.reduce(V.integrate_lineal_form(residual))
-        
+                                      
     loss_value = residual_value.T @ (A_inv @ residual_value)
     
     # loss_value = (residual_value**2).sum()
@@ -175,7 +175,6 @@ NN.load_state_dict(params_opt)
 N_points = 100
 
 X, Y = torch.meshgrid(torch.linspace(0, 1, N_points), torch.linspace(0, 1, N_points), indexing = "ij")
-
 
 with torch.no_grad(): 
     Z = abs(exact(X,Y) - NN(X, Y))
