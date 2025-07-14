@@ -15,11 +15,10 @@ class Fractures(Abstract_Mesh):
                                                 [1, 2], 
                                                 [0, 2]])
         
-        self.local_triangulations =  self.stack_triangulations(triangulations, fractures_3D_data)
+        self.local_triangulations, self.edges_parameters =  self.stack_triangulations(triangulations, fractures_3D_data)
                 
         self.mesh_parameters = self.compute_mesh_parameters(self.local_triangulations)
-        self.edges_parameters = dict()
-
+        
     def compute_mesh_parameters(self, triangulations):
                 
         nb_fractures, nb_nodes, nb_dimensions = triangulations["vertices"].shape
@@ -34,7 +33,7 @@ class Fractures(Abstract_Mesh):
         return mesh_parameters
 
     def stack_triangulations(self, fracture_triangulations: list, fractures_3D_data):
-        
+                
         stack_vertices = torch.stack([triangulation["vertices"] for triangulation in fracture_triangulations], dim = 0)
         stack_vertex_markers = torch.stack([triangulation["vertex_markers"] for triangulation in fracture_triangulations], dim = 0)
         
@@ -42,6 +41,8 @@ class Fractures(Abstract_Mesh):
         
         stack_edges = torch.stack([triangulation["edges"] for triangulation in fracture_triangulations], dim = 0)
         stack_edge_markers = torch.stack([triangulation["edge_markers"] for triangulation in fracture_triangulations], dim = 0)
+
+        stack_edge_parameters = torch.stack([td.TensorDict(self.compute_edges_values(triangulation)) for triangulation in fracture_triangulations], dim = 0)
 
         stack_coords4triangles = stack_vertices[torch.arange(stack_vertices.shape[0])[:, None, None],stack_triangles]
 
@@ -70,10 +71,12 @@ class Fractures(Abstract_Mesh):
         det_fractures_map_jacobian = torch.norm(torch.linalg.cross(*torch.split(fractures_map_jacobian, 1, dim = -1), dim = -2), dim = -2, keepdim = True)
         
         fractures_map_jacobian_inv = torch.linalg.inv(fractures_map_jacobian.mT @ fractures_map_jacobian) @ fractures_map_jacobian.mT 
-                
-        # xd = fractures_map(fractures_2D_vertices).squeeze(-2)
-        
+                        
         stack_vertices_3D = fractures_map(stack_vertices)
+        
+        stack_coords_3D4triangles = stack_vertices_3D[torch.arange(stack_vertices_3D.shape[0])[:, None, None],stack_triangles]
+        
+        stack_normal4inner_edges_3D = fractures_map_int(stack_edge_parameters["normal4inner_edges"].unsqueeze(-2))
         
         stack_triangulation = td.TensorDict(
             vertices = stack_vertices,
@@ -84,13 +87,109 @@ class Fractures(Abstract_Mesh):
             edge_markers = stack_edge_markers,
             fractures_map = fractures_map,
             coords4triangles = stack_coords4triangles,
+            stack_coords_3D4triangles = stack_coords_3D4triangles,
             fractures_map_jacobian = fractures_map_jacobian,
             det_fractures_map_jacobian = det_fractures_map_jacobian,
             fractures_map_jacobian_inv = fractures_map_jacobian_inv,
             fractures_map_int = fractures_map_int,
+            normal4inner_edges_3D = stack_normal4inner_edges_3D
             )
                   
-        return stack_triangulation
+        return stack_triangulation, stack_edge_parameters
+    
+    def compute_edges_values(self, triangulation: dict):
+        
+        nodes4elements = triangulation["triangles"]
+        
+        coords4nodes = triangulation["vertices"]
+        
+        coords4elements = coords4nodes[nodes4elements]
+                        
+        nodes4edges, _ = torch.sort(nodes4elements[..., self.edges_permutations], dim = -1)
+        
+        coords4edges = coords4nodes[nodes4edges]
+        
+        coords4edges_1, coords4edges_2 = torch.split(coords4edges, 1, dim = -2)
+        
+        elements_diameter = torch.min(torch.norm(coords4edges_2 - coords4edges_1, dim = -1, keepdim = True), dim = -2, keepdim = True)[0]       
+        
+        nodes4unique_edges = triangulation["edges"]
+        boundary_mask = triangulation["edge_markers"].squeeze(-1)
+        
+        edges_idx = self.get_edges_idx(nodes4elements, nodes4unique_edges)
+
+        nodes4boundary_edges = nodes4unique_edges[boundary_mask == 1]
+        nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
+        nodes4boundary = torch.nonzero(triangulation["vertex_markers"])[:, [0]]
+                    
+        elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-1).unsqueeze(-4)).any(dim = -2).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
+        elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-1).unsqueeze(-4)).any(dim = -2).all(dim = -1), as_tuple=True)[1].reshape(-1, 2)
+        
+        nodes_idx4boundary_edges = torch.nonzero((nodes4unique_edges.unsqueeze(-2) == nodes4boundary_edges.unsqueeze(-3)).all(dim = -1).any(dim = -1))
+
+        # compute inner edges normal vector
+        
+        coords4inner_edges = coords4nodes[nodes4inner_edges]
+        
+        coords4inner_edges_1, coords4inner_edges_2 = torch.split(coords4inner_edges, 1, dim = -2)
+
+        inner_edges_vector = coords4inner_edges_2 - coords4inner_edges_1
+        
+        inner_edges_length = torch.norm(inner_edges_vector, dim = -1, keepdim = True)
+                
+        normal4inner_edges = inner_edges_vector[..., [1, 0]] * torch.tensor([-1., 1.])/ inner_edges_length
+                
+        inner_elements_centroid = coords4elements[elements4inner_edges].mean(dim = -2)
+        
+        inner_elements_centroid_1, inner_elements_centroid_2 = torch.split(inner_elements_centroid, 1 , dim = -2)
+        
+        inner_direction_mask = (normal4inner_edges * (inner_elements_centroid_2 - inner_elements_centroid_1)).sum(dim = -1)
+
+        normal4inner_edges[inner_direction_mask < 0] *= -1
+        
+        edges_parameters = {"nodes4edges": nodes4edges,
+                            "edges_idx": edges_idx,
+                            "nodes4unique_edges": nodes4unique_edges,
+                            "elements4boundary_edges": elements4boundary_edges,
+                            "nodes4inner_edges": nodes4inner_edges,
+                            "elements4inner_edges": elements4inner_edges,
+                            "nodes_idx4boundary_edges": nodes_idx4boundary_edges,
+                            "inner_edges_length": inner_edges_length,
+                            "normal4inner_edges": normal4inner_edges,
+                            "elements_diameter": elements_diameter,
+                            "nodes4boundary": nodes4boundary}
+ 
+        return edges_parameters
+    
+    def get_edges_idx(self, nodes4elements, nodes4unique_edges):
+            # 1. Obtener los 3 edges de cada triángulo
+            i0 = nodes4elements[..., 0]
+            i1 = nodes4elements[..., 1]
+            i2 = nodes4elements[..., 2]
+        
+            # Cada edge como par ordenado (min, max)
+            tri_edges = torch.stack([
+                torch.stack([torch.min(i0, i1), torch.max(i0, i1)], dim = 1),
+                torch.stack([torch.min(i1, i2), torch.max(i1, i2)], dim = 1),
+                torch.stack([torch.min(i2, i0), torch.max(i2, i0)], dim = 1),
+            ], dim=1)  # (n_triangles, 3, 2)
+        
+            # 2. Convertimos cada par (a,b) en una clave única: a * M + b
+            M = nodes4elements.max().item() + 1  # M debe ser mayor al número de nodos
+            tri_keys = tri_edges[:, :, 0] * M + tri_edges[:, :, 1]  # (n_triangles, 3)
+        
+            # 3. Hacer lo mismo con edges únicos
+            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values) # (n_unique_edges,)
+            
+            # 4. Crear tabla de búsqueda
+            sorted_keys, sorted_idx = torch.sort(edge_keys)  # Necesario para searchsorted
+            flat_tri_keys = tri_keys.flatten()  # (n_triangles * 3,)
+            
+            # 5. Buscar cada key en sorted_keys
+            edge_pos = torch.searchsorted(sorted_keys, flat_tri_keys)
+            edge_indices = sorted_idx[edge_pos].reshape(tri_keys.shape)  # (n_triangles, 3)
+        
+            return edge_indices
 
 class Element_Fracture(Abstract_Element):
     def __init__(self, 
@@ -119,7 +218,7 @@ class Element_Fracture(Abstract_Element):
         gaussian_map_nodes, det_map_jacobian, self.inv_map_jacobian = self.compute_map(coords4elements, bar_coords)
                 
         gaussian_map_3D_nodes = fractures_map(gaussian_map_nodes)
-        
+                
         v, v_grad = self.compute_shape_functions(bar_coords, self.inv_map_jacobian, fractures_map_jacobian_inv.unsqueeze(-3).unsqueeze(-3))
                                 
         integration_points = torch.split(gaussian_map_3D_nodes , 1, dim = -1)
@@ -158,7 +257,7 @@ class Element_Fracture(Abstract_Element):
         v = bar_coords
         
         v_grad = self.barycentric_grad @ inv_map_jacobian @ fractures_map_jacobian_inv
-            
+                    
         return v, v_grad
                 
     def compute_gauss_values(self):
