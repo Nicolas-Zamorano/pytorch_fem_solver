@@ -323,6 +323,69 @@ class Element_Fracture(Abstract_Element):
                                                                   torch.concat([-c, a], dim = -1)], dim = -2)
     
         return det_map_jacobian, inv_map_jacobian
+            
+class Fracture_Element_Line(Element_Fracture):
+    def __init__(self,
+                 P_order: int = 1,
+                 int_order: int = 2):
+        
+        self.compute_barycentric_coordinates = lambda x: torch.concat([0.5 * (1. - x), 
+                                                                       0.5 * (1. + x)], dim = -1)
+        
+        self.barycentric_grad = torch.tensor([[-0.5],
+                                              [ 0.5]])
+        
+        self.reference_element_area = 2.
+        
+        self.P_order = P_order
+        self.int_order = int_order
+        
+        self.gaussian_nodes, self.gaussian_weights = self.compute_gauss_values()
+        
+    def compute_gauss_values(self):
+        
+        if self.int_order == 2: 
+            
+            nodes = 1./torch.sqrt(torch.tensor(3.))
+            
+            gaussian_nodes= torch.tensor([[-nodes], 
+                                          [nodes]])
+                                                              
+            gaussian_weights = torch.tensor([[[.5]],
+                                             [[.5]]])
+        
+        if self.int_order == 3:
+            
+            nodes = torch.sqrt(torch.tensor(3/5))
+            
+            gaussian_nodes = torch.tensor([[0], 
+                                           [-nodes], 
+                                           [nodes]])
+            
+            gaussian_weights = torch.tensor([[[8/18]],
+                                             [[5/18]],
+                                             [[5/18]]])
+            
+        return gaussian_nodes, gaussian_weights.unsqueeze(0)
+
+    def compute_det_and_inv_map(self, map_jacobian):
+
+        det_map_jacobian = torch.linalg.norm(map_jacobian, dim = -2, keepdim = True)
+        
+        inv_map_jacobian = 1./det_map_jacobian
+        
+        return det_map_jacobian.unsqueeze(-1), inv_map_jacobian
+    
+    def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor, fractures_map_jacobian_inv):
+                    
+        v = bar_coords
+        
+        # v_grad = self.barycentric_grad @ inv_map_jacobian @ fractures_map_jacobian_inv
+            
+        v_grad  = self.barycentric_grad @ inv_map_jacobian
+        
+        return v, v_grad
+    
 
 class Fracture_Basis(Abstract_Basis):
     def __init__(self,
