@@ -72,7 +72,8 @@ class Neural_Network_3D(torch.nn.Module):
                  input_dimension: int,
                  output_dimension: int,         
                  deep_layers: int,      
-                 hidden_layers_dimension: int):
+                 hidden_layers_dimension: int,
+                 activation_function = torch.nn.Tanh()):
         
         super().__init__()  
                 
@@ -85,7 +86,7 @@ class Neural_Network_3D(torch.nn.Module):
                                          output_dimension)
         self.middle_layers = torch.nn.ModuleList([torch.nn.Linear(hidden_layers_dimension, 
                                                                   hidden_layers_dimension) for _ in range(deep_layers)])
-        self.activation_function = torch.nn.Tanh()
+        self.activation_function = activation_function
         
         torch.nn.init.xavier_uniform_(self.layer_in.weight)
         torch.nn.init.xavier_uniform_(self.layer_out.weight)
