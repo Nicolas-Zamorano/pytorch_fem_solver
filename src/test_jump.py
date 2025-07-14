@@ -2,13 +2,16 @@ import torch
 import skfem
 from fem import Mesh_Tri, Element_Tri, Basis, Element_Line, Interior_Facet_Basis
 from skfem.helpers import grad, dot
-# from numpy.linalg import norm
+import triangle as tr 
+import tensordict as td
+
+torch.set_default_dtype(torch.float64)
 
 mesh_sk = skfem.MeshTri1().refined(1)
 
 elem_sk = skfem.ElementTriP1()
 
-V_sk = skfem.Basis(mesh_sk, elem_sk, intorder = 1)
+V_sk = skfem.Basis(mesh_sk, elem_sk, intorder = 2)
 
 f = lambda x, y : 1.
 
@@ -27,7 +30,7 @@ u_sk = skfem.solve(*skfem.condense(A_sk, b_sk, I = mesh_sk.interior_nodes()))
 
 i_range = [0,1]
                    
-fbasis = [skfem.InteriorFacetBasis(mesh_sk, elem_sk, side = i, use_torch=True) for i in i_range]
+fbasis = [skfem.InteriorFacetBasis(mesh_sk, elem_sk, side = i, use_torch = True) for i in i_range]
 w = {"u" + str(i + 1): fbasis[i].interpolate(u_sk) for i in i_range}
 
 I_u_sk = torch.stack([torch.tensor(w["u1"]), torch.tensor(w["u2"])], dim = -1)
@@ -44,14 +47,16 @@ def jump_sk(w):
 
 eta_E_sk = torch.tensor(jump_sk.elemental(fbasis[0], **w))
 
-coords4nodes = torch.tensor(mesh_sk.p).T
+coords4nodes = mesh_sk.p.T
 
-nodes4elements = torch.tensor(mesh_sk.t).T
+nodes4elements = mesh_sk.t.T
 
-mesh = Mesh_Tri(coords4nodes, nodes4elements)
+triangulation = tr.triangulate(dict(vertices = coords4nodes, triangles = nodes4elements), "e") 
+
+mesh = Mesh_Tri(td.TensorDict(triangulation))
 
 elements = Element_Tri(P_order = 1, 
-                    int_order = 1)
+                    int_order = 2)
 
 V = Basis(mesh, elements)
 
@@ -74,11 +79,11 @@ I_u, I_u_grad = V.interpolate(V_inner_edges, u)
 h_E = V.mesh.edges_parameters["inner_edges_length"].unsqueeze(-2)
 n_E = V.mesh.edges_parameters["normal4inner_edges"].unsqueeze(-2)
 
-I_u_values, I_u_count = torch.unique(I_u.reshape(-1), return_counts=True)
-I_u_sk_values, I_u_sk_count = torch.unique(I_u_sk.reshape(-1), return_counts=True)
+I_u_values, I_u_count = torch.unique(torch.round(I_u.reshape(-1), decimals = 16), return_counts=True)
+I_u_sk_values, I_u_sk_count = torch.unique(torch.round(I_u_sk.reshape(-1), decimals = 16), return_counts=True)
 
-I_u_grad_values, I_u_grad_count = torch.unique(I_u_grad.reshape(-1), return_counts=True)
-I_u_grad_sk_values, I_u_grad_sk_count = torch.unique(I_u_grad_sk.reshape(-1), return_counts=True)
+I_u_grad_values, I_u_grad_count = torch.unique(torch.round(I_u_grad.reshape(-1), decimals = 16), return_counts=True)
+I_u_grad_sk_values, I_u_grad_sk_count = torch.unique(torch.round(I_u_grad_sk.reshape(-1), decimals = 16), return_counts=True)
 
 print("Values of         I_u:", I_u_values.numpy(),"Repeat:", I_u_count.numpy())
 print("Values of      I_u_sk:", I_u_sk_values.numpy(),"Repeat:", I_u_sk_count.numpy())
@@ -93,4 +98,4 @@ def jump(elements, h_E, n_E, I_u_grad):
 
 eta_E = V_inner_edges.integrate_functional(jump, h_E, n_E, I_u_grad).squeeze(-1)
 
-print("eta_E            norm:", (torch.norm(eta_E - eta_E_sk)/torch.norm(eta_E_sk)).item())
+print("eta_E            norm:", (torch.norm(eta_E.sum() - eta_E_sk.sum())/torch.norm(eta_E_sk.sum())).item())
