@@ -5,7 +5,7 @@ import tensordict as td
 import triangle as tr
 import numpy as np
 
-from fracture_fem import Fractures, Element_Fracture, Fracture_Basis
+from fracture_fem import Fractures, Element_Fracture, Fracture_Element_Line, Fracture_Basis, Interior_Facet_Fracture_Basis
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
@@ -225,7 +225,7 @@ u_h = torch.zeros(V.basis_parameters["linear_form_shape"])
 
 u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
 
-I_u_h, I_u_h_grad = V.interpolate(u_h) 
+I_u_h, I_u_h_grad = V.interpolate(V, u_h) 
 
 # non_zero_dirichlet_dofs = torch.nonzero(V.global_triangulation["vertex_markers"] == 2)[:, 0] 
 
@@ -253,7 +253,41 @@ u_h_fracture_1 , u_h_fracture_2 = torch.unbind(u_h[V.global_triangulation["globa
 
 ### --- TRACE PARAMETERS --- ###
 
-trace_nodes = V.global_triangulation["vertices_3D"][V.global_triangulation["traces_vertices"], 1].numpy(force = True)
+V_inner_edges = Interior_Facet_Fracture_Basis(mesh, Fracture_Element_Line(P_order = 1, int_order = 2))
+
+traces_local_edges_idx = V.global_triangulation["traces_local_edges_idx"]
+
+n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
+
+n4e_u =  mesh.edges_parameters["nodes4unique_edges"]
+
+nodes4trace = n4e_u[torch.arange(n4e_u.shape[0])[:, None], traces_local_edges_idx]
+
+c4n = V.mesh.local_triangulations["vertices"]
+
+coords4trace = c4n[torch.arange(c4n.shape[0]), nodes4trace]
+
+# points_trace_fracture_1, points_trace_fracture_2 = torch.unbind(, dim = 0)
+
+sort_points_trace, sort_idx = torch.sort(coords4trace.mean(-2)[...,1])
+
+points_trace_fracture_1, points_trace_fracture_2 = torch.unbind(sort_points_trace, dim = 0)
+
+# COMPUTE JUMP FEM SOLUTION
+
+I_E_u_h, I_E_u_grad = V.interpolate(V_inner_edges, u_h)
+
+I_E_u_h_grad_K_plus, I_E_u_h_grad_minus = torch.unbind(I_E_u_grad, dim = -4)
+
+jump_u_h = (I_E_u_h_grad_K_plus * n_E).sum(-1) + (I_E_u_h_grad_minus * -n_E).sum(-1)
+
+jump_u_h_trace = jump_u_h[torch.arange(jump_u_h.shape[0])[:, None], traces_local_edges_idx]
+
+sort_jump_u_h_trace = jump_u_h_trace[torch.arange(jump_u_h_trace.shape[0])[:, None], sort_idx]
+
+jump_u_h_trace_fracture_1, jump_u_h_trace_fracture_2 = torch.unbind(sort_jump_u_h_trace, dim = 0)
+
+# COMPUTE JUMP EXACT 
 
 local_vertices_3D = V.global_triangulation["vertices_3D"][V.global_triangulation["global2local_idx"].reshape(2, -1)] 
 
@@ -261,9 +295,19 @@ exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1))
 
 exact_value_global = exact_value_local.reshape(-1,1)[V.global_triangulation["local2global_idx"]]
 
-exact_trace = exact_value_global[V.global_triangulation["traces_vertices"]].numpy(force = True)
+I_E_u, I_E_u_grad = V.interpolate(V_inner_edges, exact_value_global)
 
-u_h_trace = u_h[V.global_triangulation["traces_vertices"]].numpy(force = True)
+I_E_u_grad_K_plus, I_E_u_grad_minus = torch.unbind(I_E_u_grad, dim = -4)
+
+n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
+
+jump_u = (I_E_u_grad_K_plus * n_E).sum(-1) + (I_E_u_grad_minus * -n_E).sum(-1)
+
+jump_u_trace = jump_u[torch.arange(jump_u.shape[0])[:, None], traces_local_edges_idx]
+
+sort_jump_u_trace = jump_u_trace[torch.arange(jump_u_trace.shape[0])[:, None], sort_idx]
+
+jump_u_trace_fracture_1, jump_u_trace_fracture_2 = torch.unbind(sort_jump_u_trace, dim = 0)
 
 ### --- ERROR PARAMETERS --- ###
 
@@ -275,10 +319,10 @@ c4e_fracture_1, c4e_fracture_2 =  torch.unbind(mesh.local_triangulations["coords
 
 ### --- PLOT FEM SOLUTION --- ###
 
-fig_sol = plt.figure(figsize = (15, 4), dpi = 200)
+fig_sol = plt.figure(figsize = (10, 4), dpi = 200)
 fig_sol.suptitle("FEM solution", fontsize = 16)
 
-ax_fracture_1 = fig_sol.add_subplot(1, 3, 1, projection = '3d')
+ax_fracture_1 = fig_sol.add_subplot(1, 2, 1, projection = '3d')
 ax_fracture_1.plot_trisurf(vertices_fracture_1.numpy(force = True)[:, 0], 
                  vertices_fracture_1.numpy(force = True)[:, 1], 
                  u_h_fracture_1.reshape(-1).numpy(force = True), 
@@ -292,7 +336,7 @@ ax_fracture_1.set_xlabel(r"$x$")
 ax_fracture_1.set_ylabel(r"$y$")
 ax_fracture_1.set_zlabel(r"$u_h(x,y)$")
 
-ax_fracture_2 = fig_sol.add_subplot(1, 3, 2, projection = '3d')
+ax_fracture_2 = fig_sol.add_subplot(1, 2, 2, projection = '3d')
 ax_fracture_2.plot_trisurf(vertices_fracture_2.numpy(force = True)[:, 0], 
                  vertices_fracture_2.numpy(force = True)[:, 1], 
                  u_h_fracture_2.reshape(-1).numpy(force = True),
@@ -306,24 +350,42 @@ ax_fracture_2.set_xlabel(r"$x$")
 ax_fracture_2.set_ylabel(r"$y$")
 ax_fracture_2.set_zlabel(r"$u_h(x,y)$")
 
-ax_trace = fig_sol.add_subplot(1, 3, 3)
-ax_trace.plot(trace_nodes, 
-              exact_trace, 
-              label = r"$u$", 
-              color='blue')
+# plt.subplots_adjust(wspace = 0.4)  # Aumenta separación horizontal
+plt.show()
 
-ax_trace.plot(trace_nodes, 
-              u_h_trace, 
-              label = r"$u_h$", 
-              color = 'red', 
-              linestyle = '--')
-ax_trace.set_title("value along the trace")
-ax_trace.set_xlabel(r"$y$")
-ax_trace.set_ylabel(r"u(x,y)")
-# ax_trace.legend()
-ax_trace.grid(True)
+### --- PLOT TRACES --- ###
 
-plt.subplots_adjust(wspace = 0.4)  # Aumenta separación horizontal
+fig_traces = plt.figure(figsize = (11, 4), dpi = 200)
+fig_traces.suptitle("Traces values for FEM solution", fontsize = 16)
+
+ax_jump_fracture_1 = fig_traces.add_subplot(1, 2, 1)
+ax_jump_fracture_1.plot(points_trace_fracture_1.numpy(force = True),
+                        jump_u_trace_fracture_1.reshape(-1).numpy(force = True),
+                        color = "black",
+                        label = r"$u^{ex}$")
+ax_jump_fracture_1.scatter(points_trace_fracture_1.numpy(force = True),
+                           jump_u_h_trace_fracture_1.reshape(-1).numpy(force = True),
+                           color = "r",
+                           label = r"$u_h$")
+ax_jump_fracture_1.set_title("Fracture 1")
+ax_jump_fracture_1.set_xlabel("trace lenght")
+ax_jump_fracture_1.set_ylabel("jump value")
+ax_jump_fracture_1.legend()
+
+ax_jump_fracture_2 = fig_traces.add_subplot(1, 2, 2)
+ax_jump_fracture_2.plot(points_trace_fracture_2.numpy(force = True),
+                        jump_u_trace_fracture_2.reshape(-1).numpy(force = True),
+                        color = "black",
+                        label = r"$u^{ex}$")
+ax_jump_fracture_2.scatter(points_trace_fracture_2.numpy(force = True),
+                           jump_u_h_trace_fracture_2.reshape(-1).numpy(force = True),
+                           color = "r",
+                           label = r"$u_h$")
+ax_jump_fracture_2.set_title("Fracture 2")
+ax_jump_fracture_2.set_xlabel("trace lenght")
+ax_jump_fracture_2.set_ylabel("jump value")
+ax_jump_fracture_2.legend()
+
 plt.show()
 
 ### --- PLOT ERROR --- ###
