@@ -557,6 +557,69 @@ class Fracture_Basis(Abstract_Basis):
             interpolation_grad = (tensor(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
             
         return interpolation, interpolation_grad
+            return interpolator, interpolator_grad
+    
+class Interior_Facet_Fracture_Basis(Abstract_Basis):
+    def __init__(self, 
+                 mesh: Abstract_Mesh,
+                 elements: Fracture_Element_Line()):
 
-                        
+        self.elements = elements
+        self.mesh = mesh
         
+        nodes4elements = mesh.edges_parameters["nodes4inner_edges"]
+        coords4nodes = mesh.local_triangulations["vertices"]
+        coords4elements = coords4nodes[torch.arange(coords4nodes.shape[0])[:, None, None], nodes4elements]
+        
+        self.v, self.v_grad, self.integration_points, self.dx = elements.compute_integral_values(coords4elements, 
+                                                                                                  mesh.local_triangulations["fractures_map_int"], 
+                                                                                                  mesh.local_triangulations["fractures_map_jacobian_inv"], 
+                                                                                                  mesh.local_triangulations["det_fractures_map_jacobian"])
+        
+        self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(coords4nodes, 
+                                                                                                          nodes4elements, 
+                                                                                                          torch.tensor([-1]),
+                                                                                                          mesh.mesh_parameters,
+                                                                                                          mesh.edges_parameters,
+                                                                                                          elements.P_order)
+
+        self.coords4elements = self.mesh.local_triangulations["coords4triangles"]
+
+        self.basis_parameters = self.compute_basis_parameters(self.coords4global_dofs, 
+                                                              self.global_dofs4elements, 
+                                                              self.nodes4boundary_dofs)
+        
+        # self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(self.meshl.local_triangulations)        
+        
+        # self.basis_parameters = self.compute_basis_parameters(self.coords4global_dofs, 
+        #                                                       self.global_dofs4elements, 
+        #                                                       self.nodes4boundary_dofs)
+        
+    def compute_dofs(self, coords4nodes, nodes4elements, nodes4boundary, mesh_parameters, edges_parameters, P_order):
+        
+        if P_order == 1:
+            coords4global_dofs = coords4nodes
+            global_dofs4elements = nodes4elements
+            nodes4boundary_dofs = nodes4boundary
+            
+        return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
+
+    def compute_basis_parameters(self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs):
+        
+        nb_global_dofs = coords4global_dofs.shape[-2]
+        nb_local_dofs = global_dofs4elements.shape[-1]
+        
+        inner_dofs = torch.arange(nb_global_dofs)[~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)]
+
+        rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
+        cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
+        
+        form_idx = global_dofs4elements.reshape(-1)
+        
+        basis_parameters = {"bilinear_form_shape" : (nb_global_dofs, nb_global_dofs),
+                            "bilinear_form_idx": (rows_idx, cols_idx),
+                            "linear_form_shape": (nb_global_dofs, 1),
+                            "linear_form_idx": (form_idx,),
+                            "inner_dofs": (inner_dofs)}
+
+        return basis_parameters    
