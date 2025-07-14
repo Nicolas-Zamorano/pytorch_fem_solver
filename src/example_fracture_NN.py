@@ -5,7 +5,7 @@ import tensordict as td
 import triangle as tr
 
 from Neural_Network import Neural_Network_3D
-from fracture_fem import Fractures, Element_Fracture, Fracture_Basis
+from fracture_fem import Fractures, Element_Fracture, Fracture_Element_Line, Fracture_Basis, Interior_Facet_Fracture_Basis
 from datetime import datetime
 import numpy as np
 
@@ -39,15 +39,16 @@ def optimizer_step(optimizer, loss_value):
 
 #---------------------- Neural Network Parameters ----------------------#
 
-epochs = 1000
-learning_rate = 0.5e-2
-decay_rate = 0.98
-decay_steps = 100
+epochs = 10000
+learning_rate = 0.2e-3
+decay_rate = 0.99
+decay_steps = 200
 
 NN = torch.jit.script(Neural_Network_3D(input_dimension = 3, 
                                         output_dimension = 1,
                                         deep_layers = 4, 
-                                        hidden_layers_dimension = 25))
+                                        hidden_layers_dimension = 25,
+                                        activation_function= torch.nn.ReLU()))
 
 optimizer = torch.optim.Adam(NN.parameters(), 
                              lr = learning_rate)  
@@ -137,6 +138,14 @@ A = V.reduce(V.integrate_bilineal_form(gram_matrix))
 
 A_inv = torch.linalg.inv(A)
 
+Ih, Ih_grad = V.interpolate(V)
+
+# Ih_NN = lambda x, y, z : Ih(NN)
+# Ih_grad_NN = lambda x, y, z : Ih_grad(NN)
+
+Ih_NN = lambda x, y, z : NN(x, y, z)
+Ih_grad_NN = lambda x, y, z : NN_gradiant(NN, x, y, z)
+
 #---------------------- Error Parameters ----------------------#
 
 def exact(x, y, z):
@@ -214,23 +223,15 @@ for epoch in range(epochs):
     current_time = datetime.now().strftime("%H:%M:%S")
     print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
     
-    Ih_NN, Ih_grad_NN = V.interpolate(NN, is_array=False)
-    
-    NN_func = lambda x, y, z : Ih_NN
-    NN_grad_func = lambda x, y, z : Ih_grad_NN
-    
-    NN_func = lambda x, y, z: NN(x, y, z)
-    NN_grad_func = lambda x, y, z: NN_gradiant(NN, x, y, z)
-
-    residual_value = V.reduce(V.integrate_lineal_form(residual, NN_grad_func))
+    residual_value = V.reduce(V.integrate_lineal_form(residual, Ih_grad_NN))
                                           
-    # loss_value = residual_value.T @ (A_inv @ residual_value)
+    loss_value = residual_value.T @ (A_inv @ residual_value)
     
-    loss_value = (residual_value**2).sum()
+    # loss_value = (residual_value**2).sum()
 
     optimizer_step(optimizer, loss_value)
     
-    error_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_norm, NN_func, NN_grad_func)))/exact_norm
+    error_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_norm, Ih_NN, Ih_grad_NN)))/exact_norm
         
     relative_loss = torch.sqrt(loss_value)/exact_norm 
             
@@ -252,6 +253,8 @@ print(f"Training time: {execution_time}")
 
 #---------------------- Plot Values ----------------------#
 
+NN.load_state_dict(params_opt)
+
 ### --- FEM SOLUTION PARAMETERS --- ###
 
 local_vertices_3D = V.global_triangulation["vertices_3D"][V.global_triangulation["global2local_idx"].reshape(2, -1)] 
@@ -266,21 +269,67 @@ u_NN_fracture_1 , u_NN_fracture_2 = torch.unbind(u_NN_local, dim = 0)
 
 ### --- TRACE PARAMETERS --- ###
 
-trace_nodes = V.global_triangulation["vertices_3D"][V.global_triangulation["traces_vertices"], 1].numpy(force = True)
+V_inner_edges = Interior_Facet_Fracture_Basis(mesh, Fracture_Element_Line(P_order = 1, int_order = 2))
+
+traces_local_edges_idx = V.global_triangulation["traces_local_edges_idx"]
+
+n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
+
+n4e_u =  mesh.edges_parameters["nodes4unique_edges"]
+
+nodes4trace = n4e_u[torch.arange(n4e_u.shape[0])[:, None], traces_local_edges_idx]
+
+c4n = V.mesh.local_triangulations["vertices"]
+
+coords4trace = c4n[torch.arange(c4n.shape[0]), nodes4trace]
+
+# points_trace_fracture_1, points_trace_fracture_2 = torch.unbind(, dim = 0)
+
+sort_points_trace, sort_idx = torch.sort(coords4trace.mean(-2)[...,1])
+
+points_trace_fracture_1, points_trace_fracture_2 = torch.unbind(sort_points_trace, dim = 0)
+
+# COMPUTE JUMP FEM SOLUTION
+
+_, I_E_grad = V.interpolate(V_inner_edges)
+
+I_E_NN_grad = I_E_grad(NN)
+
+I_E_u_NN_grad_K_plus, I_E_u_NN_grad_minus = torch.unbind(I_E_NN_grad, dim = -4)
+
+jump_u_NN = (I_E_u_NN_grad_K_plus * n_E).sum(-1) + (I_E_u_NN_grad_minus * -n_E).sum(-1)
+
+jump_u_NN_trace = jump_u_NN[torch.arange(jump_u_NN.shape[0])[:, None], traces_local_edges_idx]
+
+sort_jump_u_NN_trace = jump_u_NN_trace[torch.arange(jump_u_NN_trace.shape[0])[:, None], sort_idx]
+
+jump_u_NN_trace_fracture_1, jump_u_NN_trace_fracture_2 = torch.unbind(sort_jump_u_NN_trace, dim = 0)
+
+# COMPUTE JUMP EXACT 
+
+local_vertices_3D = V.global_triangulation["vertices_3D"][V.global_triangulation["global2local_idx"].reshape(2, -1)] 
 
 exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1))
 
 exact_value_global = exact_value_local.reshape(-1,1)[V.global_triangulation["local2global_idx"]]
 
-exact_trace = exact_value_global[V.global_triangulation["traces_vertices"]].numpy(force = True)
+I_E_u, I_E_u_grad = V.interpolate(V_inner_edges, exact_value_global)
 
-u_NN_global = u_NN_local.reshape(-1,1)[V.global_triangulation["local2global_idx"]]
+I_E_u_grad_K_plus, I_E_u_grad_minus = torch.unbind(I_E_u_grad, dim = -4)
 
-u_NN_trace = u_NN_global[V.global_triangulation["traces_vertices"]].numpy(force = True)
+n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
+
+jump_u = (I_E_u_grad_K_plus * n_E).sum(-1) + (I_E_u_grad_minus * -n_E).sum(-1)
+
+jump_u_trace = jump_u[torch.arange(jump_u.shape[0])[:, None], traces_local_edges_idx]
+
+sort_jump_u_trace = jump_u_trace[torch.arange(jump_u_trace.shape[0])[:, None], sort_idx]
+
+jump_u_trace_fracture_1, jump_u_trace_fracture_2 = torch.unbind(sort_jump_u_trace, dim = 0)
 
 ### --- ERROR PARAMETERS --- ###
 
-H1_error_fracture_1, H1_error_fracture_2 =  torch.unbind(torch.sqrt(V.integrate_functional(H1_norm, NN_func, NN_grad_func)/V.integrate_functional(H1_exact)), dim = 0)
+H1_error_fracture_1, H1_error_fracture_2 =  torch.unbind(torch.sqrt(V.integrate_functional(H1_norm, Ih_NN, Ih_grad_NN)/V.integrate_functional(H1_exact)), dim = 0)
 
 c4e_fracture_1, c4e_fracture_2 =  torch.unbind(mesh.local_triangulations["coords4triangles"], dim = 0)
 
@@ -291,7 +340,7 @@ c4e_fracture_1, c4e_fracture_2 =  torch.unbind(mesh.local_triangulations["coords
 fig_sol = plt.figure(figsize = (15, 4), dpi = 200)
 fig_sol.suptitle("NN solution", fontsize = 16)
 
-ax_fracture_1 = fig_sol.add_subplot(1, 3, 1, projection = '3d')
+ax_fracture_1 = fig_sol.add_subplot(1, 2, 1, projection = '3d')
 ax_fracture_1.plot_trisurf(vertices_fracture_1.numpy(force = True)[:, 0], 
                  vertices_fracture_1.numpy(force = True)[:, 1], 
                  u_NN_fracture_1.reshape(-1).numpy(force = True), 
@@ -305,7 +354,7 @@ ax_fracture_1.set_xlabel(r"$x$")
 ax_fracture_1.set_ylabel(r"$y$")
 ax_fracture_1.set_zlabel(r"$u_h(x,y)$")
 
-ax_fracture_2 = fig_sol.add_subplot(1, 3, 2, projection = '3d')
+ax_fracture_2 = fig_sol.add_subplot(1, 2, 2, projection = '3d')
 ax_fracture_2.plot_trisurf(vertices_fracture_2.numpy(force = True)[:, 0], 
                  vertices_fracture_2.numpy(force = True)[:, 1], 
                  u_NN_fracture_2.reshape(-1).numpy(force = True),
@@ -319,24 +368,41 @@ ax_fracture_2.set_xlabel(r"$x$")
 ax_fracture_2.set_ylabel(r"$y$")
 ax_fracture_2.set_zlabel(r"$u_h(x,y)$")
 
-ax_trace = fig_sol.add_subplot(1, 3, 3)
-ax_trace.plot(trace_nodes, 
-              exact_trace, 
-              label = r"$u$", 
-              color='blue')
+plt.show()
 
-ax_trace.plot(trace_nodes, 
-              u_NN_trace, 
-              label = r"$u_h$", 
-              color = 'red', 
-              linestyle = '--')
-ax_trace.set_title("value along the trace")
-ax_trace.set_xlabel(r"$y$")
-ax_trace.set_ylabel(r"u(x,y)")
-ax_trace.legend()
-ax_trace.grid(True)
+### --- PLOT TRACES --- ###
 
-plt.subplots_adjust(wspace = 0.4)  # Aumenta separación horizontal
+fig_traces = plt.figure(figsize = (11, 4), dpi = 200)
+fig_traces.suptitle("Traces values for FEM solution", fontsize = 16)
+
+ax_jump_fracture_1 = fig_traces.add_subplot(1, 2, 1)
+ax_jump_fracture_1.plot(points_trace_fracture_1.numpy(force = True),
+                        jump_u_trace_fracture_1.reshape(-1).numpy(force = True),
+                        color = "black",
+                        label = r"$u^{ex}$")
+ax_jump_fracture_1.scatter(points_trace_fracture_1.numpy(force = True),
+                           jump_u_NN_trace_fracture_1.reshape(-1).numpy(force = True),
+                           color = "r",
+                           label = r"$u_h$")
+ax_jump_fracture_1.set_title("Fracture 1")
+ax_jump_fracture_1.set_xlabel("trace lenght")
+ax_jump_fracture_1.set_ylabel("jump value")
+ax_jump_fracture_1.legend()
+
+ax_jump_fracture_2 = fig_traces.add_subplot(1, 2, 2)
+ax_jump_fracture_2.plot(points_trace_fracture_2.numpy(force = True),
+                        jump_u_trace_fracture_2.reshape(-1).numpy(force = True),
+                        color = "black",
+                        label = r"$u^{ex}$")
+ax_jump_fracture_2.scatter(points_trace_fracture_2.numpy(force = True),
+                           jump_u_NN_trace_fracture_2.reshape(-1).numpy(force = True),
+                           color = "r",
+                           label = r"$u_h$")
+ax_jump_fracture_2.set_title("Fracture 2")
+ax_jump_fracture_2.set_xlabel("trace lenght")
+ax_jump_fracture_2.set_ylabel("jump value")
+ax_jump_fracture_2.legend()
+
 plt.show()
 
 ### --- PLOT TRAINING --- ###
