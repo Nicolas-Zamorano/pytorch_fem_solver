@@ -7,8 +7,8 @@ class Abstract_Mesh(ABC):
     def __init__(self,
                  triangulation: dict):
         
-        self.coords4nodes = torch.tensor(triangulation["vertices"])
-        self.nodes4elements = torch.tensor(triangulation["triangles"])
+        self.coords4nodes = triangulation["vertices"]
+        self.nodes4elements = triangulation["triangles"]
 
         self.coords4elements = self.coords4nodes[self.nodes4elements]
         
@@ -21,7 +21,6 @@ class Abstract_Mesh(ABC):
                                                                                                        triangulation)
                
     def compute_edges_values(self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor, mesh_parameters: torch.Tensor, triangulation: dict):
-    
                         
         nodes4edges, _ = torch.sort(nodes4elements[..., self.edges_permutations], dim = -1)
         
@@ -31,14 +30,14 @@ class Abstract_Mesh(ABC):
         
         elements_diameter = torch.min(torch.norm(coords4edges_2 - coords4edges_1, dim = -1, keepdim = True), dim = -2, keepdim = True)[0]       
         
-        nodes4unique_edges = torch.tensor(triangulation["edges"])
-        boundary_mask = torch.tensor(triangulation["edge_markers"]).squeeze(-1)
+        nodes4unique_edges = triangulation["edges"]
+        boundary_mask = triangulation["edge_markers"].squeeze(-1)
         
         edges_idx = self.get_edges_idx(nodes4elements, nodes4unique_edges)
 
         nodes4boundary_edges = nodes4unique_edges[boundary_mask == 1]
         nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
-        nodes4boundary = torch.nonzero(torch.tensor(triangulation["vertex_markers"]).squeeze(-1) == 1)
+        nodes4boundary = torch.nonzero(triangulation["vertex_markers"])[:, [0]]
                     
         elements4boundary_edges = (nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-1).unsqueeze(-4)).any(dim = -2).all(dim = -1).float().argmax(dim = -1,keepdim = True) 
         elements4inner_edges = torch.nonzero((nodes4inner_edges.unsqueeze(-2).unsqueeze(-2) == nodes4elements.unsqueeze(-1).unsqueeze(-4)).any(dim = -2).all(dim = -1), as_tuple=True)[1].reshape(-1, mesh_parameters["nb_dimensions"])
@@ -109,13 +108,13 @@ class Mesh_Tri(Abstract_Mesh):
         cada entrada i indica a qué triángulo del mallado grueso pertenece 
         el triángulo i del mallado fino.
         """
-        c4e_h = fine_mesh.coords4elements        # (n_elem_h, 1, 3, 2)
-        c4e_H = self.coords4elements             # (n_elem_H, 1, 3, 2)
-        centroids_h = c4e_h.mean(dim = -2).squeeze(1)  # (n_elem_h, 2)
+        c4e_h = fine_mesh.coords4elements        # (n_elem_h, 3, 2)
+        c4e_H = self.coords4elements             # (n_elem_H, 3, 2)
+        centroids_h = c4e_h.mean(dim = -2)       # (n_elem_h, 2)
     
         # Expandimos para broadcasting
         P = centroids_h[:, None, :]              # (n_elem_h, 1, 2)
-        A = c4e_H[:, 0, 0, :][None, :, :]         # (1, n_elem_H, 2)
+        A = c4e_H[:, 0, 0, :][None, :, :]        # (1, n_elem_H, 2)
         B = c4e_H[:, 0, 1, :][None, :, :]
         C = c4e_H[:, 0, 2, :][None, :, :]
     
@@ -123,11 +122,11 @@ class Mesh_Tri(Abstract_Mesh):
         v1 = B - A
         v2 = P - A                               # (n_elem_h, n_elem_H, 2)
     
-        dot00 = (v0 * v0).sum(dim = -1)            # (1, n_elem_H)
+        dot00 = (v0 * v0).sum(dim = -1)          # (1, n_elem_H)
         dot01 = (v0 * v1).sum(dim = -1)
         dot11 = (v1 * v1).sum(dim = -1)
     
-        dot02 = (v0 * v2).sum(dim = -1)            # (n_elem_h, n_elem_H)
+        dot02 = (v0 * v2).sum(dim = -1)          # (n_elem_h, n_elem_H)
         dot12 = (v1 * v2).sum(dim = -1)
     
         denom = dot00 * dot11 - dot01 * dot01    # (1, n_elem_H)
@@ -161,9 +160,9 @@ class Mesh_Tri(Abstract_Mesh):
         
             # Cada edge como par ordenado (min, max)
             tri_edges = torch.stack([
-                torch.stack([torch.min(i0, i1), torch.max(i0, i1)], dim=1),
-                torch.stack([torch.min(i1, i2), torch.max(i1, i2)], dim=1),
-                torch.stack([torch.min(i2, i0), torch.max(i2, i0)], dim=1),
+                torch.stack([torch.min(i0, i1), torch.max(i0, i1)], dim = 1),
+                torch.stack([torch.min(i1, i2), torch.max(i1, i2)], dim = 1),
+                torch.stack([torch.min(i2, i0), torch.max(i2, i0)], dim = 1),
             ], dim=1)  # (n_triangles, 3, 2)
         
             # 2. Convertimos cada par (a,b) en una clave única: a * M + b
@@ -171,7 +170,7 @@ class Mesh_Tri(Abstract_Mesh):
             tri_keys = tri_edges[:, :, 0] * M + tri_edges[:, :, 1]  # (n_triangles, 3)
         
             # 3. Hacer lo mismo con edges únicos
-            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values).squeeze(-1)  # (n_unique_edges,)
+            edge_keys = (nodes4unique_edges.min(dim=-1).values * M + nodes4unique_edges.max(dim=-1).values) # (n_unique_edges,)
             
             # 4. Crear tabla de búsqueda
             sorted_keys, sorted_idx = torch.sort(edge_keys)  # Necesario para searchsorted
@@ -201,7 +200,7 @@ class Abstract_Element(ABC):
                         
         integration_points = torch.split(bar_coords.mT @ coords4elements.unsqueeze(-3), 1, dim = -1)
                         
-        dx = self.reference_element_area * self.gaussian_weights * det_map_jacobian 
+        dx = self.reference_element_area * self.gaussian_weights * det_map_jacobian
         
         return v, v_grad, integration_points, dx
     
@@ -282,7 +281,7 @@ class Element_Line(Abstract_Element):
                                              [[5/18]],
                                              [[5/18]]])
             
-        return gaussian_nodes, gaussian_weights
+        return gaussian_nodes, gaussian_weights.unsqueeze(0)
                         
     
     def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
@@ -301,7 +300,7 @@ class Element_Line(Abstract_Element):
         
         inv_map_jacobian = 1./det_map_jacobian
         
-        return det_map_jacobian, inv_map_jacobian
+        return det_map_jacobian.unsqueeze(-1), inv_map_jacobian
     
 class Element_Tri(Abstract_Element):
     def __init__(self,
@@ -402,7 +401,8 @@ class Element_Tri(Abstract_Element):
             
         return gaussian_nodes, gaussian_weights
 
-    def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
+    @staticmethod
+    def compute_det_and_inv_map(map_jacobian: torch.Tensor):
         
         ab, cd = torch.split(map_jacobian, 1, dim = -2)
         
@@ -415,7 +415,7 @@ class Element_Tri(Abstract_Element):
                                                                   torch.concat([-c, a], dim = -1)], dim = -2)
     
         return det_map_jacobian, inv_map_jacobian
-
+       
 class Abstract_Basis(ABC):
     def __init__(self,
                  mesh: Abstract_Mesh,
@@ -424,7 +424,7 @@ class Abstract_Basis(ABC):
         self.elements = elements
         self.mesh = mesh
             
-        self.v, self.v_grad, self.integration_points, self.dx = elements.compute_integral_values(mesh.coords4elements)
+        self.v, self.v_grad, self.integration_points, self.dx,  = elements.compute_integral_values(mesh.coords4elements)
         
         self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs = self.compute_dofs(mesh.coords4nodes, 
                                                                                                          mesh.nodes4elements, 
@@ -452,8 +452,8 @@ class Abstract_Basis(ABC):
         local_matrix = (function(self, *args, **kwargs) * self.dx).sum(-3)
         
         global_matrix.index_put_(self.basis_parameters["bilinear_form_idx"], 
-                              local_matrix.reshape(-1),
-                              accumulate = True)
+                                 local_matrix.reshape(-1),
+                                 accumulate = True)
         
         return global_matrix
     
@@ -464,8 +464,8 @@ class Abstract_Basis(ABC):
         integrand_value = (function(self, *args, **kwargs) * self.dx).sum(-3)
         
         integral_value.index_put_(self.basis_parameters["linear_form_idx"], 
-                              integrand_value.reshape(-1, 1),
-                              accumulate = True)
+                                  integrand_value.reshape(-1, 1),
+                                  accumulate = True)
                 
         return integral_value
     
@@ -521,7 +521,8 @@ class Basis(Abstract_Basis):
                             "bilinear_form_idx": (rows_idx, cols_idx),
                             "linear_form_shape": (nb_global_dofs, 1),
                             "linear_form_idx": (form_idx,),
-                            "inner_dofs": inner_dofs}
+                            "inner_dofs": inner_dofs,
+                            "nb_dofs": nb_global_dofs}
 
         return basis_parameters    
 
@@ -535,34 +536,34 @@ class Basis(Abstract_Basis):
     def interpolate(self, basis, tensor = None):
         
         if basis == self:            
-            dofs_idx = self.global_dofs4elements
+            dofs_idx = self.global_dofs4elements.unsqueeze(-2)
             
             v = self.v
             v_grad = self.v_grad
             
-        if basis.__class__ == Basis:
+        # else:
             
-            elements_mask = self.mesh.map_fine_mesh(basis.mesh)
+        #     elements_mask = self.mesh.map_fine_mesh(basis.mesh)
             
-            dofs_idx = self.global_dofs4elements[elements_mask]
+        #     dofs_idx = self.global_dofs4elements[elements_mask]
             
-            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
+        #     coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
         
-            inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+        #     inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
 
-            new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
-                                                                        basis.integration_points, 
-                                                                        inv_map_jacobian)
+        #     new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+        #                                                                 basis.integration_points, 
+        #                                                                 inv_map_jacobian)
             
-            _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-2), inv_map_jacobian)
+        #     _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-2), inv_map_jacobian)
 
         if basis.__class__ == Interior_Facet_Basis: 
 
             elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
             
-            dofs_idx = basis.mesh.nodes4elements[elements_mask]
+            dofs_idx = basis.mesh.nodes4elements[elements_mask].unsqueeze(-2)
                     
-            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
+            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask].unsqueeze(-3)
         
             inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
             
@@ -572,14 +573,14 @@ class Basis(Abstract_Basis):
                                                                         integration_points, 
                                                                         inv_map_jacobian)
             
-            _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-3), inv_map_jacobian)
+            bar_coords , v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-3), inv_map_jacobian)
                 
         if tensor != None:
             
             interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim = True)
-            
+                        
             interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2, keepdim = True)
-            
+                        
             return interpolation, interpolation_grad
         
         else:
@@ -591,7 +592,7 @@ class Basis(Abstract_Basis):
             interpolator_grad = lambda function : (function(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
             
             return interpolator, interpolator_grad
-        
+     
 class Interior_Facet_Basis(Abstract_Basis):
     def __init__(self, 
                  mesh: Abstract_Mesh,
