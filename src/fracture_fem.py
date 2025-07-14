@@ -536,27 +536,98 @@ class Fracture_Basis(Abstract_Basis):
         
         return A, b
         
-    def interpolate(self, tensor, is_array: bool = True):
+    # def interpolate(self, tensor, is_array: bool = True):
 
-        dofs_idx = self.global_triangulation["triangles"].reshape(self.mesh.mesh_parameters["nb_fractures"], -1, 1, 3)
-        v = self.v
-        v_grad = self.v_grad
+    #     dofs_idx = self.global_triangulation["triangles"].reshape(self.mesh.mesh_parameters["nb_fractures"], -1, 1, 3)
+    #     v = self.v
+    #     v_grad = self.v_grad
         
-        if is_array:
+    #     if is_array:
                         
-            interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim = True)
+    #         interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim = True)
                 
+    #         interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2, keepdim = True)
+                        
+    #     else:
+            
+    #         nodes = torch.split(self.global_triangulation["vertices_3D"], 1 , dim = -1)
+        
+    #         interpolation =  (tensor(*nodes)[dofs_idx] * v).sum(-2, keepdim = True)
+            
+    #         interpolation_grad = (tensor(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
+            
+    #     return interpolation, interpolation_grad
+    
+    def interpolate(self, basis, tensor = None):
+        
+        if basis == self:            
+            dofs_idx = self.global_triangulation["triangles"].reshape(self.mesh.mesh_parameters["nb_fractures"], -1, 1, 3)
+            v = self.v
+            v_grad = self.v_grad
+            
+        # else:
+            
+        #     elements_mask = self.mesh.map_fine_mesh(basis.mesh)
+            
+        #     dofs_idx = self.global_dofs4elements[elements_mask]
+            
+        #     coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
+        
+        #     inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+
+        #     new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+        #                                                                 basis.integration_points, 
+        #                                                                 inv_map_jacobian)
+            
+        #     _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-2), inv_map_jacobian)
+
+        if basis.__class__ == Interior_Facet_Fracture_Basis: 
+
+            elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
+                        
+            nodes4elements = self.global_triangulation["triangles"].reshape(self.mesh.mesh_parameters["nb_fractures"], -1, 1, 3)
+                        
+            dofs_idx = nodes4elements[torch.arange(nodes4elements.shape[0])[:, None, None], elements_mask]
+                        
+            coords4elements_first_node = self.mesh.local_triangulations["stack_coords_3D4triangles"][..., [0], :]
+                    
+            coords4elements_first_node = coords4elements_first_node[torch.arange(coords4elements_first_node.shape[0])[:, None, None], elements_mask].unsqueeze(-3)
+        
+            inv_map_jacobian = self.elements.inv_map_jacobian
+        
+            inv_map_jacobian = inv_map_jacobian[torch.arange(inv_map_jacobian.shape[0])[:, None, None], elements_mask]
+
+            fractures_map_jacobian_inv = self.mesh.local_triangulations["fractures_map_jacobian_inv"].unsqueeze(-3).unsqueeze(-3).unsqueeze(-3)
+            
+            inv_map_jac = inv_map_jacobian @ fractures_map_jacobian_inv
+            
+            integration_points = torch.split(torch.cat(basis.integration_points, dim = -1).unsqueeze(-4), 1, dim = -1)
+
+            new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
+                                                                        integration_points, 
+                                                                        inv_map_jac)
+            
+            bar_coords = self.elements.compute_barycentric_coordinates(new_integrations_points.squeeze(-3))
+            
+            v, v_grad = self.elements.compute_shape_functions(bar_coords, inv_map_jacobian, fractures_map_jacobian_inv)
+                
+    
+        if tensor != None:
+            
+            interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim = True)
+                        
             interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2, keepdim = True)
                         
+            return interpolation, interpolation_grad
+        
         else:
             
             nodes = torch.split(self.global_triangulation["vertices_3D"], 1 , dim = -1)
-        
-            interpolation =  (tensor(*nodes)[dofs_idx] * v).sum(-2, keepdim = True)
             
-            interpolation_grad = (tensor(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
+            interpolator = lambda function : (function(*nodes)[dofs_idx] * v).sum(-2, keepdim = True)
             
-        return interpolation, interpolation_grad
+            interpolator_grad = lambda function : (function(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim = True)
+            
             return interpolator, interpolator_grad
     
 class Interior_Facet_Fracture_Basis(Abstract_Basis):
