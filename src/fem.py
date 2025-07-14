@@ -160,9 +160,9 @@ class Mesh_Tri(Abstract_Mesh):
         
             # Cada edge como par ordenado (min, max)
             tri_edges = torch.stack([
-                torch.stack([torch.min(i0, i1), torch.max(i0, i1)], dim=1),
-                torch.stack([torch.min(i1, i2), torch.max(i1, i2)], dim=1),
-                torch.stack([torch.min(i2, i0), torch.max(i2, i0)], dim=1),
+                torch.stack([torch.min(i0, i1), torch.max(i0, i1)], dim = 1),
+                torch.stack([torch.min(i1, i2), torch.max(i1, i2)], dim = 1),
+                torch.stack([torch.min(i2, i0), torch.max(i2, i0)], dim = 1),
             ], dim=1)  # (n_triangles, 3, 2)
         
             # 2. Convertimos cada par (a,b) en una clave única: a * M + b
@@ -281,7 +281,7 @@ class Element_Line(Abstract_Element):
                                              [[5/18]],
                                              [[5/18]]])
             
-        return gaussian_nodes, gaussian_weights
+        return gaussian_nodes, gaussian_weights.unsqueeze(0)
                         
     
     def shape_functions_value_and_grad(self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor):
@@ -300,7 +300,7 @@ class Element_Line(Abstract_Element):
         
         inv_map_jacobian = 1./det_map_jacobian
         
-        return det_map_jacobian, inv_map_jacobian
+        return det_map_jacobian.unsqueeze(-1), inv_map_jacobian
     
 class Element_Tri(Abstract_Element):
     def __init__(self,
@@ -420,8 +420,6 @@ class Abstract_Basis(ABC):
     def __init__(self,
                  mesh: Abstract_Mesh,
                  elements: Abstract_Element):
-        
-        
         
         self.elements = elements
         self.mesh = mesh
@@ -563,9 +561,9 @@ class Basis(Abstract_Basis):
 
             elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
             
-            dofs_idx = basis.mesh.nodes4elements[elements_mask]
+            dofs_idx = basis.mesh.nodes4elements[elements_mask].unsqueeze(-2)
                     
-            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask]
+            coords4elements_first_node = self.coords4elements[..., [0], :][elements_mask].unsqueeze(-3)
         
             inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
             
@@ -575,14 +573,14 @@ class Basis(Abstract_Basis):
                                                                         integration_points, 
                                                                         inv_map_jacobian)
             
-            _, v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-3), inv_map_jacobian)
+            bar_coords , v, v_grad = self.elements.compute_shape_functions(new_integrations_points.squeeze(-3), inv_map_jacobian)
                 
         if tensor != None:
             
             interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim = True)
-            
+                        
             interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2, keepdim = True)
-            
+                        
             return interpolation, interpolation_grad
         
         else:
