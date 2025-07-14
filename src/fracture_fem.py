@@ -397,7 +397,9 @@ class Fracture_Basis(Abstract_Basis):
         
         self.global_triangulation = self.build_global_triangulation(self.mesh.local_triangulations)
         
-        self.coords4elements = self.global_triangulation["vertices_2D"][self.global_triangulation["triangles"]].reshape(mesh.mesh_parameters["nb_fractures"], -1, 3, 2)
+        self.coords4elements = self.mesh.local_triangulations["coords4triangles"]
+        
+        # self.coords4elements = self.global_triangulation["vertices_2D"][self.global_triangulation["triangles"]].reshape(mesh.mesh_parameters["nb_fractures"], -1, 3, 2)
         
         self.v, self.v_grad, self.integration_points, self.dx, = elements.compute_integral_values(self.coords4elements, 
                                                                                                   mesh.local_triangulations["fractures_map_int"], 
@@ -418,16 +420,15 @@ class Fracture_Basis(Abstract_Basis):
 
         local_triangulation_3D_coords = local_triangulations["vertices_3D"].reshape(-1,3)
 
-        global_vertices_3D, global2local_idx, counts = torch.unique(local_triangulation_3D_coords, 
-                                                                    dim = 0,
-                                                                    return_inverse = True,
-                                                                    return_counts= True
-                                                                    )
-        
+        global_vertices_3D, global2local_idx, vertex_counts = torch.unique(local_triangulation_3D_coords, 
+                                                                           dim = 0,
+                                                                           return_inverse = True,
+                                                                           return_counts= True
+                                                                           )
         
         nb_global_vertices = global_vertices_3D.shape[-2]
         
-        traces_vertices = torch.arange(nb_global_vertices)[counts != 1]
+        traces__global_vertices_idx =  torch.nonzero(vertex_counts > 1, as_tuple=True)[0]
 
         local2global_idx = torch.full((nb_global_vertices,), (nb_fractures*nb_vertices)+1, dtype = torch.int64)
         
@@ -445,10 +446,17 @@ class Fracture_Basis(Abstract_Basis):
 
         local_edges_2_global = global2local_idx[local_triangulations["edges"] + vertices_offset].reshape(-1,2)
         
-        global_edges, global2local_edges_idx = torch.unique(local_edges_2_global.reshape(-1, 2), 
-                                                            dim = 0,
-                                                            return_inverse = True)
+        global_edges, global2local_edges_idx, edges_counts = torch.unique(local_edges_2_global.reshape(-1, 2), 
+                                                                          dim = 0,
+                                                                          return_inverse = True,
+                                                                          return_counts = True)
         
+        edge_offset = torch.arange(nb_fractures)[:, None] * nb_edges
+
+        traces_global_edges_idx = torch.nonzero(edges_counts > 1, as_tuple = True)[0]
+
+        traces_local_edges_idx = torch.nonzero(torch.isin(global2local_edges_idx, traces_global_edges_idx), as_tuple = True)[0].reshape(nb_fractures, -1) - edge_offset
+                
         nb_global_edges = global_edges.shape[-2]
         
         local2global_edges_idx = torch.full((nb_global_edges,), (nb_fractures*nb_edges)+1, dtype = torch.int64)
@@ -470,7 +478,9 @@ class Fracture_Basis(Abstract_Basis):
                                              edge_markers = global_edges_marker,
                                              global2local_idx = global2local_idx,
                                              local2global_idx = local2global_idx,
-                                             traces_vertices = traces_vertices
+                                             traces__global_vertices_idx = traces__global_vertices_idx,
+                                             traces_global_edges_idx = traces_global_edges_idx,
+                                             traces_local_edges_idx = traces_local_edges_idx
                                              )
         
         return global_triangulation    
