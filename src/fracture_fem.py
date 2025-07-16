@@ -344,6 +344,13 @@ class Fracture_Element_Line(Element_Fracture):
         
     def compute_gauss_values(self):
         
+        if self.int_order == 1:
+            gaussian_nodes = torch.tensor([[-1.],
+                                           [ 1.]])
+            
+            gaussian_weights = torch.tensor([[[1.]],
+                                             [[1.]]])
+        
         if self.int_order == 2: 
             
             nodes = 1./torch.sqrt(torch.tensor(3.))
@@ -360,7 +367,7 @@ class Fracture_Element_Line(Element_Fracture):
             
             gaussian_nodes = torch.tensor([[0], 
                                            [-nodes], 
-                                           [nodes]])
+                                           [ nodes]])
             
             gaussian_weights = torch.tensor([[[8/18]],
                                              [[5/18]],
