@@ -47,8 +47,8 @@ V = fracture_3D_vertices.T  # (3,3)
 T = V @ torch.linalg.inv(hat_V)  # (3,3)
 
 # Separar A y b
-A = T[:, :2]  # (3x2)
-b = T[:, [-1]]  # (3x1)
+A = T[..., :2]  # (3x2)
+b = T[..., [-1]]  # (3x1)
 
 # Definir función de mapeo
 def fracture_map(x):

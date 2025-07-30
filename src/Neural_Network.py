@@ -114,5 +114,5 @@ class Neural_Network_3D(torch.nn.Module):
         output = self.layer_out(output).squeeze(-1)
         
         return output * (x - 1) * (x + 1) * (y - 1)  * (y + 0) * (z + 1) * (z - 1)
-        
+        # return output
         

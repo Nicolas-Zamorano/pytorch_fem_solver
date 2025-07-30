@@ -612,9 +612,9 @@ class Fracture_Basis(Abstract_Basis):
 
             new_integrations_points = self.elements.compute_inverse_map(coords4elements_first_node,
                                                                         integration_points, 
-                                                                        inv_map_jac)
+                                                                        inv_map_jac).squeeze(-3)
             
-            bar_coords = self.elements.compute_barycentric_coordinates(new_integrations_points.squeeze(-3))
+            bar_coords = self.elements.compute_barycentric_coordinates(new_integrations_points)
             
             v, v_grad = self.elements.compute_shape_functions(bar_coords, inv_map_jacobian, fractures_map_jacobian_inv)
                 
