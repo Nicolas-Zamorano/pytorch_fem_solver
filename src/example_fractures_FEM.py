@@ -1,11 +1,11 @@
 import torch
 
-import matplotlib.pyplot as plt
 import tensordict as td
 import triangle as tr
 import numpy as np
 
 from fracture_fem import Fractures, Element_Fracture, Fracture_Element_Line, Fracture_Basis, Interior_Facet_Fracture_Basis
+import matplotlib.pyplot as plt
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
@@ -15,7 +15,7 @@ torch.set_default_dtype(torch.float64)
 
 h = 0.5
 
-n = 9
+n = 2
 
 # fracture_2d_data = {"vertices" : [[-1., 0.],
 #                                   [ 1., 0.],
@@ -77,9 +77,9 @@ fracture_triangulation = tr.triangulate(fracture_2d_data,
 
 fracture_triangulation_torch = td.TensorDict(fracture_triangulation)
 
-# tr.compare(plt, fracture_2d_data, fracture_triangulation)
+tr.compare(plt, fracture_2d_data, fracture_triangulation)
 
-# plt.show()
+plt.show()
 
 fractures_triangulation = (fracture_triangulation_torch, fracture_triangulation_torch)
 
@@ -317,136 +317,126 @@ c4e_fracture_1, c4e_fracture_2 =  torch.unbind(mesh.local_triangulations["coords
 
 #---------------------- Plot ----------------------#
 
-### --- PLOT FEM SOLUTION --- ###
-
-fig_sol = plt.figure(figsize = (10, 4), dpi = 200)
-fig_sol.suptitle("FEM solution", fontsize = 16)
-
-ax_fracture_1 = fig_sol.add_subplot(1, 2, 1, projection = '3d')
-ax_fracture_1.plot_trisurf(vertices_fracture_1.numpy(force = True)[:, 0], 
-                 vertices_fracture_1.numpy(force = True)[:, 1], 
-                 u_h_fracture_1.reshape(-1).numpy(force = True), 
-                 triangles = triangles_fracture_1.numpy(force = True),
-                 cmap = 'viridis', 
-                 edgecolor = 'black', 
-                 linewidth = 0.1)
-
-ax_fracture_1.set_title("Fracture 1")
-ax_fracture_1.set_xlabel(r"$x$")
-ax_fracture_1.set_ylabel(r"$y$")
-ax_fracture_1.set_zlabel(r"$u_h(x,y)$")
-
-ax_fracture_2 = fig_sol.add_subplot(1, 2, 2, projection = '3d')
-ax_fracture_2.plot_trisurf(vertices_fracture_2.numpy(force = True)[:, 0], 
-                 vertices_fracture_2.numpy(force = True)[:, 1], 
-                 u_h_fracture_2.reshape(-1).numpy(force = True),
-                 triangles = triangles_fracture_2.numpy(force = True),
-                 cmap = 'viridis', 
-                 edgecolor = 'black', 
-                 linewidth = 0.1)
-
-ax_fracture_2.set_title("Fracture 2")
-ax_fracture_2.set_xlabel(r"$x$")
-ax_fracture_2.set_ylabel(r"$y$")
-ax_fracture_2.set_zlabel(r"$u_h(x,y)$")
-
-# plt.subplots_adjust(wspace = 0.4)  # Aumenta separación horizontal
-plt.show()
-
-### --- PLOT TRACES --- ###
-
-fig_traces = plt.figure(figsize = (11, 4), dpi = 200)
-fig_traces.suptitle("Traces values for FEM solution", fontsize = 16)
-
-ax_jump_fracture_1 = fig_traces.add_subplot(1, 2, 1)
-ax_jump_fracture_1.plot(points_trace_fracture_1.numpy(force = True),
-                        jump_u_trace_fracture_1.reshape(-1).numpy(force = True),
-                        color = "black",
-                        label = r"$u^{ex}$")
-ax_jump_fracture_1.scatter(points_trace_fracture_1.numpy(force = True),
-                           jump_u_h_trace_fracture_1.reshape(-1).numpy(force = True),
-                           color = "r",
-                           label = r"$u_h$")
-ax_jump_fracture_1.set_title("Fracture 1")
-ax_jump_fracture_1.set_xlabel("trace lenght")
-ax_jump_fracture_1.set_ylabel("jump value")
-ax_jump_fracture_1.legend()
-
-ax_jump_fracture_2 = fig_traces.add_subplot(1, 2, 2)
-ax_jump_fracture_2.plot(points_trace_fracture_2.numpy(force = True),
-                        jump_u_trace_fracture_2.reshape(-1).numpy(force = True),
-                        color = "black",
-                        label = r"$u^{ex}$")
-ax_jump_fracture_2.scatter(points_trace_fracture_2.numpy(force = True),
-                           jump_u_h_trace_fracture_2.reshape(-1).numpy(force = True),
-                           color = "r",
-                           label = r"$u_h$")
-ax_jump_fracture_2.set_title("Fracture 2")
-ax_jump_fracture_2.set_xlabel("trace lenght")
-ax_jump_fracture_2.set_ylabel("jump value")
-ax_jump_fracture_2.legend()
-
-plt.show()
-
-### --- PLOT ERROR --- ###
-
 from matplotlib.collections import PolyCollection
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 
-# Obtener los errores y coordenadas
-H1_error_fracture_1 = H1_error_fracture_1.numpy(force = True)
-c4e_fracture_1 = c4e_fracture_1.numpy(force = True)
+# ------------------ SOLUCIÓN FEM ------------------
 
-H1_error_fracture_2 = H1_error_fracture_2.numpy(force = True)
-c4e_fracture_2 = c4e_fracture_2.numpy(force = True)
+# Fractura 1
+fig = plt.figure(dpi=200)
+ax = fig.add_subplot(111, projection='3d')
+ax.plot_trisurf(vertices_fracture_1.numpy(force=True)[:, 0],
+                vertices_fracture_1.numpy(force=True)[:, 1],
+                u_h_fracture_1.reshape(-1).numpy(force=True),
+                triangles=triangles_fracture_1.numpy(force=True),
+                cmap='viridis', edgecolor='black', linewidth=0.1)
+ax.set_xlabel(r"$x$")
+ax.set_ylabel(r"$y$")
+ax.set_zlabel(r"Preassure")
+ax.tick_params(labelsize=8)
 
-# Unificar escala de colores
+plt.tight_layout()
+# plt.savefig("fem_solution_fracture_1.png")
+plt.show()
+
+# Fractura 2
+fig = plt.figure(dpi=200)
+ax = fig.add_subplot(111, projection='3d')
+ax.plot_trisurf(vertices_fracture_2.numpy(force=True)[:, 0],
+                vertices_fracture_2.numpy(force=True)[:, 1],
+                u_h_fracture_2.reshape(-1).numpy(force=True),
+                triangles=triangles_fracture_2.numpy(force=True),
+                cmap='viridis', edgecolor='black', linewidth=0.1)
+ax.set_xlabel(r"$x$")
+ax.set_ylabel(r"$y$")
+ax.set_zlabel(r"Preassure")
+plt.tight_layout()
+ax.tick_params(labelsize=8)
+# plt.savefig("fem_solution_fracture_2.png")
+plt.show()
+
+# ------------------ TRACES (JUMPS) ------------------
+
+# Fractura 1
+fig = plt.figure(dpi=200)
+plt.plot(points_trace_fracture_1.numpy(force=True),
+         jump_u_trace_fracture_1.reshape(-1).numpy(force=True),
+         color="black", label=r"$u^{ex}$")
+plt.scatter(points_trace_fracture_1.numpy(force=True),
+            jump_u_h_trace_fracture_1.reshape(-1).numpy(force=True),
+            color="r", label=r"$u_h$")
+plt.xlabel("trace length")
+plt.ylabel("jump value")
+plt.legend()
+plt.tight_layout()
+# plt.savefig("trace_jump_fracture_1.png")
+plt.show()
+
+# Fractura 2
+fig = plt.figure(dpi=200)
+plt.plot(points_trace_fracture_2.numpy(force=True),
+         jump_u_trace_fracture_2.reshape(-1).numpy(force=True),
+         color="black", label=r"$u^{ex}$")
+plt.scatter(points_trace_fracture_2.numpy(force=True),
+            jump_u_h_trace_fracture_2.reshape(-1).numpy(force=True),
+            color="r", label=r"$u_h$")
+plt.xlabel("trace length")
+plt.ylabel("jump value")
+plt.legend()
+plt.tight_layout()
+# plt.savefig("trace_jump_fracture_2.png")
+plt.show()
+
+# ------------------ RELATIVE ERROR ------------------
+
+# Convert to numpy
+H1_error_fracture_1 = H1_error_fracture_1.numpy(force=True)
+c4e_fracture_1 = c4e_fracture_1.numpy(force=True)
+H1_error_fracture_2 = H1_error_fracture_2.numpy(force=True)
+c4e_fracture_2 = c4e_fracture_2.numpy(force=True)
+
+# Shared color scale
 all_errors = np.concatenate([H1_error_fracture_1, H1_error_fracture_2])
-norm = colors.Normalize(vmin = all_errors.min(), vmax = all_errors.max())
+norm = colors.Normalize(vmin=all_errors.min(), vmax=all_errors.max())
 cmap = cm.viridis
 
-# Crear figura con 2 subplots
-fig_error, axes = plt.subplots(1,2, 
-                               figsize = (12, 3), 
-                               dpi = 200)
-
-fig_error.suptitle("Relative error for FEM solution", fontsize = 14)
-
-# Fracture 1
-face_colors_1 = cmap(norm(H1_error_fracture_1))
-collection1 = PolyCollection(c4e_fracture_1, 
-                             facecolors = face_colors_1, 
-                             edgecolors = 'black', 
-                             linewidths = 0.2)
-ax1 = axes[0]
-ax1.add_collection(collection1)
-ax1.autoscale()
-ax1.set_aspect('equal')
-ax1.set_title('Fracture 1')
-ax1.set_xlim([-1, 1])
-ax1.set_ylim([0, 1])
-
-# Fracture 2
-face_colors_2 = cmap(norm(H1_error_fracture_2))
-collection2 = PolyCollection(c4e_fracture_2, 
-                             facecolors = face_colors_2, 
-                             edgecolors = 'black', 
-                             linewidths = 0.2)
-ax2 = axes[1]
-ax2.add_collection(collection2)
-ax2.autoscale()
-ax2.set_aspect('equal')
-ax2.set_title('Fracture 2')
-ax2.set_xlim([-1, 1])
-ax2.set_ylim([0, 1])
-
-# Colorbar común
+# Fractura 1
+fig, ax = plt.subplots(dpi=200)
+face_colors = cmap(norm(H1_error_fracture_1))
+collection = PolyCollection(c4e_fracture_1, facecolors=face_colors,
+                            edgecolors='black', linewidths=0.2)
+ax.add_collection(collection)
+ax.autoscale()
+ax.set_aspect('equal')
+ax.set_xlim([-1, 1])
+ax.set_ylim([0, 1])
+ax.tick_params(labelsize=8)
 sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-sm.set_array(all_errors)
-cbar = fig_error.colorbar(sm, 
-                          ax = axes.ravel().tolist(), 
-                          orientation = 'vertical', 
-                          label = 'error')
+sm.set_array([])
+fig.colorbar(sm, ax=ax, orientation='vertical', label=r'$H^1$ relative error')
+plt.xlabel("x")
+plt.ylabel("y")
+plt.tight_layout()
+# plt.savefig("relative_error_fracture_1.png")
+plt.show()
 
+# Fractura 2
+fig, ax = plt.subplots(dpi=200)
+face_colors = cmap(norm(H1_error_fracture_2))
+collection = PolyCollection(c4e_fracture_2, facecolors=face_colors,
+                            edgecolors='black', linewidths=0.2)
+ax.add_collection(collection)
+ax.autoscale()
+ax.set_aspect('equal')
+ax.set_xlim([-1, 1])
+ax.set_ylim([0, 1])
+ax.tick_params(labelsize=8)
+sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+sm.set_array([])
+plt.xlabel("x")
+plt.ylabel("y")
+fig.colorbar(sm, ax=ax, orientation='vertical', label=r'$H^1$ relative error')
+plt.tight_layout()
+# plt.savefig("relative_error_fracture_2.png")
 plt.show()
