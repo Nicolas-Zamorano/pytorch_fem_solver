@@ -1,4 +1,3 @@
 *.pyc
 src/mesh.msh
 /src/figures
-.vscode
