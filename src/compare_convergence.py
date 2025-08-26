@@ -29,29 +29,33 @@ fit_FEM = 10**intercept_FEM * dofs_FEM**slope_FEM
 # Graficar ambos conjuntos
 fig, ax = plt.subplots(dpi=500)
 # FEM
-ax.loglog(
-    dofs_FEM,
-    errors_FEM,
-    "s",
-    color="blue",
-    markersize=7,  # Tamaño más pequeño
-    markeredgecolor="black",  # Borde negro
-    label=f"FEM (decay = {-slope_FEM:.2f})",
-)
-ax.loglog(dofs_FEM, fit_FEM, ":", color="blue", alpha=0.5)
+ax.loglog(dofs_FEM, 
+          errors_FEM, 
+          "s", 
+          color="blue",
+          markersize=7,            # Tamaño más pequeño
+          markeredgecolor="black", # Borde negro
+          label=f"FEM (decay = {-slope_FEM:.2f})")
+ax.loglog(dofs_FEM, 
+          fit_FEM, 
+          ":",
+          color="blue",
+          alpha=0.5)
 
 # VPINNs
-ax.loglog(
-    dofs_NN,
-    errors_NN,
-    "^",
-    color="orange",
-    markersize=7,  # Tamaño más pequeño
-    markeredgecolor="black",  # Borde negro
-    label=f"VPINNs (decay rate = {-slope_NN:.2f})",
-)
+ax.loglog(dofs_NN, 
+          errors_NN, 
+          "^", 
+          color="orange",
+          markersize=7,             # Tamaño más pequeño
+          markeredgecolor="black", # Borde negro
+          label=f"VPINNs (decay rate = {-slope_NN:.2f})")
 
-ax.loglog(dofs_NN, fit_NN, "-.", color="orange", alpha=0.5)
+ax.loglog(dofs_NN, 
+          fit_NN, 
+          "-.", 
+          color="orange",
+          alpha=0.5)
 ax.set_xlabel("# DOFs")
 ax.set_ylabel("Relative $H^1$ Error")
 ax.legend()
