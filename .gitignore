@@ -1,3 +1,4 @@
 *.pyc
 src/mesh.msh
 /src/figures
+.vscode/settings.json
