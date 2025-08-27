@@ -3,7 +3,7 @@ import math
 
 import matplotlib.pyplot as plt
 
-from Neural_Network import Neural_Network
+from Neural_Network import NeuralNetwork
 from fem import Mesh, Elements, Basis
 from datetime import datetime
 from Triangulation import Triangulation
@@ -92,7 +92,7 @@ decay_rate = 0.95
 decay_steps = 100
 
 NN = torch.jit.script(
-    Neural_Network(
+    NeuralNetwork(
         input_dimension=2, output_dimension=1, deep_layers=5, hidden_layers_dimension=10
     )
 )

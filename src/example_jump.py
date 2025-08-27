@@ -6,7 +6,7 @@ import skfem
 import torch
 
 from fem import Basis, ElementLine, ElementTri, InteriorFacetBasis, MeshTri
-from Neural_Network import Neural_Network
+from Neural_Network import NeuralNetwork
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
@@ -49,7 +49,7 @@ decay_rate = 0.99
 decay_steps = 100
 
 NN = torch.jit.script(
-    Neural_Network(
+    NeuralNetwork(
         input_dimension=2, output_dimension=1, deep_layers=4, hidden_layers_dimension=40
     )
 )

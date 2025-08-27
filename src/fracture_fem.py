@@ -1,11 +1,11 @@
 import torch
 import tensordict as td
-from fem import Abstract_Mesh, AbstractElement, AbstractBasis
+from fem import AbstractMesh, AbstractElement, AbstractBasis
 
 torch.set_default_dtype(torch.float64)
 
 
-class Fractures(Abstract_Mesh):
+class Fractures(AbstractMesh):
     def __init__(self, triangulations: list, fractures_3D_data: torch.Tensor):
 
         self.fractures_3D_data = fractures_3D_data
@@ -345,7 +345,7 @@ class Element_Fracture(AbstractElement):
         self, bar_coords, inv_map_jacobian: torch.Tensor, fractures_map_jacobian_inv
     ):
 
-        v, v_grad = self.shape_functions_value_and_grad(
+        v, v_grad = self.compute_shape_functions(
             bar_coords, inv_map_jacobian, fractures_map_jacobian_inv
         )
 
@@ -364,7 +364,7 @@ class Element_Fracture(AbstractElement):
 
         return inv_map
 
-    def shape_functions_value_and_grad(
+    def compute_shape_functions(
         self,
         bar_coords: torch.Tensor,
         inv_map_jacobian: torch.Tensor,
@@ -495,7 +495,7 @@ class Fracture_Element_Line(Element_Fracture):
 
         return det_map_jacobian.unsqueeze(-1), inv_map_jacobian
 
-    def shape_functions_value_and_grad(
+    def compute_shape_functions(
         self,
         bar_coords: torch.Tensor,
         inv_map_jacobian: torch.Tensor,
@@ -512,7 +512,7 @@ class Fracture_Element_Line(Element_Fracture):
 
 
 class Fracture_Basis(AbstractBasis):
-    def __init__(self, mesh: Abstract_Mesh, elements: AbstractElement):
+    def __init__(self, mesh: AbstractMesh, elements: AbstractElement):
 
         self.elements = elements
         self.mesh = mesh
@@ -838,7 +838,7 @@ class Fracture_Basis(AbstractBasis):
 
 
 class Interior_Facet_Fracture_Basis(AbstractBasis):
-    def __init__(self, mesh: Abstract_Mesh, elements: Fracture_Element_Line()):
+    def __init__(self, mesh: AbstractMesh, elements: Fracture_Element_Line()):
 
         self.elements = elements
         self.mesh = mesh

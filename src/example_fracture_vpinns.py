@@ -1,19 +1,21 @@
-import torch
+"""From obtaining the date and time"""
+
+from datetime import datetime
 
 import matplotlib.pyplot as plt
+import numpy as np
 import tensordict as td
+import torch
 import triangle as tr
 
-from Neural_Network import Neural_Network_3D
 from fracture_fem import (
-    Fractures,
     Element_Fracture,
-    Fracture_Element_Line,
     Fracture_Basis,
+    Fracture_Element_Line,
+    Fractures,
     Interior_Facet_Fracture_Basis,
 )
-from datetime import datetime
-import numpy as np
+from Neural_Network import NeuralNetwork3D
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
@@ -22,13 +24,13 @@ torch.set_default_dtype(torch.float64)
 # ---------------------- Neural Network Functions ----------------------#
 
 
-def NN_gradiant(NN, x, y, z):
+def NN_gradient(neural_network, x, y, z):
 
     x.requires_grad_(True)
     y.requires_grad_(True)
     z.requires_grad_(True)
 
-    output = NN(x, y, z)
+    output = neural_network(x, y, z)
 
     gradients = torch.autograd.grad(
         outputs=output,
@@ -56,7 +58,7 @@ decay_rate = 0.98
 decay_steps = 200
 
 NN = torch.jit.script(
-    Neural_Network_3D(
+    NeuralNetwork3D(
         input_dimension=3,
         output_dimension=1,
         deep_layers=4,
@@ -115,10 +117,10 @@ V = Fracture_Basis(mesh, elements)
 
 
 def rhs(x, y, z):
-
-    x_fracture_1, x_fracture_2 = torch.split(x, 1, dim=0)
+    """Right-hand side function for facture problem."""
+    x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
-    z_fracture_1, z_fracture_2 = torch.split(z, 1, dim=0)
+    _, z_fracture_2 = torch.split(z, 1, dim=0)
 
     rhs_fracture_1 = 6.0 * (y_fracture_1 - y_fracture_1**2) * torch.abs(
         x_fracture_1
@@ -133,18 +135,18 @@ def rhs(x, y, z):
 
 
 def residual(basis, u_NN_grad):
-
-    NN_grad = u_NN_grad(*basis.integration_points)
+    """Residual functional for fracture problem."""
+    u_grad = u_NN_grad(*basis.integration_points)
 
     v = basis.v
     v_grad = basis.v_grad
     rhs_value = rhs(*basis.integration_points)
 
-    return rhs_value * v - v_grad @ NN_grad.mT
+    return rhs_value * v - v_grad @ u_grad.mT
 
 
 def gram_matrix(basis):
-
+    """bilinear form for fracture problem."""
     v_grad = basis.v_grad
 
     return v_grad @ v_grad.mT
@@ -152,15 +154,15 @@ def gram_matrix(basis):
 
 A = V.reduce(V.integrate_bilinear_form(gram_matrix))
 
-A_inv = torch.linalg.inv(A)
+A_inv = torch.inverse(A)
 
 Ih, Ih_grad = V.interpolate(V)
 
 Ih_NN = lambda x, y, z: Ih(NN)
 Ih_grad_NN = lambda x, y, z: Ih_grad(NN)
 
-# Ih_NN = lambda x, y, z : NN(x, y, z)
-# Ih_grad_NN = lambda x, y, z : NN_gradiant(NN, x, y, z)
+# Ih_NN = lambda x, y, z : neural_network(x, y, z)
+# Ih_grad_NN = lambda x, y, z : NN_gradient(neural_network, x, y, z)
 
 # ---------------------- Error Parameters ----------------------#
 
@@ -280,7 +282,8 @@ loss_list = []
 relative_loss_list = []
 H1_error_list = []
 
-loss_opt = 10e4
+OPTIMAL_LOSS = 10e4
+params_opt = 0
 
 # ---------------------- Training ----------------------#
 
@@ -309,9 +312,9 @@ for epoch in range(epochs):
         f"Loss: {loss_value.item():.8f} Relative Loss: {relative_loss.item():.8f} Relative error: {error_norm.item():.8f}"
     )
 
-    if loss_value < loss_opt:
-        loss_opt = loss_value
-        params_opt = NN.state_dict()
+    if loss_value < OPTIMAL_LOSS:
+        OPTIMAL_LOSS = loss_value
+        params_opt = neural_network.state_dict()
 
     loss_list.append(loss_value.item())
     relative_loss_list.append(relative_loss.item())
@@ -325,7 +328,7 @@ print(f"Training time: {execution_time}")
 
 # ---------------------- Plot Values ----------------------#
 
-NN.load_state_dict(params_opt)
+neural_network.load_state_dict(params_opt)
 
 ### --- FEM SOLUTION PARAMETERS --- ###
 
@@ -341,7 +344,7 @@ triangles_fracture_1, triangles_fracture_2 = torch.unbind(
     mesh.local_triangulations["triangles"], dim=0
 )
 
-u_NN_local = NN(*torch.split(local_vertices_3D, 1, -1))
+u_NN_local = neural_network(*torch.split(local_vertices_3D, 1, -1))
 
 u_NN_fracture_1, u_NN_fracture_2 = torch.unbind(u_NN_local, dim=0)
 
@@ -398,11 +401,11 @@ points_trace_fracture_1, points_trace_fracture_2 = torch.unbind(
     sort_points_trace, dim=0
 )
 
-# COMPUTE JUMP NN SOLUTION
+# COMPUTE JUMP neural_network SOLUTION
 
 _, I_E_grad = V.interpolate(V_inner_edges)
 
-I_E_NN_grad = I_E_grad(NN)
+I_E_NN_grad = I_E_grad(neural_network)
 
 I_E_u_NN_grad_K_plus, I_E_u_NN_grad_minus = torch.unbind(I_E_NN_grad, dim=-4)
 
@@ -475,24 +478,23 @@ c4e_fracture_1, c4e_fracture_2 = torch.unbind(
 
 # ---------------------- Plot ---------------------- #
 
-import pyvista as pv
-from matplotlib.collections import PolyCollection
-import matplotlib.cm as cm
-import matplotlib.colors as colors
 import os
 
-# ------------------ CONFIGURACIÓN DE GUARDADO ------------------
+import matplotlib.cm as cm
+import matplotlib.colors as colors
+import pyvista as pv
+from matplotlib.collections import PolyCollection
 
-# name = "non_interpolated_vpinns"
-# name = "vpinns"
-name = "rvpinns"
-# name = "vpinns_tanh"
-save_dir = "figures"
-os.makedirs(save_dir, exist_ok=True)
+# NAME = "non_interpolated_vpinns"
+# NAME = "vpinns"
+NAME = "rvpinns"
+# NAME = "vpinns_tanh"
+SAVE_DIR = "figures"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-# ------------------ NN SOLUTION ------------------
+# ------------------ neural_network SOLUTION ------------------
 
-# # Fractura 1
+# # Fracture 1
 # fig = plt.figure(dpi=200)
 # ax = fig.add_subplot(111, projection='3d')
 # ax.plot_trisurf(vertices_fracture_1.numpy(force=True)[:, 0],
@@ -506,10 +508,10 @@ os.makedirs(save_dir, exist_ok=True)
 # ax.set_zlabel(r"$u_h(x,y)$")
 # ax.tick_params(labelsize=8)
 # plt.tight_layout()
-# plt.savefig(os.path.join(save_dir, f"{name}_nn_solution_fracture_1.png"))
+# plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_nn_solution_fracture_1.png"))
 #
 
-# # Fractura 2
+# # Fracture 2
 # fig = plt.figure(dpi=200)
 # ax = fig.add_subplot(111, projection='3d')
 # ax.plot_trisurf(vertices_fracture_2.numpy(force=True)[:, 0],
@@ -523,7 +525,7 @@ os.makedirs(save_dir, exist_ok=True)
 # ax.set_zlabel(r"$u_h(x,y)$")
 # ax.tick_params(labelsize=8)
 # plt.tight_layout()
-# plt.savefig(os.path.join(save_dir, f"{name}_nn_solution_fracture_2.png"))
+# plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_nn_solution_fracture_2.png"))
 #
 
 vertices = torch.unbind(mesh.local_triangulations["vertices_3D"], dim=0)
@@ -534,31 +536,32 @@ solution = torch.unbind(u_NN_local, dim=0)
 
 plotter = pv.Plotter(off_screen=True)
 
-for i in range(2):  # Para cada fractura
-    verts = vertices[i].numpy(force=True)  # (N_v, 3)
-    tris = triangles[i].numpy(force=True)  # (N_T, 3)
-    sol = solution[i].numpy(force=True)
+for i in range(2):
+    vertices_numpy = vertices[i].numpy(force=True)  # (N_v, 3)
+    triangles_numpy = triangles[i].numpy(force=True)  # (N_T, 3)
+    solution_numpy = solution[i].numpy(force=True)
 
-    # pyvista espera una lista plana con un prefijo indicando el número de vértices por celda (3 para triángulos)
-    faces = np.hstack([np.full((tris.shape[0], 1), 3), tris]).flatten()
+    # Pyvista expects a flat list with a prefix indicating the number of vertices per cell (3 for triangles)
+    faces = np.hstack(
+        [np.full((triangles_numpy.shape[0], 1), 3), triangles_numpy]
+    ).flatten()
 
-    # Crear una malla PolyData
-    mesh = pv.PolyData(verts, faces)
+    mesh = pv.PolyData(vertices_numpy, faces)
 
-    mesh.point_data["solution"] = sol
+    mesh.point_data["solution"] = solution_numpy
 
     plotter.add_mesh(
         mesh,
         show_edges=True,
         scalars="solution",
-        cmap="viridis",  # Puedes cambiar el colormap
+        cmap="viridis",
         opacity=1,
         scalar_bar_args={"title": "Pressure"},
         lighting=False,
     )
 
 plotter.show()
-plotter.screenshot(os.path.join(save_dir, f"{name}_solution.png"))
+plotter.screenshot(os.path.join(SAVE_DIR, f"{NAME}_solution.png"))
 
 # ------------------ TRACES (JUMPS) ------------------
 
@@ -571,11 +574,11 @@ plt.ylabel("value")
 plt.grid(True)
 
 plt.tight_layout()
-plt.savefig(os.path.join(save_dir, f"{name}_trace_value_nn.png"))
+plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_value_nn.png"))
 
 # ------------------ TRACES (JUMPS) ------------------
 
-# Fractura 1
+# Fracture 1
 fig = plt.figure(dpi=200)
 plt.plot(
     points_trace_fracture_1.numpy(force=True),
@@ -594,9 +597,9 @@ plt.ylabel("jump value")
 # plt.title("Fracture 1")
 plt.legend()
 plt.tight_layout()
-plt.savefig(os.path.join(save_dir, f"{name}_trace_jump_fracture_1.png"))
+plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_1.png"))
 
-# Fractura 2
+# Fracture 2
 fig = plt.figure(dpi=200)
 plt.plot(
     points_trace_fracture_2.numpy(force=True),
@@ -615,7 +618,7 @@ plt.ylabel("jump value")
 # plt.title("Fracture 2")
 plt.legend()
 plt.tight_layout()
-plt.savefig(os.path.join(save_dir, f"{name}_trace_jump_fracture_2.png"))
+plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_2.png"))
 
 
 # ------------------ ERROR EVOLUTION ------------------
@@ -634,17 +637,17 @@ plt.legend(fontsize=10)
 plt.tight_layout()
 plt.ylabel("Value")
 plt.xlabel("# Epochs")
-plt.savefig(os.path.join(save_dir, f"{name}_error_evolution.png"))
+plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_error_evolution.png"))
 
 
 # # Relative Loss vs H1 Error (loglog)
 # fig = plt.figure(dpi=300)
 # plt.loglog(relative_loss_list, H1_error_list)
-# plt.title(f"Error vs Loss comparison of VPINNs ({name})")
+# plt.title(f"Error vs Loss comparison of VPINNs ({NAME})")
 # plt.xlabel("Relative Loss")
 # plt.ylabel("Relative Error")
 # plt.tight_layout()
-# plt.savefig(os.path.join(save_dir, f"{name}_error_vs_loss.png"))
+# plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_error_vs_loss.png"))
 #
 
 # ------------------ RELATIVE ERROR ------------------
@@ -658,9 +661,9 @@ c4e_fracture_2 = c4e_fracture_2.numpy(force=True)
 # Shared color scale
 all_errors = np.concatenate([H1_error_fracture_1, H1_error_fracture_2])
 norm = colors.Normalize(vmin=all_errors.min(), vmax=all_errors.max())
-cmap = cm.viridis
+cmap = cm.viridis()
 
-# Fractura 1
+# Fracture 1
 fig, ax = plt.subplots(dpi=200)
 face_colors = cmap(norm(H1_error_fracture_1))
 collection = PolyCollection(
@@ -681,7 +684,7 @@ fig.colorbar(
 plt.xlabel("x")
 plt.ylabel("y")
 plt.tight_layout()
-plt.savefig(os.path.join(save_dir, f"{name}_relative_error_fracture_1.png"))
+plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_relative_error_fracture_1.png"))
 
 
 fig, ax = plt.subplots(dpi=200)
@@ -704,4 +707,4 @@ fig.colorbar(
 plt.xlabel("x")
 plt.ylabel("y")
 plt.tight_layout()
-plt.savefig(os.path.join(save_dir, f"{name}_relative_error_fracture_2.png"))
+plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_relative_error_fracture_2.png"))

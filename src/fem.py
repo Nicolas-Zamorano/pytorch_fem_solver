@@ -1,12 +1,19 @@
-from abc import ABC, abstractmethod
+"""Finite Element Method (FEM) module for mesh, element, and basis representation."""
+
+import abc
 import torch
+import tensordict
 
 torch.set_default_dtype(torch.float64)
 
 
-class AbstractMesh(ABC):
+class AbstractMesh(abc.ABC):
+    """Abstract class for mesh representation"""
 
     def __init__(self, triangulation: dict):
+
+        self.mesh = self.triangle_to_tensordict(triangulation)
+
         self.coords4nodes = triangulation["vertices"]
         self.nodes4elements = triangulation["triangles"]
 
@@ -25,6 +32,42 @@ class AbstractMesh(ABC):
             )
         )
 
+    def triangle_to_tensordict(self, mesh_dict):
+        """Convert a mesh dictionary from 'triangle' library to a tensordict.TensorDict format"""
+        key_map = {
+            "vertices": ("vertices", "coordinates"),
+            "vertex_markers": ("vertices", "markers"),
+            "triangles": ("triangles", "indices"),
+            "neighbors": ("triangles", "neighbors"),
+            "edges": ("edges", "indices"),
+            "edge_markers": ("edges", "markers"),
+        }
+
+        sub_dictionaries = {
+            "coords": {},
+            "triangles": {},
+            "edges": {},
+        }
+
+        for key, value in mesh_dict.items():
+            subname, new_key = key_map[key]
+            sub_dictionaries[subname][new_key] = value
+
+        td = tensordict.TensorDict(
+            {
+                name: (
+                    tensordict.TensorDict(
+                        content, batch_size=[len(next(iter(content.values())))]
+                    )
+                    if content
+                    else tensordict.TensorDict({}, batch_size=[0])
+                )
+                for name, content in sub_dictionaries.items()
+            },
+            batch_size=[],
+        )
+        return td
+
     def compute_edges_values(
         self,
         coords4nodes: torch.Tensor,
@@ -32,7 +75,7 @@ class AbstractMesh(ABC):
         mesh_parameters: torch.Tensor,
         triangulation: dict,
     ):
-
+        """Compute edges related values from the mesh triangulation"""
         nodes4edges, _ = torch.sort(
             nodes4elements[..., self.edges_permutations], dim=-1
         )
@@ -128,23 +171,28 @@ class AbstractMesh(ABC):
 
         return elements_diameter, nodes4boundary, edges_parameters
 
-    @abstractmethod
+    @abc.abstractmethod
     def compute_mesh_parameters(
         self, coords4nodes: torch.Tensor, nodes4elements: torch.Tensor
     ):
+        """Compute basic mesh parameters related to number of nodes, elements and dimensions."""
         raise NotImplementedError
 
     @property
-    @abstractmethod
+    @abc.abstractmethod
     def edges_permutations(self):
+        """Return the local node indices defining each edge of the element.
+        the convection is the i-th edge is defined by his opposite node."""
         raise NotImplementedError
 
-    @abstractmethod
+    @abc.abstractmethod
     def get_edges_idx(self, nodes4elements, nodes4unique_edges):
+        """Return the indices of the edges for each element in the mesh."""
         raise NotImplementedError
 
 
 class MeshTri(AbstractMesh):
+    """Class for triangular mesh representation"""
 
     @property
     def edges_permutations(self):
@@ -164,6 +212,7 @@ class MeshTri(AbstractMesh):
         }
 
     def map_fine_mesh(self, finer_mesh: torch.Tensor):
+        """Map each element of a finer mesh to an element of the current coarser mesh."""
         c4e_finer_mesh = finer_mesh.coords4elements  # (n_elem_h, 3, 2)
         c4e_coarser_mesh = self.coords4elements  # (n_elem_H, 3, 2)
         centroids_h = c4e_finer_mesh.mean(dim=-2)  # (n_elem_h, 2)
@@ -234,7 +283,9 @@ class MeshTri(AbstractMesh):
         return sorted_idx[edge_pos].reshape(tri_keys.shape)
 
 
-class AbstractElement(ABC):
+class AbstractElement(abc.ABC):
+    """Abstract class for element representation"""
+
     def __init__(self, polynomial_order: int, integration_order: int):
 
         self.polynomial_order = polynomial_order
@@ -249,39 +300,46 @@ class AbstractElement(ABC):
         integration_points: torch.Tensor,
         inv_map_jacobian: torch.Tensor,
     ):
-
+        """Compute the inverse map from physical coordinates to reference coordinates"""
         integration_points = torch.concat(integration_points, dim=-1)
 
         return (integration_points - first_node) @ inv_map_jacobian.mT
 
-    @abstractmethod
-    def shape_functions_value_and_grad(self, bar_coords, inv_map_jacobian):
+    @abc.abstractmethod
+    def compute_shape_functions(self, bar_coords, inv_map_jacobian):
+        """Compute the shape functions and their gradients at given barycentric coordinates"""
         raise NotImplementedError
 
-    @abstractmethod
+    @abc.abstractmethod
     def compute_gauss_values(self):
+        """Compute the Gaussian integration points and weights"""
         raise NotImplementedError
 
-    @abstractmethod
+    @abc.abstractmethod
     def compute_barycentric_coordinates(self, x):
+        """Compute the barycentric coordinates of given points x"""
         raise NotImplementedError
 
-    @abstractmethod
+    @abc.abstractmethod
     def compute_det_and_inv_map(self, map_jacobian):
+        """Compute the determinant and inverse of the mapping Jacobian"""
         raise NotImplementedError
 
     @property
-    @abstractmethod
+    @abc.abstractmethod
     def reference_element_area(self):
+        """Return the area (or length) of the reference element"""
         raise NotImplementedError
 
     @property
-    @abstractmethod
+    @abc.abstractmethod
     def barycentric_grad(self):
+        """Return the gradients of the barycentric coordinates in the reference element"""
         raise NotImplementedError
 
 
 class ElementLine(AbstractElement):
+    """Class for 1D line element representation"""
 
     @property
     def barycentric_grad(self):
@@ -318,7 +376,7 @@ class ElementLine(AbstractElement):
 
         return gaussian_nodes, gaussian_weights.unsqueeze(0)
 
-    def shape_functions_value_and_grad(
+    def compute_shape_functions(
         self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor
     ):
 
@@ -344,6 +402,7 @@ class ElementLine(AbstractElement):
 
 
 class ElementTri(AbstractElement):
+    """Class for 2D triangular element representation"""
 
     @property
     def barycentric_grad(self):
@@ -353,12 +412,17 @@ class ElementTri(AbstractElement):
     def reference_element_area(self):
         return 0.5
 
+    @property
+    def outward_normal(self):
+        """Return the outward normal vectors of the reference triangle edges."""
+        return torch.tensor([[1.0, 1.0], [-1.0, 0.0], [0.0, -1.0]])
+
     def compute_barycentric_coordinates(self, x):
         return torch.stack(
             [1.0 - x[..., [0]] - x[..., [1]], x[..., [0]], x[..., [1]]], dim=-2
         )
 
-    def shape_functions_value_and_grad(
+    def compute_shape_functions(
         self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor
     ):
         lambda_1, lambda_2, lambda_3 = torch.split(bar_coords, 1, dim=-2)
@@ -478,7 +542,9 @@ class ElementTri(AbstractElement):
         return det_map_jacobian, inv_map_jacobian
 
 
-class AbstractBasis(ABC):
+class AbstractBasis(abc.ABC):
+    """Abstract class for basis representation"""
+
     def __init__(self, mesh: AbstractMesh, element: AbstractElement):
 
         self.element = element
@@ -505,20 +571,21 @@ class AbstractBasis(ABC):
             self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs
         )
 
-    @abstractmethod
+    @abc.abstractmethod
     def compute_integral_values(
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
     ):
+        """Compute the integral values needed for the basis functions"""
         raise NotImplementedError
 
     def integrate_functional(self, function, *args, **kwargs):
-
+        """Integrate a given functional over the mesh elements"""
         return (function(self, *args, **kwargs) * self.dx).sum(-3).sum(-2)
 
     def integrate_bilinear_form(self, function, *args, **kwargs):
-
+        """Integrate a given bilinear form over the mesh elements"""
         global_matrix = torch.zeros(self.basis_parameters["bilinear_form_shape"])
 
         local_matrix = (function(self, *args, **kwargs) * self.dx).sum(-3)
@@ -532,7 +599,7 @@ class AbstractBasis(ABC):
         return global_matrix
 
     def integrate_linear_form(self, function, *args, **kwargs):
-
+        """Integrate a given linear form over the mesh elements"""
         integral_value = torch.zeros(self.basis_parameters["linear_form_shape"])
 
         integrand_value = (function(self, *args, **kwargs) * self.dx).sum(-3)
@@ -545,22 +612,25 @@ class AbstractBasis(ABC):
 
         return integral_value
 
-    @abstractmethod
+    @abc.abstractmethod
     def compute_dofs(
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
     ):
+        """Compute the degrees of freedom for the basis functions"""
         raise NotImplementedError
 
-    @abstractmethod
+    @abc.abstractmethod
     def compute_basis_parameters(
         self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
     ):
+        """Compute parameters related to the basis functions"""
         raise NotImplementedError
 
 
 class Basis(AbstractBasis):
+    """Class for standard basis representation"""
 
     def compute_integral_values(
         self,
@@ -576,7 +646,7 @@ class Basis(AbstractBasis):
 
         bar_coords = element.compute_barycentric_coordinates(element.gaussian_nodes)
 
-        v, v_grad = element.shape_functions_value_and_grad(bar_coords, inv_map_jacobian)
+        v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
 
         integration_points = torch.split(
             bar_coords.mT @ mesh.coords4elements.unsqueeze(-3), 1, dim=-1
@@ -654,11 +724,12 @@ class Basis(AbstractBasis):
         }
 
     def reduce(self, tensor):
+        """Reduce a tensor to only include inner degrees of freedom"""
         idx = self.basis_parameters["inner_dofs"]
         return tensor[idx, :][:, idx] if tensor.shape[-1] != 1 else tensor[idx]
 
     def interpolate(self, basis, tensor=None):
-
+        """Interpolate a tensor from the current basis to another basis."""
         if basis == self:
             dofs_idx = self.global_dofs4elements.unsqueeze(-2)
 
@@ -709,7 +780,7 @@ class Basis(AbstractBasis):
                 new_integrations_points.squeeze(-3)
             )
 
-            v, v_grad = self.element.shape_functions_value_and_grad(
+            v, v_grad = self.element.compute_shape_functions(
                 bar_coords, inv_map_jacobian
             )
 
@@ -740,6 +811,7 @@ class Basis(AbstractBasis):
 
 
 class InteriorFacetBasis(AbstractBasis):
+    """Class for basis representation on interior facets"""
 
     def compute_integral_values(self, mesh, element):
 
@@ -755,7 +827,7 @@ class InteriorFacetBasis(AbstractBasis):
 
         bar_coords = element.compute_barycentric_coordinates(element.gaussian_nodes)
 
-        v, v_grad = element.shape_functions_value_and_grad(bar_coords, inv_map_jacobian)
+        v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
 
         integration_points = torch.split(
             bar_coords.mT @ coords4inner_facet.unsqueeze(-3), 1, dim=-1

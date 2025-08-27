@@ -8,7 +8,7 @@ import numpy as np
 import os
 
 from fracture_fem import Fractures, Element_Fracture, Fracture_Basis
-from Neural_Network import Neural_Network_3D
+from Neural_Network import NeuralNetwork3D
 from datetime import datetime
 
 torch.set_default_dtype(torch.float64)
@@ -52,7 +52,7 @@ decay_rate = 0.98
 decay_steps = 200
 
 NN = torch.jit.script(
-    Neural_Network_3D(
+    NeuralNetwork3D(
         input_dimension=3,
         output_dimension=1,
         deep_layers=4,

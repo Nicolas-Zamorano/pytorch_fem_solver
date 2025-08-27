@@ -3,7 +3,7 @@ import math
 
 import matplotlib.pyplot as plt
 
-from Neural_Network import Neural_Network
+from Neural_Network import NeuralNetwork
 from fem import MeshTri, ElementTri, Basis
 from datetime import datetime
 
@@ -49,13 +49,13 @@ decay_rate = 0.99
 decay_steps = 100
 
 NN = torch.jit.script(
-    Neural_Network(
+    NeuralNetwork(
         input_dimension=2, output_dimension=1, deep_layers=4, hidden_layers_dimension=20
     )
 )
 
 NN_int = torch.jit.script(
-    Neural_Network(
+    NeuralNetwork(
         input_dimension=2, output_dimension=1, deep_layers=4, hidden_layers_dimension=20
     )
 )
