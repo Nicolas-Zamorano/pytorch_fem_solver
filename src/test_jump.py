@@ -1,3 +1,5 @@
+"""Test jump functional implementation against skfem."""
+
 import skfem
 import tensordict as td
 import torch
@@ -15,17 +17,20 @@ elem_sk = skfem.ElementTriP1()
 V_sk = skfem.Basis(mesh_sk, elem_sk, intorder=2)
 
 
-def f(x, y):
+def f(_):
+    """Right-hand side function."""
     return 1.0
 
 
 @skfem.BilinearForm
 def a_sk(u, v, _):
+    """Bilinear form."""
     return dot(grad(u), grad(v))
 
 
 @skfem.LinearForm
 def l_sk(v, w):
+    """Linear form."""
     return f(*w.x) * v
 
 
@@ -53,6 +58,7 @@ I_u_grad_sk = torch.stack(
 
 @skfem.Functional
 def jump_sk(w):
+    """Jump functional."""
     h = w.h
     n = w.n
     dw1 = grad(w["u1"])
@@ -78,10 +84,12 @@ V = Basis(mesh, element)
 
 
 def a(basis):
+    """Bilinear form."""
     return basis.v_grad @ basis.v_grad.mT
 
 
 def l(basis):
+    """Linear form."""
     return f(*basis.integration_points) * basis.v
 
 
@@ -137,13 +145,14 @@ print(
 )
 
 
-def jump(basis, h_E, n_E, I_u_grad):
-    I_u_grad_plus, I_u_grad_minus = torch.unbind(I_u_grad, dim=-4)
+def jump(_, h_element, n_element, solution_grad):
+    """Jump functional."""
+    solution_grad_plus, solution_grad_minus = torch.unbind(solution_grad, dim=-4)
     return (
-        h_E
+        h_element
         * (
-            (I_u_grad_plus * n_E).sum(-1, keepdim=True)
-            + (I_u_grad_minus * -n_E).sum(-1, keepdim=True)
+            (solution_grad_plus * n_element).sum(-1, keepdim=True)
+            + (solution_grad_minus * -n_element).sum(-1, keepdim=True)
         )
         ** 2
     )

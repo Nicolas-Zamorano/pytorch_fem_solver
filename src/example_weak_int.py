@@ -1,13 +1,14 @@
-import torch
+"""Example of weak formulation using FEM and Neural Networks with interpolation."""
+
 import math
-
-import matplotlib.pyplot as plt
-
-from Neural_Network import NeuralNetwork
-from fem import MeshTri, ElementTri, Basis
 from datetime import datetime
 
+import matplotlib.pyplot as plt
 import skfem
+import torch
+
+from fem import Basis, ElementTri, MeshTri
+from neural_network import NeuralNetwork
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()
@@ -16,12 +17,12 @@ import skfem
 # ---------------------- Neural Network Functions ----------------------#
 
 
-def NN_gradiant(NN, x, y):
-
+def nn_gradient(neural_net, x, y):
+    """Compute gradient of a Neural Network w.r.t inputs."""
     x.requires_grad_(True)
     y.requires_grad_(True)
 
-    output = NN.forward(x, y)
+    output = neural_net.forward(x, y)
 
     gradients = torch.autograd.grad(
         outputs=output,
@@ -34,19 +35,20 @@ def NN_gradiant(NN, x, y):
     return torch.concat(gradients, dim=-1)
 
 
-def optimizer_step(optimizer, scheduler, loss_value):
-    optimizer.zero_grad()
-    loss_value.backward(retain_graph=True)
-    optimizer.step()
-    scheduler.step()
+def optimizer_step(opt, scheduler_func, value_loss):
+    """Perform an optimization step."""
+    opt.zero_grad()
+    value_loss.backward(retain_graph=True)
+    opt.step()
+    scheduler_func.step()
 
 
 # ---------------------- Neural Network Parameters ----------------------#
 
-epochs = 5000
-learning_rate = 0.5e-3
-decay_rate = 0.99
-decay_steps = 100
+EPOCHS = 5000
+LEARNING_RATE = 0.5e-3
+DECAY_RATE = 0.99
+DECAY_STEPS = 100
 
 NN = torch.jit.script(
     NeuralNetwork(
@@ -60,64 +62,76 @@ NN_int = torch.jit.script(
     )
 )
 
-optimizer = torch.optim.Adam(NN.parameters(), lr=learning_rate)
+optimizer = torch.optim.Adam(NN.parameters(), lr=LEARNING_RATE)
 
-optimizer_int = torch.optim.Adam(NN_int.parameters(), lr=learning_rate)
+optimizer_int = torch.optim.Adam(NN_int.parameters(), lr=LEARNING_RATE)
 
 scheduler = torch.optim.lr_scheduler.ExponentialLR(
-    optimizer, decay_rate ** (1 / decay_steps)
+    optimizer, DECAY_RATE ** (1 / DECAY_STEPS)
 )
 
 scheduler_int = torch.optim.lr_scheduler.ExponentialLR(
-    optimizer_int, decay_rate ** (1 / decay_steps)
+    optimizer_int, DECAY_RATE ** (1 / DECAY_STEPS)
 )
 
 # ---------------------- FEM Parameters ----------------------#
 
-k_ref = 3
+K_REF = 3
 
-q = 1
-k_int = 2
-k_test = 1
+Q = 1
+K_INT = 2
+K_TEST = 1
 
-mesh_sk_H = skfem.MeshTri1().refined(k_ref)
+mesh_sk_H = skfem.MeshTri1().refined(K_REF)
 
-mesh_sk_h = mesh_sk_H.refined(k_test)
+mesh_sk_h = mesh_sk_H.refined(K_TEST)
 
 V_H = Basis(
     MeshTri(torch.tensor(mesh_sk_H.p).T, torch.tensor(mesh_sk_H.t).T),
-    ElementTri(P_order=k_int, int_order=q),
+    ElementTri(polynomial_order=K_INT, integration_order=Q),
 )
 
 V_h = Basis(
     MeshTri(torch.tensor(mesh_sk_h.p).T, torch.tensor(mesh_sk_h.t).T),
-    ElementTri(P_order=k_test, int_order=q),
+    ElementTri(polynomial_order=K_TEST, integration_order=Q),
 )
 
-I_H, I_H_grad = V_H.interpolate(V_h)
+interpolation_func, grad_interpolation_func = V_H.interpolate(V_h)
 
 # ---------------------- Residual Parameters ----------------------#
 
-NN_grad_func = lambda x, y: NN_gradiant(NN, x, y)
 
-I_H_NN = lambda x, y: I_H(NN)
-
-I_H_NN_grad = lambda x, y: I_H_grad(NN)
-
-rhs = lambda x, y: 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+def nn_grad_func(x, y):
+    """Compute gradient of the primary Neural Network."""
+    return nn_gradient(NN, x, y)
 
 
-def residual(basis, NN_gradient):
+def interpolate_nn(_):
+    """Interpolate the primary Neural Network using FEM basis."""
+    return interpolation_func(NN)
 
+
+def interpolate_nn_grad(_):
+    """Interpolate the gradient of the primary Neural Network using FEM basis."""
+    return grad_interpolation_func(NN)
+
+
+def rhs(x, y):
+    """Right-hand side function."""
+    return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+
+
+def residual(basis, nn_grad):
+    """Compute the residual of the Poisson equation using the neural network as an approximation."""
     x, y = basis.integration_points
 
-    NN_grad = NN_gradient(x, y)
+    nn_grad = nn_grad(x, y)
 
     v = basis.v
     v_grad = basis.v_grad
     rhs_value = rhs(x, y)
 
-    return rhs_value * v - (v_grad @ NN_grad.mT)
+    return rhs_value * v - (v_grad @ nn_grad.mT)
 
 
 # def gram_matrix(elements: Elements):
@@ -127,38 +141,49 @@ def residual(basis, NN_gradient):
 
 #     return v_grad @ v_grad.mT + v @ v.mT
 
-# A = V_h.integrate_bilineal_form(gram_matrix)[V_h.inner_dofs, :][:, V_h.inner_dofs]
+# A = V_h.integrate_bilinear_form(gram_matrix)[V_h.inner_dofs, :][:, V_h.inner_dofs]
 
 # A_inv = torch.linalg.inv(A)
 
 # ---------------------- Error Parameters ----------------------#
 
-exact = lambda x, y: torch.sin(math.pi * x) * torch.sin(math.pi * y)
-exact_dx = lambda x, y: math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
-exact_dy = lambda x, y: math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
+
+def exact(x, y):
+    """Exact solution."""
+    return torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
 
-def H1_exact(basis):
+def exact_dx(x, y):
+    """Exact solution derivative w.r.t x."""
+    return math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
 
+
+def exact_dy(x, y):
+    """Exact solution derivative w.r.t y."""
+    return math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
+
+
+def h1_exact(basis):
+    """Compute the H1 norm of the exact solution."""
     x, y = basis.integration_points
 
     return exact_dx(x, y) ** 2 + exact_dy(x, y) ** 2 + exact(x, y) ** 2
 
 
-def H1_norm(basis):
-
+def h1_norm(basis):
+    """Compute the H1 norm of the neural network solution."""
     x, y = basis.integration_points
 
-    NN_dx, NN_dy = torch.split(NN_gradiant(NN, x, y), 1, dim=-1)
+    nn_dx, nn_dy = torch.split(nn_gradient(NN, x, y), 1, dim=-1)
 
-    L2_error = (exact(x, y) - NN(x, y)) ** 2
+    l2_error = (exact(x, y) - NN(x, y)) ** 2
 
-    H1_0_error = (exact_dx(x, y) - NN_dx) ** 2 + (exact_dy(x, y) - NN_dy) ** 2
+    h1_0_error = (exact_dx(x, y) - nn_dx) ** 2 + (exact_dy(x, y) - nn_dy) ** 2
 
-    return L2_error + H1_0_error
+    return l2_error + h1_0_error
 
 
-exact_norm = torch.sqrt(torch.sum(V_h.integrate_functional(H1_exact)))
+exact_norm = torch.sqrt(torch.sum(V_h.integrate_functional(h1_exact)))
 
 H_1_error_int_list = []
 H1_error_list = []
@@ -167,11 +192,11 @@ H1_error_list = []
 
 start_time = datetime.now()
 
-for epoch in range(epochs):
+for epoch in range(EPOCHS):
     current_time = datetime.now().strftime("%H:%M:%S")
-    print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
+    print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{EPOCHS} {'='*20}")
 
-    residual_value = V_h.integrate_linear_form(residual, NN_grad_func)[V_h.inner_dofs]
+    residual_value = V_h.reduce(V_h.integrate_linear_form(residual, nn_grad_func))
 
     # loss_value = residual_value.T @ (A_inv @ residual_value)
 
@@ -180,14 +205,13 @@ for epoch in range(epochs):
     optimizer_step(optimizer, scheduler, loss_value)
 
     error_norm = (
-        torch.sqrt(torch.sum(V_h.integrate_functional(H1_norm, NN, NN_grad_func)))
+        torch.sqrt(torch.sum(V_h.integrate_functional(h1_norm, NN, nn_grad_func)))
         / exact_norm
     )
 
-    residual_value_int = V_h.integrate_linear_form(residual, I_H_NN_grad)[
-        V_h.inner_dofs
-    ]
-
+    residual_value_int = V_h.reduce(
+        V_h.integrate_linear_form(residual, interpolate_nn_grad)
+    )
     # loss_value_int = residual_value_int.T @ (A_inv @ residual_value_int)
 
     loss_value_int = (residual_value_int**2).sum()
@@ -195,7 +219,11 @@ for epoch in range(epochs):
     optimizer_step(optimizer_int, scheduler_int, loss_value_int)
 
     error_norm_int = (
-        torch.sqrt(torch.sum(V_h.integrate_functional(H1_norm, I_H_NN, I_H_NN_grad)))
+        torch.sqrt(
+            torch.sum(
+                V_h.integrate_functional(h1_norm, interpolate_nn, interpolate_nn_grad)
+            )
+        )
         / exact_norm
     )
 
@@ -215,11 +243,13 @@ print(f"Training time: {execution_time}")
 
 # ---------------------- Plotting ----------------------#
 
-N_points = 100
+NB_PLOT_POINTS = 100
 
-x = torch.linspace(0, 1, N_points)
-y = torch.linspace(0, 1, N_points)
-X, Y = torch.meshgrid(x, y, indexing="ij")
+X, Y = torch.meshgrid(
+    torch.linspace(0, 1, NB_PLOT_POINTS),
+    torch.linspace(0, 1, NB_PLOT_POINTS),
+    indexing="ij",
+)
 
 with torch.no_grad():
     Z = abs(torch.sin(math.pi * X) * torch.sin(math.pi * Y) - NN_int(X, Y))

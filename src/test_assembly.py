@@ -1,13 +1,15 @@
-import meshio
-import skfem
-import torch
+"""Tests for assembly of matrices and vectors."""
+
 import math
 
-from fem import MeshTri, ElementTri, Basis
+import meshio
+import numpy as np
+import skfem
+import torch
+import triangle as tr
 from skfem.helpers import dot, grad
 
-import triangle as tr
-import numpy as np
+from fem import Basis, ElementTri, MeshTri
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]}, "qea0.005"
@@ -26,11 +28,13 @@ V_sk = skfem.Basis(mesh_sk, skfem.ElementTriP1(), intorder=3)
 
 @skfem.BilinearForm
 def a(u, v, _):
+    """Stiffness + Mass matrix."""
     return dot(grad(u), grad(v)) + u * v
 
 
 @skfem.LinearForm
 def l(v, w):
+    """Load vector."""
     x, y = w.x
     return (2.0 * math.pi**2 * np.sin(math.pi * x) * np.sin(math.pi * y)) * v
     # return x*v
@@ -38,6 +42,7 @@ def l(v, w):
 
 @skfem.Functional
 def rhs_int(w):
+    """Integral of the squared rhs."""
     x, y = w.x
     return (2.0 * math.pi**2 * np.sin(math.pi * x) * np.sin(math.pi * y)) ** 2
 
@@ -55,28 +60,30 @@ elements = ElementTri(P_order=1, int_order=3)
 V = Basis(mesh, elements)
 
 
-def gram_matrix(elements):
-
-    v = elements.v
-    v_grad = elements.v_grad
+def gram_matrix(basis):
+    """Stiffness + Mass matrix."""
+    v = basis.v
+    v_grad = basis.v_grad
 
     return v_grad @ v_grad.mT + v @ v.mT
 
 
-rhs = lambda x, y: 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+def rhs(x, y):
+    """Right-hand side function."""
+    return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
 
-def residual(elements):
-
-    x, y = elements.integration_points
-    v = elements.v
+def residual(basis):
+    """Load vector."""
+    x, y = basis.integration_points
+    v = basis.v
 
     return rhs(x, y) * v
 
 
-def functional(elements):
-
-    x, y = elements.integration_points
+def functional(basis):
+    """Integral of the squared rhs."""
+    x, y = basis.integration_points
 
     return rhs(x, y) ** 2
 

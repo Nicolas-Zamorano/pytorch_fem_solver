@@ -1,22 +1,28 @@
-import torch
-from fracture_fem import (
-    Fractures,
-    Element_Fracture,
-    Fracture_Basis,
-    Fracture_Element_Line,
-    Interior_Facet_Fracture_Basis,
-)
-from fem import MeshTri, ElementTri, Basis, ElementLine, InteriorFacetBasis
-import triangle as tr
-import tensordict as td
+"""Test fracture jump implementation by comparison with 2D implementation."""
+
 import matplotlib.pyplot as plt
+import tensordict as td
+import torch
+import triangle as tr
+
+from fem import (
+    Basis,
+    ElementLine,
+    ElementTri,
+    FractureBasis,
+    Fractures,
+    InteriorFacetBasis,
+    InteriorFacetFractureBasis,
+    MeshTri,
+)
 
 torch.set_default_dtype(torch.float64)
 
-h = 0.5**4
+MESH_SIZE = 0.5**4
 
 mesh_data = tr.triangulate(
-    {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]}, "Dqea" + str(h)
+    {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
+    "Dqea" + str(MESH_SIZE),
 )
 
 mesh_data_torch = td.TensorDict(mesh_data)
@@ -33,20 +39,31 @@ tr.plot(ax_mesh, **mesh_data)
 
 plt.show()
 
-f = lambda x, y: 1.0
-f_3D = lambda x, y, z: 1
+
+def rhs(_):
+    """Right-hand side function."""
+    return 1.0
 
 
-def a(elements):
-    return elements.v_grad @ elements.v_grad.mT
+def rhs_3d(
+    _,
+):
+    """Right-hand side function in 3D."""
+    return 1.0
 
 
-def l(elements, rhs):
-    return rhs(*elements.integration_points) * elements.v
+def a(basis):
+    """Bilinear form."""
+    return basis.v_grad @ basis.v_grad.mT
+
+
+def l(basis, right_hand_side):
+    """Linear form."""
+    return right_hand_side(*basis.integration_points) * basis.v
 
 
 A = V.reduce(V.integrate_bilinear_form(a))
-b = V.reduce(V.integrate_linear_form(l, f))
+b = V.reduce(V.integrate_linear_form(l, rhs))
 
 u = torch.zeros(V.basis_parameters["linear_form_shape"])
 u[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
@@ -59,13 +76,14 @@ h_E = V.mesh.edges_parameters["inner_edges_length"].unsqueeze(-2)
 n_E = V.mesh.edges_parameters["normal4inner_edges"].unsqueeze(-2)
 
 
-def jump(elements, h_E, n_E, I_u_grad):
-    I_u_grad_plus, I_u_grad_minus = torch.unbind(I_u_grad, dim=-4)
+def jump(_, h_element, n_element, solution_grad):
+    """Jump functional."""
+    solution_grad_plus, solution_grad_minus = torch.unbind(solution_grad, dim=-4)
     return (
-        h_E
+        h_element
         * (
-            (I_u_grad_plus * n_E).sum(-1, keepdim=True)
-            + (I_u_grad_minus * -n_E).sum(-1, keepdim=True)
+            (solution_grad_plus * n_element).sum(-1, keepdim=True)
+            + (solution_grad_minus * -n_element).sum(-1, keepdim=True)
         )
         ** 2
     )
@@ -83,18 +101,18 @@ mesh_f = Fractures(
     triangulations=fractures_triangulation, fractures_3D_data=fractures_data
 )
 
-elements_f = Element_Fracture(P_order=1, int_order=2)
+elements_f = ElementTri(P_order=1, int_order=2)
 
-V_f = Fracture_Basis(mesh_f, elements_f)
+V_f = FractureBasis(mesh_f, elements_f)
 
 A_f = V_f.reduce(V_f.integrate_bilinear_form(a))
-b_f = V_f.reduce(V_f.integrate_linear_form(l, f_3D))
+b_f = V_f.reduce(V_f.integrate_linear_form(l, rhs_3d))
 
 u_f = torch.zeros(V_f.basis_parameters["linear_form_shape"])
 u_f[V_f.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_f, b_f)
 
-V_f_inner_edges = Interior_Facet_Fracture_Basis(
-    mesh_f, Fracture_Element_Line(P_order=1, int_order=2)
+V_f_inner_edges = InteriorFacetFractureBasis(
+    mesh_f, ElementLine(P_order=1, int_order=2)
 )
 
 I_u_f, I_u_f_grad = V_f.interpolate(V_f_inner_edges, u_f)

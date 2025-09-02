@@ -1,3 +1,5 @@
+"""Example of using jump residual for a problem with discontinuous solution"""
+
 import math
 from datetime import datetime
 
@@ -6,7 +8,7 @@ import skfem
 import torch
 
 from fem import Basis, ElementLine, ElementTri, InteriorFacetBasis, MeshTri
-from Neural_Network import NeuralNetwork
+from neural_network import NeuralNetwork
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
@@ -15,12 +17,12 @@ torch.set_default_dtype(torch.float64)
 # ---------------------- Neural Network Functions ----------------------#
 
 
-def NN_gradiant(NN, x, y):
-
+def nn_gradient(neural_net, x, y):
+    """compute gradient of a Neural Network w.r.t inputs."""
     x.requires_grad_(True)
     y.requires_grad_(True)
 
-    output = NN.forward(x, y)
+    output = neural_net.forward(x, y)
 
     gradients = torch.autograd.grad(
         outputs=output,
@@ -34,19 +36,20 @@ def NN_gradiant(NN, x, y):
     return torch.concat(gradients, dim=-1)
 
 
-def optimizer_step(optimizer, loss_value):
-    optimizer.zero_grad()
-    loss_value.backward(retain_graph=True)
-    optimizer.step()
+def optimizer_step(opt, value_loss):
+    """Performs a single optimization step."""
+    opt.zero_grad()
+    value_loss.backward(retain_graph=True)
+    opt.step()
     scheduler.step()
 
 
 # ---------------------- Neural Network Parameters ----------------------#
 
-epochs = 5000
-learning_rate = 0.5e-2
-decay_rate = 0.99
-decay_steps = 100
+EPOCHS = 5000
+LEARNING_RATE = 0.5e-2
+DECAY_RATE = 0.99
+DECAY_STEPS = 100
 
 NN = torch.jit.script(
     NeuralNetwork(
@@ -54,10 +57,10 @@ NN = torch.jit.script(
     )
 )
 
-optimizer = torch.optim.Adam(NN.parameters(), lr=learning_rate)
+optimizer = torch.optim.Adam(NN.parameters(), lr=LEARNING_RATE)
 
 scheduler = torch.optim.lr_scheduler.ExponentialLR(
-    optimizer, decay_rate ** (1 / decay_steps)
+    optimizer, DECAY_RATE ** (1 / DECAY_STEPS)
 )
 
 # ---------------------- FEM Parameters ----------------------#
@@ -78,38 +81,49 @@ V_edges = InteriorFacetBasis(mesh, elements_1D)
 
 V = Basis(mesh, elements)
 
-I, I_grad = V.interpolate(V_edges)
+I, grad_interpolator = V.interpolate(V_edges)
 
 # ---------------------- Residual Parameters ----------------------#
 
-rhs = lambda x, y: 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+
+def rhs(x, y):
+    """Right-hand side function"""
+    return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+
 
 normals = mesh.normal4inner_edges.unsqueeze(-2).unsqueeze(-2)
 h_E = mesh.inner_edges_length.unsqueeze(-1).unsqueeze(-1)
 h_T = mesh.elements_diameter.unsqueeze(-1).unsqueeze(-1)
 
 
-def jump(elements, n_E, h_E):
-    I_u_grad_plus, I_u_grad_minus = torch.unbind(I_grad(NN), dim=-4)
+def jump(_, normal_elements, edge_size):
+    """Jump term for discontinuous solutions"""
+    interpolator_u_grad_plus, interpolator_u_grad_minus = torch.unbind(
+        grad_interpolator(NN), dim=-4
+    )
     return (
-        (I_u_grad_plus * n_E).sum(-1, keepdim=True)
-        + (I_u_grad_minus * -n_E).sum(-1, keepdim=True)
-    ) ** 2
+        edge_size
+        * (
+            (interpolator_u_grad_plus * normal_elements).sum(-1, keepdim=True)
+            + (interpolator_u_grad_minus * -normal_elements).sum(-1, keepdim=True)
+        )
+        ** 2
+    )
 
 
-def rhs_term(elements, h_T):
+def rhs_term(basis, triangle_size):
+    """Residual term for the right-hand side"""
+    x, y = basis.integration_points
 
-    x, y = elements.integration_points
-
-    return h_T**2 * rhs(x, y) ** 2
+    return triangle_size**2 * rhs(x, y) ** 2
 
 
 # ---------------------- Error Parameters ----------------------#
 
 
-def H1_exact(elements):
-
-    x, y = elements.integration_points
+def h1_exact(basis):
+    """Exact solution for H1 norm computation"""
+    x, y = basis.integration_points
 
     exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
@@ -119,39 +133,40 @@ def H1_exact(elements):
     return exact_dx**2 + exact_dy**2 + exact**2
 
 
-def H1_norm(elements):
+def h1_norm(basis):
+    """H1 norm computation"""
+    x, y = basis.integration_points
 
-    x, y = elements.integration_points
-
-    NN_dx, NN_dy = torch.split(NN_gradiant(NN, x, y), 1, dim=-1)
+    nn_dx, nn_dy = torch.split(nn_gradient(NN, x, y), 1, dim=-1)
 
     exact = torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
     exact_dx = math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
     exact_dy = math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
 
-    L2_error = (exact - NN(x, y)) ** 2
+    l2_error = (exact - NN(x, y)) ** 2
 
-    H1_0_error = (exact_dx - NN_dx) ** 2 + (exact_dy - NN_dy) ** 2
+    h1_0_error = (exact_dx - nn_dx) ** 2 + (exact_dy - nn_dy) ** 2
 
-    return L2_error + H1_0_error
+    return l2_error + h1_0_error
 
 
-exact_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_exact)))
+exact_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_exact)))
 
 loss_list = []
 relative_loss_list = []
 H1_error_list = []
 
-loss_opt = 10e4
+LOSS_OPT = 10e4
+PARAMS_OPT = NN.state_dict()
 
 # ---------------------- Training ----------------------#
 
 start_time = datetime.now()
 
-for epoch in range(epochs):
+for epoch in range(EPOCHS):
     current_time = datetime.now().strftime("%H:%M:%S")
-    print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{epochs} {'='*20}")
+    print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{EPOCHS} {'='*20}")
 
     residual_value = (V.integrate_functional(rhs_term, h_T)).sum() + (
         V_edges.integrate_functional(jump, normals, h_E)
@@ -161,7 +176,7 @@ for epoch in range(epochs):
 
     optimizer_step(optimizer, loss_value)
 
-    error_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_norm))) / exact_norm
+    error_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_norm))) / exact_norm
 
     relative_loss = torch.sqrt(loss_value) / exact_norm
 
@@ -169,9 +184,9 @@ for epoch in range(epochs):
         f"Loss: {loss_value.item():.8f} Relative Loss: {relative_loss.item():.8f} Relative error: {error_norm.item():.8f}"
     )
 
-    if loss_value < loss_opt:
-        loss_opt = loss_value
-        params_opt = NN.state_dict()
+    if loss_value < LOSS_OPT:
+        LOSS_OPT = loss_value
+        PARAMS_OPT = NN.state_dict()
 
     loss_list.append(loss_value.item())
     relative_loss_list.append(relative_loss.item())
@@ -185,13 +200,15 @@ print(f"Training time: {execution_time}")
 
 # ---------------------- Plotting ----------------------#
 
-NN.load_state_dict(params_opt)
+NN.load_state_dict(PARAMS_OPT)
 
-N_points = 100
+NB_PLOT_POINTS = 100
 
-x = torch.linspace(0, 1, N_points)
-y = torch.linspace(0, 1, N_points)
-X, Y = torch.meshgrid(x, y, indexing="ij")
+X, Y = torch.meshgrid(
+    torch.linspace(0, 1, NB_PLOT_POINTS),
+    torch.linspace(0, 1, NB_PLOT_POINTS),
+    indexing="ij",
+)
 
 with torch.no_grad():
     Z = abs(torch.sin(math.pi * X) * torch.sin(math.pi * Y) - NN(X, Y))
@@ -226,7 +243,7 @@ axis_error.legend(fontsize=15)
 # axis_loglog.loglog(relative_loss_list,
 #                     H1_error_list)
 
-# axis_loglog.set(title = "Error vs Loss comparasion of RVPINNs method",
+# axis_loglog.set(title = "Error vs Loss comparison of RVPINNs method",
 #                 xlabel = "Relative Loss",
 #                 ylabel = "Relative Error")
 

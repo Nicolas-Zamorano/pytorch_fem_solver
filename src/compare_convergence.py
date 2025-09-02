@@ -1,4 +1,4 @@
-"""For importing the data"""
+"""Compare convergence rates of VPINNs and FEM in H1 norm."""
 
 import pickle
 import numpy as np

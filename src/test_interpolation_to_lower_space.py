@@ -1,47 +1,54 @@
-import meshio
-import torch
+"""Test interpolation to lower space."""
 
 import matplotlib.pyplot as plt
-import triangle as tr
+import meshio
 import skfem as fem
+import torch
+import triangle as tr
+from skfem.helpers import dot, grad
 
-from fem import MeshTri, ElementTri, Basis
-from skfem.helpers import grad, dot
+from fem import Basis, ElementTri, MeshTri
 
 vertices = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
 
-h = 0.5 ** (1)
+MESH_SIZE = 0.5 ** (1)
 
-mesh_H = tr.triangulate(dict(vertices=vertices), "Dqeca" + str(h))
+mesh_H = tr.triangulate(dict(vertices=vertices), "Dqeca" + str(MESH_SIZE))
 
 ##------------------ fem ------------------##
 
 V_H = Basis(MeshTri(triangulation=mesh_H), ElementTri(P_order=2, int_order=3))
 
-f = lambda x, y: 1.0
+
+def rhs(_):
+    """Right-hand side function."""
+    return 1.0
 
 
 def a(elements):
+    """Bilinear form."""
     return elements.v_grad @ elements.v_grad.mT
 
 
 def l(elements):
-    return f(*elements.integration_points) * elements.v
+    """Linear form."""
+    return rhs(*elements.integration_points) * elements.v
 
 
 A = V_H.reduce(V_H.integrate_bilinear_form(a))
 b = V_H.reduce(V_H.integrate_linear_form(l))
 
-u = torch.zeros(V_H.basis_parameters["linear_form_shape"])
-u[V_H.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
+u_h = torch.zeros(V_H.basis_parameters["linear_form_shape"])
+u_h[V_H.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
 
 mesh_h = tr.triangulate(
-    dict(vertices=V_H.coords4global_dofs, segments=mesh_H["edges"]), "Dqepca" + str(h)
+    dict(vertices=V_H.coords4global_dofs, segments=mesh_H["edges"]),
+    "Dqepca" + str(MESH_SIZE),
 )
 
 V_h = Basis(MeshTri(triangulation=mesh_h), ElementTri(P_order=1, int_order=3))
 
-I_H_u, I_H_u_grad = V_H.interpolate(V_h, u)
+I_H_u, I_H_u_grad = V_H.interpolate(V_h, u_h)
 
 
 tr.compare(plt, mesh_H, mesh_h)
@@ -62,13 +69,15 @@ V_H_sk = fem.Basis(mesh_sk_H, fem.ElementTriP2(), intorder=3)
 
 
 @fem.BilinearForm
-def a_sk(u, v, w):
+def a_sk(u, v, _):
+    """Bilinear form."""
     return dot(grad(u), grad(v))
 
 
 @fem.LinearForm
 def l_sk(v, w):
-    return f(*w.x) * v
+    """Linear form."""
+    return rhs(*w.x) * v
 
 
 A_sk = a_sk.assemble(V_H_sk)
@@ -115,7 +124,7 @@ print(
     I_u_grad_sk_count.numpy(),
 )
 
-print("u error   norm:", (torch.norm(u_sk_torch - u) / torch.norm(u_sk_torch)))
+print("u error   norm:", (torch.norm(u_sk_torch - u_h) / torch.norm(u_sk_torch)))
 print(
     "I_u error norm:",
     (

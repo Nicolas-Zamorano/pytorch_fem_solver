@@ -1,15 +1,17 @@
-import torch
+"""Example of VPINNs for the 3D fracture problem with convergence study"""
+
+import os
 import pickle
+from datetime import datetime
 
 import matplotlib.pyplot as plt
-import tensordict as td
-import triangle as tr
 import numpy as np
-import os
+import tensordict as td
+import torch
+import triangle as tr
+from fem import ElementTri, FractureBasis, Fractures
 
-from fracture_fem import Fractures, Element_Fracture, Fracture_Basis
-from Neural_Network import NeuralNetwork3D
-from datetime import datetime
+from neural_network import NeuralNetwork3D
 
 torch.set_default_dtype(torch.float64)
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
@@ -18,13 +20,13 @@ torch.set_default_dtype(torch.float64)
 # ---------------------- Neural Network Functions ----------------------#
 
 
-def NN_gradiant(NN, x, y, z):
-
+def nn_gradient(neural_net, x, y, z):
+    """Compute gradient of a Neural Network w.r.t inputs."""
     x.requires_grad_(True)
     y.requires_grad_(True)
     z.requires_grad_(True)
 
-    output = NN.forward(x, y, z)
+    output = neural_net.forward(x, y, z)
 
     gradients = torch.autograd.grad(
         outputs=output,
@@ -37,19 +39,20 @@ def NN_gradiant(NN, x, y, z):
     return torch.concat(gradients, dim=-1)
 
 
-def optimizer_step(optimizer, loss_value):
-    optimizer.zero_grad()
-    loss_value.backward(retain_graph=True)
-    optimizer.step()
+def optimizer_step(opt, loss):
+    """Perform one step of the optimizer."""
+    opt.zero_grad()
+    loss.backward(retain_graph=True)
+    opt.step()
     scheduler.step()
 
 
 # ---------------------- Neural Network Parameters ----------------------#
 
-epochs = 5000
-learning_rate = 0.2e-3
-decay_rate = 0.98
-decay_steps = 200
+EPOCHS = 5000
+LEARNING_RATE = 0.2e-3
+DECAY_RATE = 0.98
+DECAY_STEPS = 200
 
 NN = torch.jit.script(
     NeuralNetwork3D(
@@ -63,9 +66,9 @@ NN = torch.jit.script(
 
 # ---------------------- FEM Parameters ----------------------#
 
-h = 0.5
+MESH_SIZE = 0.5
 
-n = 3
+EXPONENT = 3
 
 fracture_2d_data = {
     "vertices": [
@@ -86,16 +89,19 @@ fractures_data = torch.tensor(
     ]
 )
 
-fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsea" + str(h ** (n)))
+fracture_triangulation = tr.triangulate(
+    fracture_2d_data, "pqsea" + str(MESH_SIZE ** (EXPONENT))
+)
 
 # ---------------------- Residual Parameters ----------------------#
 
 
 def rhs(x, y, z):
+    """Right-hand side function."""
 
-    x_fracture_1, x_fracture_2 = torch.split(x, 1, dim=0)
+    x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
-    z_fracture_1, z_fracture_2 = torch.split(z, 1, dim=0)
+    _, z_fracture_2 = torch.split(z, 1, dim=0)
 
     rhs_fracture_1 = 6.0 * (y_fracture_1 - y_fracture_1**2) * torch.abs(
         x_fracture_1
@@ -109,19 +115,18 @@ def rhs(x, y, z):
     return rhs_value
 
 
-def residual(basis, u_NN_grad):
-
-    NN_grad = u_NN_grad(*basis.integration_points)
+def residual(basis, solution_grad):
+    """Residual of the PDE."""
 
     v = basis.v
     v_grad = basis.v_grad
     rhs_value = rhs(*basis.integration_points)
 
-    return rhs_value * v - v_grad @ NN_grad.mT
+    return rhs_value * v - v_grad @ solution_grad(*basis.integration_points).mT
 
 
 def a(basis):
-
+    """Bilinear form."""
     v_grad = basis.v_grad
 
     return v_grad @ v_grad.mT
@@ -131,10 +136,10 @@ def a(basis):
 
 
 def exact(x, y, z):
-
-    x_fracture_1, x_fracture_2 = torch.split(x, 1, dim=0)
+    """Exact solution."""
+    x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
-    z_fracture_1, z_fracture_2 = torch.split(z, 1, dim=0)
+    _, z_fracture_2 = torch.split(z, 1, dim=0)
 
     exact_fracture_1 = (
         -y_fracture_1
@@ -155,10 +160,10 @@ def exact(x, y, z):
 
 
 def exact_grad(x, y, z):
-
-    x_fracture_1, x_fracture_2 = torch.split(x, 1, dim=0)
+    """Gradient of the exact solution."""
+    x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
-    z_fracture_1, z_fracture_2 = torch.split(z, 1, dim=0)
+    _, z_fracture_2 = torch.split(z, 1, dim=0)
 
     exact_dx_fracture_1 = (
         -y_fracture_1
@@ -199,8 +204,8 @@ def exact_grad(x, y, z):
     return grad_value
 
 
-def H1_exact(basis):
-
+def h1_exact(basis):
+    """Exact H1 norm."""
     exact_value = exact(*basis.integration_points)
 
     exact_dx_value, exact_dy_value, exact_dz_value = torch.split(
@@ -210,29 +215,29 @@ def H1_exact(basis):
     return exact_value**2 + exact_dx_value**2 + exact_dy_value**2 + exact_dz_value**2
 
 
-def H1_norm(basis, u_NN, u_NN_grad):
-
+def h1_norm(basis, solution, solution_grad):
+    """H1 norm of the error."""
     exact_value = exact(*basis.integration_points)
 
-    u_NN_value = u_NN(*basis.integration_points)
+    solution_value = solution(*basis.integration_points)
 
-    L2_error = (exact_value - u_NN_value) ** 2
+    l2_error = (exact_value - solution_value) ** 2
 
     exact_dx_value, exact_dy_value, exact_dz_value = torch.split(
         exact_grad(*basis.integration_points), 1, dim=-1
     )
 
-    u_NN_dx, u_NN_dy, u_NN_dz = torch.split(
-        u_NN_grad(*basis.integration_points), 1, dim=-1
+    solution_dx, solution_dy, solution_dz = torch.split(
+        solution_grad(*basis.integration_points), 1, dim=-1
     )
 
-    H1_0_error = (
-        (exact_dx_value - u_NN_dx) ** 2
-        + (exact_dy_value - u_NN_dy) ** 2
-        + (exact_dz_value - u_NN_dz) ** 2
+    h1_0_error = (
+        (exact_dx_value - solution_dx) ** 2
+        + (exact_dy_value - solution_dy) ** 2
+        + (exact_dz_value - solution_dz) ** 2
     )
 
-    return H1_0_error + L2_error
+    return h1_0_error + l2_error
 
 
 NN_initial_parameters = NN.state_dict()
@@ -242,19 +247,30 @@ NN_initial_parameters = NN.state_dict()
 H1_norm_list = []
 nb_dofs_list = []
 
+
+def interpolation_nn(_):
+    """Interpolation of the Neural Network in the FEM basis."""
+    return Ih(NN)
+
+
+def grad_interpolation_nn(_):
+    """Interpolation of the Neural Network gradient in the FEM basis."""
+    return Ih_grad(NN)
+
+
 for i in range(11):
 
     # torch.cuda.empty_cache()
     NN.load_state_dict(NN_initial_parameters)
 
-    optimizer = torch.optim.Adam(NN.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(NN.parameters(), lr=LEARNING_RATE)
 
     scheduler = torch.optim.lr_scheduler.ExponentialLR(
-        optimizer, decay_rate ** (1 / decay_steps)
+        optimizer, DECAY_RATE ** (1 / DECAY_STEPS)
     )
 
     fracture_triangulation = tr.triangulate(
-        fracture_triangulation, "prsea" + str(h ** (n + i))
+        fracture_triangulation, "prsea" + str(MESH_SIZE ** (EXPONENT + i))
     )
 
     fracture_triangulation_torch = td.TensorDict((fracture_triangulation))
@@ -265,14 +281,14 @@ for i in range(11):
     )
 
     mesh = Fractures(
-        triangulations=fractures_triangulation, fractures_3D_data=fractures_data
+        triangulations=fractures_triangulation, fractures_3d_data=fractures_data
     )
 
-    elements = Element_Fracture(P_order=1, int_order=2)
+    elements = ElementTri(polynomial_order=1, integration_order=2)
 
-    V = Fracture_Basis(mesh, elements)
+    V = FractureBasis(mesh, elements)
 
-    exact_H1_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_exact)))
+    exact_H1_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_exact)))
 
     A = V.reduce(V.integrate_bilinear_form(a))
 
@@ -280,17 +296,17 @@ for i in range(11):
 
     Ih, Ih_grad = V.interpolate(V)
 
-    Ih_NN = lambda x, y, z: Ih(NN)
-    Ih_grad_NN = lambda x, y, z: Ih_grad(NN)
+    exact_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_exact)))
 
-    exact_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_exact)))
+    LOSS_OPT = 10e4
+    params_opt = NN.state_dict()
 
-    loss_opt = 10e4
-
-    for epoch in range(epochs):
+    for epoch in range(EPOCHS):
         current_time = datetime.now().strftime("%H:%M:%S")
-        print(f"{'='*15} [{current_time}] Iter:{i} Epoch:{epoch + 1}/{epochs} {'='*15}")
-        residual_value = V.reduce(V.integrate_linear_form(residual, Ih_grad_NN))
+        print(f"{'='*15} [{current_time}] Iter:{i} Epoch:{epoch + 1}/{EPOCHS} {'='*15}")
+        residual_value = V.reduce(
+            V.integrate_linear_form(residual, grad_interpolation_nn)
+        )
 
         # loss_value = residual_value.T @ (A_inv @ residual_value)
 
@@ -300,14 +316,18 @@ for i in range(11):
 
         optimizer_step(optimizer, loss_value)
 
-        if loss_value < loss_opt:
-            loss_opt = loss_value
+        if loss_value < LOSS_OPT:
+            LOSS_OPT = loss_value
             params_opt = NN.state_dict()
 
     NN.load_state_dict(params_opt)
 
     H1_norm_value = (
-        torch.sqrt(torch.sum(V.integrate_functional(H1_norm, Ih_NN, Ih_grad_NN)))
+        torch.sqrt(
+            torch.sum(
+                V.integrate_functional(h1_norm, interpolation_nn, grad_interpolation_nn)
+            )
+        )
         / exact_norm
     )
 
@@ -315,15 +335,15 @@ for i in range(11):
 
     nb_dofs_list.append(V.basis_parameters["nb_dofs"])
 
-# ------------------ CONFIGURACIÓN ------------------
+# ------------------ CONFIG ------------------
 
-name = "vpinns"
+NAME = "vpinns"
 # name = "rvpinns"
 # name = "non_interpolated_vpinns"
-save_dir = "figures"
-os.makedirs(save_dir, exist_ok=True)
+SAVE_DIR = "figures"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-# ------------------ CONVERGENCIA VPINNs ------------------
+# ------------------ CONVERGENCE VPINNs ------------------
 
 nb_dofs_np = np.array(nb_dofs_list)
 H1_norm_np = np.array(H1_norm_list)
@@ -352,10 +372,10 @@ ax.set_ylabel(r"$H^1$ Relative Error")
 ax.legend()
 ax.grid(True, which="both", linestyle="--", alpha=0.3)
 plt.tight_layout()
-plt.savefig(os.path.join(save_dir, f"{name}_H1_convergence.png"))
+plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_H1_convergence.png"))
 plt.show()
 
-# ------------------ GUARDAR DATOS ------------------
+# ------------------ SAVE DATA ------------------
 
-with open(os.path.join(save_dir, f"{name}_H1_norm_convergence.pkl"), "wb") as file:
+with open(os.path.join(SAVE_DIR, f"{NAME}_H1_norm_convergence.pkl"), "wb") as file:
     pickle.dump([nb_dofs_np, H1_norm_np], file)

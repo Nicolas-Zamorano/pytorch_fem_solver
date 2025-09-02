@@ -1,3 +1,5 @@
+"""Neural Network class for constructing a deep neural network."""
+
 import torch
 
 

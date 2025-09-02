@@ -1,12 +1,13 @@
-import torch
+"""Example of FEM convergence on fractures."""
+
 import pickle
 
 import matplotlib.pyplot as plt
-import tensordict as td
-import triangle as tr
 import numpy as np
-
-from fracture_fem import Fractures, Element_Fracture, Fracture_Basis
+import tensordict as td
+import torch
+import triangle as tr
+from fem import Fractures, ElementTri, FractureBasis
 
 torch.set_default_dtype(torch.float64)
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
@@ -14,9 +15,9 @@ torch.set_default_dtype(torch.float64)
 
 # ---------------------- FEM Parameters ----------------------#
 
-h = 0.5
+ELEMENT_SIZE = 0.5
 
-n = 3
+EXPONENT = 3
 
 fracture_2d_data = {
     "vertices": [
@@ -37,16 +38,18 @@ fractures_data = torch.tensor(
     ]
 )
 
-fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsea" + str(h ** (n)))
+fracture_triangulation = tr.triangulate(
+    fracture_2d_data, "pqsea" + str(ELEMENT_SIZE ** (EXPONENT))
+)
 
 # ---------------------- Residual Parameters ----------------------#
 
 
 def rhs(x, y, z):
-
-    x_fracture_1, x_fracture_2 = torch.split(x, 1, dim=0)
+    """Right-hand side function."""
+    x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
-    z_fracture_1, z_fracture_2 = torch.split(z, 1, dim=0)
+    _, z_fracture_2 = torch.split(z, 1, dim=0)
 
     rhs_fracture_1 = 6.0 * (y_fracture_1 - y_fracture_1**2) * torch.abs(
         x_fracture_1
@@ -61,7 +64,7 @@ def rhs(x, y, z):
 
 
 def l(basis):
-
+    """Linear form."""
     x, y, z = basis.integration_points
 
     v = basis.v
@@ -71,7 +74,7 @@ def l(basis):
 
 
 def a(basis):
-
+    """Bilinear form."""
     v_grad = basis.v_grad
 
     return v_grad @ v_grad.mT
@@ -81,10 +84,10 @@ def a(basis):
 
 
 def exact(x, y, z):
-
-    x_fracture_1, x_fracture_2 = torch.split(x, 1, dim=0)
+    """Exact solution."""
+    x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
-    z_fracture_1, z_fracture_2 = torch.split(z, 1, dim=0)
+    _, z_fracture_2 = torch.split(z, 1, dim=0)
 
     exact_fracture_1 = (
         -y_fracture_1
@@ -105,10 +108,10 @@ def exact(x, y, z):
 
 
 def exact_grad(x, y, z):
-
-    x_fracture_1, x_fracture_2 = torch.split(x, 1, dim=0)
+    """Gradient of the exact solution."""
+    x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
-    z_fracture_1, z_fracture_2 = torch.split(z, 1, dim=0)
+    _, z_fracture_2 = torch.split(z, 1, dim=0)
 
     exact_dx_fracture_1 = (
         -y_fracture_1
@@ -149,8 +152,8 @@ def exact_grad(x, y, z):
     return grad_value
 
 
-def H1_exact(basis):
-
+def h1_exact(basis):
+    """H1 norm of the exact solution."""
     exact_value = exact(*basis.integration_points)
 
     exact_dx_value, exact_dy_value, exact_dz_value = torch.split(
@@ -162,27 +165,27 @@ def H1_exact(basis):
     return exact_value**2 + exact_dx_value**2 + exact_dy_value**2 + exact_dz_value**2
 
 
-def H1_norm(basis, I_u_h, I_u_h_grad):
-
+def h1_norm(basis, solution, solution_grad):
+    """H1 norm of the error."""
     exact_value = exact(*basis.integration_points)
 
     exact_dx_value, exact_dy_value, exact_dz_value = torch.split(
         exact_grad(*basis.integration_points), 1, dim=-1
     )
 
-    Ih_x_dx, Ih_x_dy, Ih_x_dz = torch.split(I_u_h_grad, 1, dim=-1)
+    solution_dx, solution_dy, solution_dz = torch.split(solution_grad, 1, dim=-1)
 
-    L2_error = (exact_value - I_u_h) ** 2
+    l2_error = (exact_value - solution) ** 2
 
     # return L2_error
 
-    H1_0_error = (
-        (exact_dx_value - Ih_x_dx) ** 2
-        + (exact_dy_value - Ih_x_dy) ** 2
-        + (exact_dz_value - Ih_x_dz) ** 2
+    h1_0_error = (
+        (exact_dx_value - solution_dx) ** 2
+        + (exact_dy_value - solution_dy) ** 2
+        + (exact_dz_value - solution_dz) ** 2
     )
 
-    return L2_error + H1_0_error
+    return l2_error + h1_0_error
 
 
 # ---------------------- Solution ----------------------#
@@ -193,7 +196,7 @@ nb_dofs_list = []
 for i in range(11):
 
     fracture_triangulation = tr.triangulate(
-        fracture_triangulation, "prsea" + str(h ** (n + i))
+        fracture_triangulation, "prsea" + str(ELEMENT_SIZE ** (EXPONENT + i))
     )
 
     fracture_triangulation_torch = td.TensorDict((fracture_triangulation))
@@ -204,14 +207,14 @@ for i in range(11):
     )
 
     mesh = Fractures(
-        triangulations=fractures_triangulation, fractures_3D_data=fractures_data
+        triangulations=fractures_triangulation, fractures_3d_data=fractures_data
     )
 
-    elements = Element_Fracture(P_order=1, int_order=2)
+    elements = ElementTri(polynomial_order=1, integration_order=2)
 
-    V = Fracture_Basis(mesh, elements)
+    V = FractureBasis(mesh, elements)
 
-    exact_H1_norm = torch.sqrt(torch.sum(V.integrate_functional(H1_exact)))
+    exact_H1_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_exact)))
 
     A = V.integrate_bilinear_form(a)
 
@@ -228,7 +231,7 @@ for i in range(11):
     I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 
     H1_norm_value = (
-        torch.sqrt(torch.sum(V.integrate_functional(H1_norm, I_u_h, I_u_h_grad)))
+        torch.sqrt(torch.sum(V.integrate_functional(h1_norm, I_u_h, I_u_h_grad)))
         / exact_H1_norm
     )
 
