@@ -977,9 +977,7 @@ class Basis(AbstractBasis):
 
         v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
 
-        integration_points = torch.split(
-            bar_coords.mT @ mesh.coords4elements.unsqueeze(-3), 1, dim=-1
-        )
+        integration_points = bar_coords.mT @ mesh.coords4elements.unsqueeze(-3)
 
         dx = (
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
@@ -1195,7 +1193,7 @@ class FractureBasis(AbstractBasis):
             mapped_gaussian_nodes
         )
 
-        integration_points = torch.split(mapped_3d_gaussian_nodes, 1, dim=-1)
+        integration_points = mapped_3d_gaussian_nodes
 
         dx = (
             element.reference_element_area
@@ -1276,9 +1274,7 @@ class InteriorFacetBasis(AbstractBasis):
 
         v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
 
-        integration_points = torch.split(
-            bar_coords.mT @ coords4inner_facet.unsqueeze(-3), 1, dim=-1
-        )
+        integration_points = bar_coords.mT @ coords4inner_facet.unsqueeze(-3)
 
         dx = (
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
@@ -1358,7 +1354,7 @@ class InteriorFacetFractureBasis(AbstractBasis):
             mapped_gaussian_nodes
         )
 
-        integration_points = torch.split(mapped_3d_gaussian_nodes, 1, dim=-1)
+        integration_points = mapped_3d_gaussian_nodes
 
         dx = (
             element.reference_element_area
