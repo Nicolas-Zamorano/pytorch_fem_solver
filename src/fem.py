@@ -42,21 +42,22 @@ class AbstractMesh(abc.ABC):
         key_map = {
             "vertices": ("vertices", "coordinates"),
             "vertex_markers": ("vertices", "markers"),
-            "triangles": ("triangles", "indices"),
-            "neighbors": ("triangles", "neighbors"),
-            "edges": ("edges", "indices"),
-            "edge_markers": ("edges", "markers"),
+            "triangles": ("cells", "indices"),
+            "neighbors": ("cells", "neighbors"),
+            "edges": ("facets", "indices"),
+            "edge_markers": ("facets", "markers"),
         }
 
         sub_dictionaries = {
-            "coords": {},
-            "triangles": {},
-            "edges": {},
+            "vertices": {},
+            "cells": {},
+            "facets": {},
         }
 
         for key, value in mesh_dict.items():
-            subname, new_key = key_map[key]
-            sub_dictionaries[subname][new_key] = value
+            if key in key_map:
+                subname, new_key = key_map[key]
+                sub_dictionaries[subname][new_key] = value
 
         td = tensordict.TensorDict(
             {
