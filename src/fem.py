@@ -18,8 +18,10 @@ class AbstractMesh(abc.ABC):
 
         self.mesh_parameters = self.compute_mesh_parameters(self._triangulation)
 
-        self.elements_diameter, self.nodes4boundary, self.edges_parameters = (
-            self.compute_edges_values(self._triangulation)
+        self.edges_parameters = self.compute_edges_values(self._triangulation)
+
+        self.coords4elements = self.compute_coords4elements(
+            self._triangulation["vertices"], self._triangulation["triangles"]
         )
 
     def __getitem__(self, key):
@@ -77,7 +79,7 @@ class AbstractMesh(abc.ABC):
 
         coords4nodes = mesh["vertices"]
 
-        coords4elements = self.compute_coords4nodes(coords4nodes, nodes4elements)
+        coords4elements = self.compute_coords4elements(coords4nodes, nodes4elements)
 
         nodes4edges, _ = torch.sort(
             nodes4elements[..., self.edges_permutations], dim=-1
@@ -128,6 +130,57 @@ class AbstractMesh(abc.ABC):
             .any(dim=-1)
         )
 
+        # neighbors = mesh["neighbors"]
+
+        # N_elements, _ = neighbors.shape
+
+        # tri_idx = torch.arange(
+        #     N_elements,
+        # ).repeat_interleave(3)
+
+        # neigh_flat = neighbors.reshape(-1)
+
+        # mask_inner = neigh_flat != -1
+        # mask_boundary = neigh_flat == -1
+
+        # tri1 = tri_idx[mask_inner]
+        # tri2 = neigh_flat[mask_inner]
+
+        # pair = torch.stack(
+        #     [torch.minimum(tri1, tri2), torch.maximum(tri1, tri2)], dim=1
+        # )
+
+        # elements4inner_edges_xd = torch.unique(pair, dim=0)
+
+        # elements4boundary_edges_xd = tri_idx[mask_boundary].unsqueeze(1)
+
+        # xd = elements4inner_edges_xd == elements4inner_edges
+
+        # xd_2 = elements4boundary_edges_xd == elements4boundary_edges
+
+        # xd
+        # xd_2
+
+        N_E = nodes4elements.shape[0]
+
+        neighbors = mesh["neighbors"]
+
+        inner_edges = []
+        boundary_edges = []
+
+        for t in range(N_E):
+            for i in range(3):
+                t_neigh = neighbors[t, i].item()
+                if t_neigh != -1:
+                    # Arista interior
+                    if t < t_neigh:
+                        inner_edges.append([t, t_neigh])
+                else:
+                    boundary_edges.append([t])
+
+        elements4inner_edges = torch.tensor(inner_edges, dtype=torch.long)
+        elements4boundary_edges = torch.tensor(boundary_edges, dtype=torch.long)
+
         # compute inner edges normal vector
 
         coords4inner_edges = coords4nodes[nodes4inner_edges]
@@ -175,8 +228,8 @@ class AbstractMesh(abc.ABC):
         return edges_parameters
 
     @staticmethod
-    def compute_coords4nodes(coords4nodes, nodes4elements):
-        """Compute the coordinates of the nodes in the mesh."""
+    def compute_coords4elements(coords4nodes, nodes4elements):
+        """Compute the coordinates of the elements in the mesh."""
         return coords4nodes[nodes4elements]
 
     @staticmethod
@@ -942,9 +995,9 @@ class Basis(AbstractBasis):
 
         if element.polynomial_order == 1:
 
-            coords4global_dofs = mesh.coords4nodes
-            global_dofs4elements = mesh.nodes4elements
-            nodes4boundary_dofs = mesh.nodes4boundary
+            coords4global_dofs = mesh["vertices"]
+            global_dofs4elements = mesh["triangles"]
+            nodes4boundary_dofs = mesh.edges_parameters["nodes4boundary"]
 
         elif element.polynomial_order == 2:
 
