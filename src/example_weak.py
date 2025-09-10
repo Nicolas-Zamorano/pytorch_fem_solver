@@ -3,7 +3,6 @@
 import math
 
 import matplotlib.pyplot as plt
-import tensordict as td
 import torch
 import triangle as tr
 
@@ -35,14 +34,12 @@ NN = NeuralNetwork(
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**2),
+    "Dqena" + str(0.5**8),
 )
 
-mesh_data_torch = td.TensorDict(mesh_data)
+mesh = MeshTri(triangulation=mesh_data)
 
-mesh = MeshTri(triangulation=mesh_data_torch)
-
-elements = ElementTri(polynomial_order=1, integration_order=4)
+elements = ElementTri(polynomial_order=1, integration_order=2)
 
 discrete_basis = Basis(mesh, elements)
 
