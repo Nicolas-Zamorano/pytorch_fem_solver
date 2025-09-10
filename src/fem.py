@@ -381,7 +381,9 @@ class AbstractElement(abc.ABC):
         return (integration_points - first_node) @ inv_map_jacobian.mT
 
     @abc.abstractmethod
-    def compute_shape_functions(self, bar_coords, inv_map_jacobian):
+    def compute_shape_functions(
+        self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor
+    ):
         """Compute the shape functions and their gradients at given barycentric coordinates"""
         raise NotImplementedError
 
@@ -391,12 +393,12 @@ class AbstractElement(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_barycentric_coordinates(self, x):
+    def compute_barycentric_coordinates(self, x: torch.Tensor):
         """Compute the barycentric coordinates of given points x"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_det_and_inv_map(self, map_jacobian):
+    def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
         """Compute the determinant and inverse of the mapping Jacobian"""
         raise NotImplementedError
 
@@ -424,7 +426,7 @@ class ElementLine(AbstractElement):
     def reference_element_area(self):
         return 2.0
 
-    def compute_barycentric_coordinates(self, x):
+    def compute_barycentric_coordinates(self, x: torch.Tensor):
         return torch.concat([0.5 * (1.0 - x), 0.5 * (1.0 + x)], dim=-1)
 
     def compute_gauss_values(self):
@@ -467,7 +469,7 @@ class ElementLine(AbstractElement):
 
         return v, v_grad
 
-    def compute_det_and_inv_map(self, map_jacobian):
+    def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
 
         det_map_jacobian = torch.norm(map_jacobian, dim=-2, keepdim=True)
 
@@ -492,7 +494,7 @@ class ElementTri(AbstractElement):
         """Return the outward normal vectors of the reference triangle edges."""
         return torch.tensor([[1.0, 1.0], [-1.0, 0.0], [0.0, -1.0]])
 
-    def compute_barycentric_coordinates(self, x):
+    def compute_barycentric_coordinates(self, x: torch.Tensor):
         return torch.stack(
             [1.0 - x[..., [0]] - x[..., [1]], x[..., [0]], x[..., [1]]], dim=-2
         )
@@ -702,7 +704,7 @@ class AbstractBasis(abc.ABC):
 
         return integral_value
 
-    def reduce(self, tensor):
+    def reduce(self, tensor: torch.Tensor):
         """Reduce a tensor to only include inner degrees of freedom"""
         idx = self.basis_parameters["inner_dofs"]
         return tensor[idx, :][:, idx] if tensor.shape[-1] != 1 else tensor[idx]
@@ -883,9 +885,7 @@ class Basis(AbstractBasis):
         nb_global_dofs = coords4global_dofs.shape[-2]
         nb_local_dofs = global_dofs4elements.shape[-1]
 
-        inner_dofs = torch.arange(nb_global_dofs)[
-            ~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)
-        ]
+        inner_dofs = torch.nonzero(nodes4boundary_dofs != 1, as_tuple=True)[0]
 
         rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
         cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
