@@ -12,22 +12,16 @@ class AbstractMesh(abc.ABC):
 
     def __init__(self, triangulation: dict):
 
-        self._triangulation = triangulation
+        triangulation_tensordict = self.triangle_to_tensordict(triangulation)
 
-        # self.mesh = self.triangle_to_tensordict(triangulation)
+        self._triangulation = self.build_optional_parameters(triangulation_tensordict)
 
-        self.mesh_parameters = self.compute_mesh_parameters(self._triangulation)
+        print("xd")
 
-        self.edges_parameters = self.compute_edges_values(self._triangulation)
-
-        self.coords4elements = self.compute_coords4elements(
-            self._triangulation["vertices"], self._triangulation["triangles"]
-        )
-
-    def __getitem__(self, key):
+    def __getitem__(self, key: str):
         return self._triangulation[key]
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value):
         self._triangulation[key] = value
 
     def __iter__(self):
@@ -44,14 +38,16 @@ class AbstractMesh(abc.ABC):
             "vertex_markers": ("vertices", "markers"),
             "triangles": ("cells", "indices"),
             "neighbors": ("cells", "neighbors"),
-            "edges": ("facets", "indices"),
-            "edge_markers": ("facets", "markers"),
+            "edges": ("edges", "indices"),
+            "edge_markers": ("edges", "markers"),
         }
 
         sub_dictionaries = {
             "vertices": {},
             "cells": {},
-            "facets": {},
+            "edges": {},
+            "boundary_edges": {},
+            "interior_edges": {},
         }
 
         for key, value in mesh_dict.items():
@@ -66,178 +62,121 @@ class AbstractMesh(abc.ABC):
                         content, batch_size=[len(next(iter(content.values())))]
                     )
                     if content
-                    else tensordict.TensorDict({}, batch_size=[0])
+                    else tensordict.TensorDict({})
                 )
                 for name, content in sub_dictionaries.items()
             },
             batch_size=[],
         )
-        return td
+        return td.auto_batch_size_()
 
-    def compute_edges_values(self, mesh: dict):
-        """Compute edge-related parameters for the mesh."""
-        nodes4elements = mesh["triangles"]
-
-        coords4nodes = mesh["vertices"]
-
-        coords4elements = self.compute_coords4elements(coords4nodes, nodes4elements)
-
-        nodes4edges, _ = torch.sort(
-            nodes4elements[..., self.edges_permutations], dim=-1
-        )
-
-        coords4edges = coords4nodes[nodes4edges]
-
-        coords4edges_1, coords4edges_2 = torch.split(coords4edges, 1, dim=-2)
-
-        elements_diameter = torch.min(
-            torch.norm(coords4edges_2 - coords4edges_1, dim=-1, keepdim=True),
-            dim=-2,
-            keepdim=True,
-        )[0]
-
-        nodes4unique_edges = mesh["edges"]
-        boundary_mask = mesh["edge_markers"].squeeze(-1)
-
-        edges_idx = self.get_edges_idx(nodes4elements, nodes4unique_edges)
-
-        nodes4boundary_edges = nodes4unique_edges[boundary_mask == 1]
-        nodes4inner_edges = nodes4unique_edges[boundary_mask != 1]
-        nodes4boundary = torch.nonzero(mesh["vertex_markers"])[:, [0]]
-
-        elements4boundary_edges = (
-            (
-                nodes4boundary_edges.unsqueeze(-2).unsqueeze(-2)
-                == nodes4elements.unsqueeze(-1).unsqueeze(-4)
+    def build_optional_parameters(self, triangulation: tensordict.TensorDict):
+        """Compute parameters that are not in mesh dict."""
+        if "indices" not in triangulation["edges"]:
+            vertices_4_unique_edges, boundary_mask = self.compute_edges_indices(
+                triangulation
             )
-            .any(dim=-2)
-            .all(dim=-1)
-            .float()
-            .argmax(dim=-1, keepdim=True)
+            triangulation["edges"]["indices"] = vertices_4_unique_edges
+            triangulation["edges"]["markers"] = boundary_mask
+
+        interior_edges, boundary_edges = self.compute_inner_and_outer_edges(
+            triangulation
         )
-        elements4inner_edges = torch.nonzero(
-            (
-                nodes4inner_edges.unsqueeze(-2).unsqueeze(-2)
-                == nodes4elements.unsqueeze(-1).unsqueeze(-4)
+
+        triangulation["interior_edges"] = interior_edges
+        triangulation["boundary_edges"] = boundary_edges
+
+        triangulation["cells"]["coordinates"] = self.compute_coordinates_4_cells(
+            triangulation["vertices"]["coordinates"], triangulation["cells"]["indices"]
+        )
+
+        return triangulation
+
+    def compute_inner_and_outer_edges(self, triangulation: tensordict.TensorDict):
+        """Compute interior nad boundary edges."""
+
+        indices_4_edges = triangulation["edges"]["indices"]
+        markers_4_edges = triangulation["edges"]["markers"].squeeze(-1)
+
+        indices_4_boundary_edges = indices_4_edges[markers_4_edges == 1]
+        indices_4_interior_edges = indices_4_edges[markers_4_edges != 1]
+
+        if "neighbors" in triangulation["cells"]:
+            neighbors = triangulation["cells"]["neighbors"]
+
+            number_cells, dimension_cells = triangulation["cells"]["indices"].shape
+
+            interior_edges = []
+            boundary_edges = []
+
+            for t in range(number_cells):
+                for i in range(dimension_cells):
+                    t_neigh = neighbors[t, i].item()
+                    if t_neigh != -1:
+                        if (
+                            t < t_neigh
+                        ):  # to avoid append the same edge but seems for the
+                            # other triangle perspective (ex: [1,2] and [2,1])
+                            interior_edges.append([t, t_neigh])
+                    else:
+                        boundary_edges.append([t])
+
+            cells_4_boundary_edges = torch.tensor(boundary_edges, dtype=torch.long)
+            cells_4_interior_edges = torch.tensor(interior_edges, dtype=torch.long)
+
+        else:
+            indices_4_cells = triangulation["cells"]["indices"]
+
+            cells_4_boundary_edges = (
+                (
+                    indices_4_boundary_edges.unsqueeze(-2).unsqueeze(-2)
+                    == indices_4_cells.unsqueeze(-1).unsqueeze(-4)
+                )
+                .any(dim=-2)
+                .all(dim=-1)
+                .float()
+                .argmax(dim=-1, keepdim=True)
             )
-            .any(dim=-2)
-            .all(dim=-1),
-            as_tuple=True,
-        )[1].reshape(-1, coords4nodes.shape[-1])
+            cells_4_interior_edges = torch.nonzero(
+                (
+                    indices_4_interior_edges.unsqueeze(-2).unsqueeze(-2)
+                    == indices_4_cells.unsqueeze(-1).unsqueeze(-4)
+                )
+                .any(dim=-2)
+                .all(dim=-1),
+                as_tuple=True,
+            )[1].reshape(-1, triangulation["vertices"]["coordinates"].shape[-1])
 
-        nodes_idx4boundary_edges = torch.nonzero(
-            (nodes4unique_edges.unsqueeze(-2) == nodes4boundary_edges.unsqueeze(-3))
-            .all(dim=-1)
-            .any(dim=-1)
+        boundary_edges = tensordict.TensorDict(
+            {"cells": cells_4_boundary_edges, "indices": indices_4_boundary_edges}
+        ).auto_batch_size_()
+        interior_edges = tensordict.TensorDict(
+            {"cells": cells_4_interior_edges, "indices": indices_4_interior_edges}
+        ).auto_batch_size_()
+
+        return interior_edges, boundary_edges
+
+    def compute_edges_indices(self, triangulation: tensordict.TensorDict):
+        """Compute indices for unique edges."""
+
+        indices_4_edges = triangulation["cells"]["indices"][self.edges_permutations]
+
+        indices_4_unique_edges, _, boundary_mask = torch.unique(
+            indices_4_edges.reshape(-1, 2).mT,
+            return_inverse=True,
+            sorted=False,
+            return_counts=True,
+            dim=-1,
         )
 
-        # neighbors = mesh["neighbors"]
-
-        # N_elements, _ = neighbors.shape
-
-        # tri_idx = torch.arange(
-        #     N_elements,
-        # ).repeat_interleave(3)
-
-        # neigh_flat = neighbors.reshape(-1)
-
-        # mask_inner = neigh_flat != -1
-        # mask_boundary = neigh_flat == -1
-
-        # tri1 = tri_idx[mask_inner]
-        # tri2 = neigh_flat[mask_inner]
-
-        # pair = torch.stack(
-        #     [torch.minimum(tri1, tri2), torch.maximum(tri1, tri2)], dim=1
-        # )
-
-        # elements4inner_edges_xd = torch.unique(pair, dim=0)
-
-        # elements4boundary_edges_xd = tri_idx[mask_boundary].unsqueeze(1)
-
-        # xd = elements4inner_edges_xd == elements4inner_edges
-
-        # xd_2 = elements4boundary_edges_xd == elements4boundary_edges
-
-        # xd
-        # xd_2
-
-        N_E = nodes4elements.shape[0]
-
-        neighbors = mesh["neighbors"]
-
-        inner_edges = []
-        boundary_edges = []
-
-        for t in range(N_E):
-            for i in range(3):
-                t_neigh = neighbors[t, i].item()
-                if t_neigh != -1:
-                    # Arista interior
-                    if t < t_neigh:
-                        inner_edges.append([t, t_neigh])
-                else:
-                    boundary_edges.append([t])
-
-        elements4inner_edges = torch.tensor(inner_edges, dtype=torch.long)
-        elements4boundary_edges = torch.tensor(boundary_edges, dtype=torch.long)
-
-        # compute inner edges normal vector
-
-        coords4inner_edges = coords4nodes[nodes4inner_edges]
-
-        coords4inner_edges_1, coords4inner_edges_2 = torch.split(
-            coords4inner_edges, 1, dim=-2
-        )
-
-        inner_edges_vector = coords4inner_edges_2 - coords4inner_edges_1
-
-        inner_edges_length = torch.norm(inner_edges_vector, dim=-1, keepdim=True)
-
-        normal4inner_edges = (
-            inner_edges_vector[..., [1, 0]]
-            * torch.tensor([-1.0, 1.0])
-            / inner_edges_length
-        )
-
-        inner_elements_centroid = coords4elements[elements4inner_edges].mean(dim=-2)
-
-        inner_elements_centroid_1, inner_elements_centroid_2 = torch.split(
-            inner_elements_centroid, 1, dim=-2
-        )
-
-        inner_direction_mask = (
-            normal4inner_edges * (inner_elements_centroid_2 - inner_elements_centroid_1)
-        ).sum(dim=-1)
-
-        normal4inner_edges[inner_direction_mask < 0] *= -1
-
-        edges_parameters = {
-            "nodes4edges": nodes4edges,
-            "edges_idx": edges_idx,
-            "nodes4unique_edges": nodes4unique_edges,
-            "elements4boundary_edges": elements4boundary_edges,
-            "nodes4inner_edges": nodes4inner_edges,
-            "elements4inner_edges": elements4inner_edges,
-            "nodes_idx4boundary_edges": nodes_idx4boundary_edges,
-            "inner_edges_length": inner_edges_length,
-            "normal4inner_edges": normal4inner_edges,
-            "elements_diameter": elements_diameter,
-            "nodes4boundary": nodes4boundary,
-        }
-
-        return edges_parameters
+        return indices_4_unique_edges, boundary_mask
 
     @staticmethod
-    def compute_coords4elements(coords4nodes, nodes4elements):
-        """Compute the coordinates of the elements in the mesh."""
-        return coords4nodes[nodes4elements]
-
-    @staticmethod
-    @abc.abstractmethod
-    def compute_mesh_parameters(mesh: dict):
-        """Compute basic mesh parameters related to number of nodes, elements and dimensions."""
-        raise NotImplementedError
+    def compute_coordinates_4_cells(
+        coordinates_4_nodes: torch.Tensor, indices_4_cells: torch.Tensor
+    ):
+        """Compute the coordinates of the cells in the mesh."""
+        return coordinates_4_nodes[indices_4_cells]
 
     @property
     @abc.abstractmethod
