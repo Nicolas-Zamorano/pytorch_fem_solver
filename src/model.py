@@ -91,10 +91,10 @@ class Model:
         neural_network: torch.nn.Module,
         training_step: callable,
         epochs: int = 5000,
-        learning_rate: float = 0.001,
-        use_decay_learning_rate: bool = False,
-        decay_rate: float = 0.99,
-        decay_steps: int = 200,
+        optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        optimizer_kwargs: dict = {"lr": 1e-3},
+        learning_rate_scheduler: type[torch.optim.lr_scheduler.LRScheduler] = None,
+        scheduler_kwargs: dict = {},
         use_early_stopping: bool = False,
         early_stopping_patience: int = 10,
         min_delta: float = 1e-12,
@@ -102,10 +102,15 @@ class Model:
         self._neural_network = neural_network
         self._training_step = training_step
         self._epochs = epochs
-        self._learning_rate = learning_rate
-        self._use_decay_learning_rate = use_decay_learning_rate
-        self._decay_rate = decay_rate
-        self._decay_steps = decay_steps
+        self._optimizer = optimizer(
+            self._neural_network.parameters(), **optimizer_kwargs
+        )
+
+        if learning_rate_scheduler is not None:
+            self._learning_rate_scheduler = learning_rate_scheduler(
+                self._optimizer, **scheduler_kwargs
+            )
+
         self._use_early_stopping = use_early_stopping
         self._early_stopping_patience = early_stopping_patience
         self._min_delta = min_delta
@@ -114,16 +119,7 @@ class Model:
         self._validation_loss_history = []
         self._accuracy_history = []
 
-        self._optimizer = torch.optim.Adam(
-            self._neural_network.parameters(), lr=self._learning_rate
-        )
-
         self._progress_bar = tqdm.tqdm(range(self._epochs), desc="Training Progress")
-
-        if self._use_decay_learning_rate:
-            self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                self._optimizer, gamma=self._decay_rate
-            )
 
         self._best_loss = float("inf")
         self.optimal_parameters = self._neural_network.state_dict()
@@ -138,8 +134,8 @@ class Model:
             loss, validation_loss, accuracy = self._training_step(self._neural_network)
             loss.backward()
             self._optimizer.step()
-            if self._use_decay_learning_rate:
-                self.lr_scheduler.step()
+            if self._learning_rate_scheduler is not None:
+                self._learning_rate_scheduler.step(loss.detach())
 
             loss_value_float = loss.item()
             relative_loss_float = validation_loss.item()
