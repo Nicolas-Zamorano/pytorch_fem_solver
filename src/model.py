@@ -183,17 +183,10 @@ class Model:
         """Plot the training history."""
 
         _, axis_loss = plt.subplots()
-        axis_loss.semilogy(self._loss_history, label="Training Loss")
-        axis_loss.semilogy(self._validation_loss_history, label="Validation Loss")
+        axis_loss.semilogy(self._loss_history, label="Training loss")
+        axis_loss.semilogy(self._validation_loss_history, label="Validation loss")
+        axis_loss.semilogy(self._accuracy_history, label="Accuracy")
         axis_loss.set_xlabel("# Epochs")
         axis_loss.set_ylabel("Loss")
-        axis_loss.set_title("Training and Validation Loss History")
+        axis_loss.set_title("Training history")
         axis_loss.legend()
-
-        _, axis_accuracy = plt.subplots()
-        axis_accuracy.plot(self._validation_loss_history, label="Validation Loss")
-        axis_accuracy.plot(self._accuracy_history, label="Accuracy")
-        axis_accuracy.set_xlabel("# Epochs")
-        axis_accuracy.set_ylabel("Value")
-        axis_accuracy.set_title("Validation Loss and Accuracy History")
-        axis_accuracy.legend()
