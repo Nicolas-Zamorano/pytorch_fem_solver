@@ -901,6 +901,17 @@ class Basis(AbstractBasis):
             "nb_dofs": nb_global_dofs,
         }
 
+    def compute_jacobian_map(self, mesh, element):
+        return mesh["cells"]["coordinates"].mT @ element.barycentric_grad
+
+    def compute_integration_points(self, mesh, bar_coords):
+        return bar_coords.mT @ mesh["cells"]["coordinates"].unsqueeze(-3)
+
+    def compute_integral_weights(self, element, det_map_jacobian):
+        return (
+            element.reference_element_area * element.gaussian_weights * det_map_jacobian
+        )
+
 
 class FractureBasis(AbstractBasis):
     """Class for basis representation on fractures"""
