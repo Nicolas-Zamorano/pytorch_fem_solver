@@ -16,8 +16,6 @@ class AbstractMesh(abc.ABC):
 
         self._triangulation = self.build_optional_parameters(triangulation_tensordict)
 
-        print("xd")
-
     def __getitem__(self, key: str):
         return self._triangulation[key]
 
@@ -55,7 +53,7 @@ class AbstractMesh(abc.ABC):
                 subname, new_key = key_map[key]
                 sub_dictionaries[subname][new_key] = value
 
-        td = tensordict.TensorDict(
+        mesh_tensordict = tensordict.TensorDict(
             {
                 name: (
                     tensordict.TensorDict(
@@ -68,13 +66,17 @@ class AbstractMesh(abc.ABC):
             },
             batch_size=[],
         )
-        return td.auto_batch_size_()
+
+        if mesh_tensordict.batch_dims == 0:
+            return mesh_tensordict.unsqueeze(0).auto_batch_size_()
+        else:
+            return mesh_tensordict.auto_batch_size_()
 
     def build_optional_parameters(self, triangulation: tensordict.TensorDict):
         """Compute parameters that are not in mesh dict."""
         if "indices" not in triangulation["edges"]:
             vertices_4_unique_edges, boundary_mask = self.compute_edges_indices(
-                triangulation
+                triangulation,
             )
             triangulation["edges"]["indices"] = vertices_4_unique_edges
             triangulation["edges"]["markers"] = boundary_mask
@@ -83,8 +85,12 @@ class AbstractMesh(abc.ABC):
             triangulation
         )
 
-        triangulation["interior_edges"] = interior_edges
-        triangulation["boundary_edges"] = boundary_edges
+        if triangulation.batch_size == torch.Size([1]):
+            triangulation["interior_edges"] = interior_edges.unsqueeze(0)
+            triangulation["boundary_edges"] = boundary_edges.unsqueeze(0)
+        else:
+            triangulation["interior_edges"] = interior_edges
+            triangulation["boundary_edges"] = boundary_edges
 
         triangulation["cells"]["coordinates"] = self.compute_coordinates_4_cells(
             triangulation["vertices"]["coordinates"], triangulation["cells"]["indices"]
@@ -104,14 +110,14 @@ class AbstractMesh(abc.ABC):
         if "neighbors" in triangulation["cells"]:
             neighbors = triangulation["cells"]["neighbors"]
 
-            number_cells, dimension_cells = triangulation["cells"]["indices"].shape
+            _, number_cells, dimension_cells = triangulation["cells"]["indices"].shape
 
             interior_edges = []
             boundary_edges = []
 
             for t in range(number_cells):
                 for i in range(dimension_cells):
-                    t_neigh = neighbors[t, i].item()
+                    t_neigh = neighbors[:, t, i].item()
                     if t_neigh != -1:
                         if (
                             t < t_neigh
@@ -176,7 +182,9 @@ class AbstractMesh(abc.ABC):
         coordinates_4_nodes: torch.Tensor, indices_4_cells: torch.Tensor
     ):
         """Compute the coordinates of the cells in the mesh."""
-        return coordinates_4_nodes[indices_4_cells]
+        return coordinates_4_nodes[
+            torch.arange(coordinates_4_nodes.shape[0])[:, None, None], indices_4_cells
+        ]
 
     @property
     @abc.abstractmethod
@@ -869,7 +877,9 @@ class Basis(AbstractBasis):
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
-        coords4elements = coords_4_global_dofs[global_dofs_4_elements]
+        coords4elements = mesh.compute_coordinates_4_cells(
+            coords_4_global_dofs, global_dofs_4_elements
+        )
 
         return (
             coords_4_global_dofs,
@@ -885,7 +895,7 @@ class Basis(AbstractBasis):
         nb_global_dofs = coords4global_dofs.shape[-2]
         nb_local_dofs = global_dofs4elements.shape[-1]
 
-        inner_dofs = torch.nonzero(nodes4boundary_dofs != 1, as_tuple=True)[0]
+        inner_dofs = torch.nonzero(nodes4boundary_dofs != 1, as_tuple=True)[-2]
 
         rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
         cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
@@ -917,21 +927,17 @@ class FractureBasis(AbstractBasis):
     """Class for basis representation on fractures"""
 
     def __init__(self, mesh: AbstractMesh, element: AbstractElement):
-        self.global_triangulation = self.build_global_triangulation(
-            mesh.local_triangulations
-        )
+        self.global_triangulation = self.build_global_triangulation(mesh)
 
         super().__init__(mesh, element)
 
-    def build_global_triangulation(self, local_triangulations):
+    def build_global_triangulation(self, mesh):
         """Build a global triangulation from local triangulations of multiple fractures."""
-        nb_fractures, nb_vertices, _ = local_triangulations["vertices"].shape
+        nb_fractures, nb_vertices, _ = mesh["vertices"]["coordinates"].shape
 
-        nb_edges = local_triangulations["edges"].shape[-2]
+        nb_edges = mesh["edges"]["indices"].shape[-2]
 
-        local_triangulation_3d_coords = local_triangulations["vertices_3D"].reshape(
-            -1, 3
-        )
+        local_triangulation_3d_coords = mesh["vertices_3D"].reshape(-1, 3)
 
         global_vertices_3d, global2local_idx, vertex_counts = torch.unique(
             local_triangulation_3d_coords,
@@ -956,18 +962,18 @@ class FractureBasis(AbstractBasis):
             include_self=True,
         )
 
-        global_vertices_2d = local_triangulations["vertices"].reshape(-1, 2)[
+        global_vertices_2d = mesh["vertices"]["coordinates"].reshape(-1, 2)[
             local2global_idx
         ]
 
         vertices_offset = torch.arange(nb_fractures)[:, None, None] * nb_vertices
 
         global_triangles = global2local_idx[
-            local_triangulations["triangles"] + vertices_offset
+            mesh["triangles"] + vertices_offset
         ].reshape(-1, 3)
 
         local_edges_2_global = global2local_idx[
-            local_triangulations["edges"] + vertices_offset
+            mesh["edges"] + vertices_offset
         ].reshape(-1, 2)
 
         global_edges, global2local_edges_idx, edges_counts = torch.unique(
@@ -1003,10 +1009,10 @@ class FractureBasis(AbstractBasis):
             include_self=True,
         )
 
-        global_vertices_marker = local_triangulations["vertex_markers"].reshape(-1)[
+        global_vertices_marker = mesh["vertices"]["markers"].reshape(-1)[
             local2global_idx
         ]
-        global_edges_marker = local_triangulations["edge_markers"].reshape(-1)[
+        global_edges_marker = mesh["edges"]["markers"].reshape(-1)[
             local2global_edges_idx
         ]
 
