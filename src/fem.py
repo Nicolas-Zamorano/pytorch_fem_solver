@@ -836,41 +836,42 @@ class Basis(AbstractBasis):
 
         if element.polynomial_order == 1:
 
-            coords4global_dofs = mesh["vertices"]
-            global_dofs4elements = mesh["triangles"]
-            nodes4boundary_dofs = mesh.edges_parameters["nodes4boundary"]
+            coords_4_global_dofs = mesh["vertices"]["coordinates"]
+            global_dofs_4_elements = mesh["cells"]["indices"]
+            nodes4boundary_dofs = mesh["vertices"]["markers"]
 
-        elif element.polynomial_order == 2:
+        # need to be refactored to account for deprecation of get_edges_idx function
+        # elif element.polynomial_order == 2:
 
-            new_coords4dofs = (
-                mesh.coords4nodes[mesh.edges_parameters["nodes4unique_edges"]]
-            ).mean(-2)
-            new_nodes4dofs = (
-                mesh.edges_parameters["edges_idx"].reshape(
-                    mesh.mesh_parameters["nb_simplex"], 3
-                )
-                + mesh.mesh_parameters["nb_nodes"]
-            )
-            new_nodes4boundary_dofs = (
-                mesh.edges_parameters["nodes_idx4boundary_edges"]
-                + mesh.mesh_parameters["nb_nodes"]
-            )
+        #     new_coords4dofs = (
+        #         mesh.coords4nodes[mesh.edges_parameters["nodes4unique_edges"]]
+        #     ).mean(-2)
+        #     new_nodes4dofs = (
+        #         mesh.edges_parameters["edges_idx"].reshape(
+        #             mesh.mesh_parameters["nb_simplex"], 3
+        #         )
+        #         + mesh.mesh_parameters["nb_nodes"]
+        #     )
+        #     new_nodes4boundary_dofs = (
+        #         mesh.edges_parameters["nodes_idx4boundary_edges"]
+        #         + mesh.mesh_parameters["nb_nodes"]
+        #     )
 
-            coords4global_dofs = torch.cat([mesh.coords4nodes, new_coords4dofs], dim=-2)
-            global_dofs4elements = torch.cat(
-                [mesh.nodes4elements, new_nodes4dofs], dim=-1
-            )
-            nodes4boundary_dofs = torch.cat(
-                [mesh.nodes4boundary, new_nodes4boundary_dofs], dim=-1
-            )
+        #     coords4global_dofs = torch.cat([mesh.coords4nodes, new_coords4dofs], dim=-2)
+        #     global_dofs4elements = torch.cat(
+        #         [mesh.nodes4elements, new_nodes4dofs], dim=-1
+        #     )
+        #     nodes4boundary_dofs = torch.cat(
+        #         [mesh.nodes4boundary, new_nodes4boundary_dofs], dim=-1
+        #     )
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
-        coords4elements = coords4global_dofs[global_dofs4elements]
+        coords4elements = coords_4_global_dofs[global_dofs_4_elements]
 
         return (
-            coords4global_dofs,
-            global_dofs4elements,
+            coords_4_global_dofs,
+            global_dofs_4_elements,
             nodes4boundary_dofs,
             coords4elements,
         )
