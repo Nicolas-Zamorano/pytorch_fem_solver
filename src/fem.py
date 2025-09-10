@@ -244,126 +244,84 @@ class MeshTri(AbstractMesh):
         return mapping
 
 
-class Fractures(AbstractMesh):
+class FracturesTri(MeshTri):
     """Class for handling multiple fractures represented as triangular meshes"""
 
     def __init__(self, triangulations: list, fractures_3d_data: torch.Tensor):
 
-        self.fractures_3d_data = fractures_3d_data
+        triangulations = self.stack_triangulations(triangulations)
 
-        self.local_triangulations, self.edges_parameters = self.stack_triangulations(
-            triangulations, fractures_3d_data
+        super().__init__(triangulations)
+
+        self.compute_fracture_map(fractures_3d_data)
+
+        self["vertices"]["coordinates_3d"] = self.fracture_map(
+            self["vertices"]["coordinates"]
         )
-
-        super().__init__(self.local_triangulations)
 
     @property
     def edges_permutations(self):
         return torch.tensor([[0, 1], [1, 2], [0, 2]])
 
-    def stack_triangulations(self, fracture_triangulations: list, fractures_3d_data):
-        """Stack multiple fracture triangulations into a single TensorDict
-        and compute mapping to 3D space."""
-        stack_vertices = torch.stack(
-            [triangulation["vertices"] for triangulation in fracture_triangulations],
-            dim=0,
-        )
-        stack_vertex_markers = torch.stack(
-            [
-                triangulation["vertex_markers"]
-                for triangulation in fracture_triangulations
-            ],
-            dim=0,
-        )
+    def stack_triangulations(self, fracture_triangulations: list):
+        """Stack multiple fracture triangulations into a single TensorDict"""
 
-        stack_triangles = torch.stack(
-            [triangulation["triangles"] for triangulation in fracture_triangulations],
-            dim=0,
-        )
-
-        stack_edges = torch.stack(
-            [triangulation["edges"] for triangulation in fracture_triangulations], dim=0
-        )
-        stack_edge_markers = torch.stack(
-            [
-                triangulation["edge_markers"]
-                for triangulation in fracture_triangulations
-            ],
-            dim=0,
-        )
-
-        stack_coords4triangles = stack_vertices[
-            torch.arange(stack_vertices.shape[0])[:, None, None], stack_triangles
+        fracture_triangulations_tensordict = [
+            tensordict.TensorDict(fracture_triangulation)
+            for fracture_triangulation in fracture_triangulations
         ]
 
-        fractures_2d_vertices = stack_vertices[:, :3, :]
-
-        fractures_3d_vertices = fractures_3d_data[:, :3, :].mT
-
-        hat_v = torch.cat(
-            [
-                fractures_2d_vertices.mT,
-                torch.ones_like(fractures_3d_vertices[:, [-1], :]),
-            ],
-            dim=-2,
+        stacked_fractured_triangulations = torch.cat(
+            fracture_triangulations_tensordict, dim=0
         )
 
-        linear_equation = fractures_3d_vertices @ torch.inverse(hat_v)
+        return stacked_fractured_triangulations
 
-        # Split A and b
-        fractures_map_jacobian = linear_equation[..., :2]
-        b = linear_equation[..., [-1]]
+    def compute_fracture_map(self, fractures_3d_data: torch.Tensor):
+        """compute mapping for each fracture from the 2D space to 3D."""
+        vertices_2d = self["vertices"]["coordinates"][:, :3, :]
 
-        fractures_map_jacobian_int = fractures_map_jacobian.unsqueeze(-3).unsqueeze(-3)
-        b_int = b.unsqueeze(-3).unsqueeze(-3)
+        vertices_3d = fractures_3d_data[:, :3, :]
 
-        def fractures_map(x):
-            return (fractures_map_jacobian @ x.mT + b).mT
+        extended_vertices_2d = torch.cat(
+            [vertices_2d.mT, torch.ones_like(vertices_3d[:, [-1], :])], dim=-2
+        )
 
-        def fractures_map_int(x):
-            return (fractures_map_jacobian_int @ x.mT + b_int).mT
+        linear_equation = vertices_3d @ torch.inverse(extended_vertices_2d)
 
-        det_fractures_map_jacobian = torch.norm(
-            torch.cross(*torch.split(fractures_map_jacobian, 1, dim=-1), dim=-2),
+        jacobian_fracture_map = linear_equation[..., :2]
+        translation_vector = linear_equation[..., [-1]]
+
+        det_jacobian_fracture_map = torch.norm(
+            torch.cross(*torch.split(jacobian_fracture_map, 1, dim=-1), dim=-2),
             dim=-2,
             keepdim=True,
         )
 
-        fractures_map_jacobian_inv = (
-            torch.inverse(fractures_map_jacobian.mT @ fractures_map_jacobian)
-            @ fractures_map_jacobian.mT
+        inv_jacobian_fracture_map = (
+            torch.inverse(jacobian_fracture_map.mT @ jacobian_fracture_map)
+            @ jacobian_fracture_map.mT
         )
 
-        stack_vertices_3d = fractures_map(stack_vertices)
-
-        stack_coords_3d4triangles = stack_vertices_3d[
-            torch.arange(stack_vertices_3d.shape[0])[:, None, None], stack_triangles
-        ]
-
-        stack_triangulation = tensordict.TensorDict(
-            vertices=stack_vertices,
-            vertices_3D=stack_vertices_3d,
-            vertex_markers=stack_vertex_markers,
-            triangles=stack_triangles,
-            edges=stack_edges,
-            edge_markers=stack_edge_markers,
-            fractures_map=fractures_map,
-            coords4triangles=stack_coords4triangles,
-            stack_coords_3d4triangles=stack_coords_3d4triangles,
-            fractures_map_jacobian=fractures_map_jacobian,
-            det_fractures_map_jacobian=det_fractures_map_jacobian,
-            fractures_map_jacobian_inv=fractures_map_jacobian_inv,
-            fractures_map_int=fractures_map_int,
-        )
-
-        return (stack_triangulation,)
+        self["jacobian_fracture_map"] = jacobian_fracture_map
+        self["inv_jacobian_fracture_map"] = inv_jacobian_fracture_map
+        self["det_jacobian_fracture_map"] = det_jacobian_fracture_map
+        self["translation_vector"] = translation_vector
 
     @staticmethod
-    def compute_coords4nodes(coords4nodes, nodes4elements):
+    def compute_coords4nodes(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
         """Compute the coordinates of the nodes in the mesh."""
         return coords4nodes[
             torch.arange(coords4nodes.shape[0])[:, None, None], nodes4elements
         ]
+
+    def fracture_map(self, coordinate_2d: torch.Tensor):
+        """For each fracture, compute the map from the 2D
+        coordinate to his position of in 3D space"""
+        return (
+            self["jacobian_fracture_map"] @ coordinate_2d.mT
+            + self["translation_vector"]
+        ).mT
 
 
 class AbstractElement(abc.ABC):

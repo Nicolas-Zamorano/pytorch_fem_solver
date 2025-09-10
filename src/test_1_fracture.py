@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import tensordict as td
 import triangle as tr
 
-from fem import Fractures, ElementTri, FractureBasis
+from fem import FracturesTri, ElementTri, FractureBasis
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()
@@ -30,7 +30,7 @@ fracture_2d_data = {
 }
 
 fracture_triangulation = td.TensorDict(
-    tr.triangulate(fracture_2d_data, "pqsena" + str(MESH_SIZE))
+    tr.triangulate(fracture_2d_data, "pqsea" + str(MESH_SIZE))
 )
 
 fractures_triangulation = [fracture_triangulation]
@@ -45,7 +45,7 @@ fractures_data = torch.tensor(
     ]
 )
 
-mesh = Fractures(
+mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 

@@ -9,7 +9,7 @@ import numpy as np
 import tensordict as td
 import torch
 import triangle as tr
-from fem import ElementTri, FractureBasis, Fractures
+from fem import ElementTri, FractureBasis, FracturesTri
 
 from neural_network import NeuralNetwork3D
 
@@ -280,7 +280,7 @@ for i in range(11):
         fracture_triangulation_torch,
     )
 
-    mesh = Fractures(
+    mesh = FracturesTri(
         triangulations=fractures_triangulation, fractures_3d_data=fractures_data
     )
 

@@ -7,7 +7,7 @@ import numpy as np
 import tensordict as td
 import torch
 import triangle as tr
-from fem import Fractures, ElementTri, FractureBasis
+from fem import FracturesTri, ElementTri, FractureBasis
 
 torch.set_default_dtype(torch.float64)
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
@@ -206,7 +206,7 @@ for i in range(11):
         fracture_triangulation_torch,
     )
 
-    mesh = Fractures(
+    mesh = FracturesTri(
         triangulations=fractures_triangulation, fractures_3d_data=fractures_data
     )
 

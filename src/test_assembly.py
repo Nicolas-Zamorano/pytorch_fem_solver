@@ -27,8 +27,8 @@ def test_assembly():
     )
 
     mesh_scikit = skfem.MeshTri(
-        vertices=mesh_data_meshio.points.T,
-        elements=mesh_data_meshio.cells_dict["triangle"].T,
+        doflocs=mesh_data_meshio.points.T,
+        t=mesh_data_meshio.cells_dict["triangle"].T,
     )
 
     basis_scikit = skfem.Basis(mesh_scikit, skfem.ElementTriP1(), intorder=3)
@@ -61,7 +61,7 @@ def test_assembly():
 
     elements = ElementTri(polynomial_order=1, integration_order=3)
 
-    basis = Basis(mesh, elements)
+    basis_h = Basis(mesh, elements)
 
     def bilinear(basis):
         """Stiffness + Mass matrix."""
@@ -87,11 +87,11 @@ def test_assembly():
 
         return rhs(x, y) ** 2
 
-    stiff_matrix = basis.integrate_bilinear_form(bilinear)
+    stiff_matrix = basis_h.integrate_bilinear_form(bilinear)
 
-    rhs_vector = basis.integrate_linear_form(residual)
+    rhs_vector = basis_h.integrate_linear_form(residual)
 
-    rhs_functional_scikit = basis.integrate_functional(rhs_functional)
+    rhs_functional_scikit = basis_h.integrate_functional(rhs_functional)
 
     zero = torch.zeros((1))
 

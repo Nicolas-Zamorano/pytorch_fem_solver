@@ -13,7 +13,7 @@ from fem import (
     ElementLine,
     ElementTri,
     FractureBasis,
-    Fractures,
+    FracturesTri,
     InteriorFacetFractureBasis,
 )
 
@@ -92,7 +92,7 @@ fractures_data = torch.tensor(
     ]
 )
 
-mesh = Fractures(
+mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
