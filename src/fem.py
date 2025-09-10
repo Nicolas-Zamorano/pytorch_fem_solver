@@ -647,14 +647,28 @@ class AbstractBasis(abc.ABC):
             self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs
         )
 
-    @abc.abstractmethod
     def compute_integral_values(
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
     ):
-        """Compute the integral values needed for the basis functions"""
-        raise NotImplementedError
+        """Compute the values for the numerical integration"""
+
+        map_jacobian = self.compute_jacobian_map(mesh, element)
+
+        det_map_jacobian, inv_map_jacobian = element.compute_det_and_inv_map(
+            map_jacobian
+        )
+
+        bar_coords = element.compute_barycentric_coordinates(element.gaussian_nodes)
+
+        v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
+
+        integration_points = self.compute_integration_points(mesh, bar_coords)
+
+        dx = self.compute_integral_weights(element, det_map_jacobian)
+
+        return v, v_grad, integration_points, dx, inv_map_jacobian
 
     def integrate_functional(self, function, *args, **kwargs):
         """Integrate a given functional over the mesh elements"""
@@ -790,33 +804,29 @@ class AbstractBasis(abc.ABC):
         """Compute parameters related to the basis functions"""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def compute_jacobian_map(self, mesh: AbstractMesh, element: AbstractElement):
+        """Compute the jacobian of the map that maps the local element to the physical one."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
+        """Compute the integration points, applying to map to the local quadrature points
+        to obtain the physical integration points for each element"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def compute_integral_weights(
+        self, element: AbstractMesh, det_map_jacobian: torch.Tensor
+    ):
+        """Compute the integration weight, composing of the quadrature weights, area of the
+        reference element, the determent of the jacobian of the map, as well other quantities
+        """
+        raise NotImplementedError
+
 
 class Basis(AbstractBasis):
     """Class for standard basis representation"""
-
-    def compute_integral_values(
-        self,
-        mesh: AbstractMesh,
-        element: AbstractElement,
-    ):
-
-        map_jacobian = mesh.coords4elements.mT @ element.barycentric_grad
-
-        det_map_jacobian, inv_map_jacobian = element.compute_det_and_inv_map(
-            map_jacobian
-        )
-
-        bar_coords = element.compute_barycentric_coordinates(element.gaussian_nodes)
-
-        v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
-
-        integration_points = bar_coords.mT @ mesh.coords4elements.unsqueeze(-3)
-
-        dx = (
-            element.reference_element_area * element.gaussian_weights * det_map_jacobian
-        )
-
-        return v, v_grad, integration_points, dx, inv_map_jacobian
 
     def compute_dofs(
         self,
