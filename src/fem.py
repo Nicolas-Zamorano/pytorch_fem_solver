@@ -185,12 +185,6 @@ class AbstractMesh(abc.ABC):
         the convection is the i-th node share numbering with the edge opposite to it."""
         raise NotImplementedError
 
-    @staticmethod
-    @abc.abstractmethod
-    def get_edges_idx(nodes4elements, nodes4unique_edges):
-        """Return the indices of the edges for each element in the mesh."""
-        raise NotImplementedError
-
 
 class MeshTri(AbstractMesh):
     """Class for triangular mesh representation"""
@@ -198,18 +192,6 @@ class MeshTri(AbstractMesh):
     @property
     def edges_permutations(self):
         return torch.tensor([[0, 1], [1, 2], [0, 2]])
-
-    @staticmethod
-    def compute_mesh_parameters(mesh: dict):
-
-        nb_nodes, nb_dimensions = mesh["vertices"].shape
-        nb_simplex = mesh["triangles"].shape[-2]
-
-        return {
-            "nb_nodes": nb_nodes,
-            "nb_dimensions": nb_dimensions,
-            "nb_simplex": nb_simplex,
-        }
 
     @staticmethod
     def map_fine_mesh(c4e_coarser_mesh: torch.Tensor, c4e_finer_mesh: torch.Tensor):
@@ -253,35 +235,6 @@ class MeshTri(AbstractMesh):
 
         return mapping
 
-    @staticmethod
-    def get_edges_idx(nodes4elements, nodes4unique_edges):
-        i0 = nodes4elements[..., 0]
-        i1 = nodes4elements[..., 1]
-        i2 = nodes4elements[..., 2]
-
-        tri_edges = torch.stack(
-            [
-                torch.stack([torch.min(i0, i1), torch.max(i0, i1)], dim=1),
-                torch.stack([torch.min(i1, i2), torch.max(i1, i2)], dim=1),
-                torch.stack([torch.min(i2, i0), torch.max(i2, i0)], dim=1),
-            ],
-            dim=1,
-        )  # (n_triangles, 3, 2)
-
-        m = nodes4elements.max().item() + 1
-        tri_keys = tri_edges[:, :, 0] * m + tri_edges[:, :, 1]  # (n_triangles, 3)
-
-        edge_keys = (
-            nodes4unique_edges.min(dim=-1).values * m
-            + nodes4unique_edges.max(dim=-1).values
-        )  # (n_unique_edges,)
-
-        sorted_keys, sorted_idx = torch.sort(edge_keys)
-        flat_tri_keys = tri_keys.flatten()  # (n_triangles * 3,)
-
-        edge_pos = torch.searchsorted(sorted_keys, flat_tri_keys)
-        return sorted_idx[edge_pos].reshape(tri_keys.shape)
-
 
 class Fractures(AbstractMesh):
     """Class for handling multiple fractures represented as triangular meshes"""
@@ -299,22 +252,6 @@ class Fractures(AbstractMesh):
     @property
     def edges_permutations(self):
         return torch.tensor([[0, 1], [1, 2], [0, 2]])
-
-    @staticmethod
-    def compute_mesh_parameters(mesh: dict):
-
-        nb_fractures, nb_nodes, nb_dimensions = mesh["vertices"].shape
-        _, nb_simplex, nb_size4simplex = mesh["triangles"].shape
-
-        mesh_parameters = {
-            "nb_fractures": nb_fractures,
-            "nb_nodes": nb_nodes,
-            "nb_dimensions": nb_dimensions,
-            "nb_simplex": nb_simplex,
-            "nb_size4simplex": nb_size4simplex,
-        }
-
-        return mesh_parameters
 
     def stack_triangulations(self, fracture_triangulations: list, fractures_3d_data):
         """Stack multiple fracture triangulations into a single TensorDict
@@ -350,14 +287,6 @@ class Fractures(AbstractMesh):
         stack_coords4triangles = stack_vertices[
             torch.arange(stack_vertices.shape[0])[:, None, None], stack_triangles
         ]
-
-        stack_edge_parameters = torch.stack(
-            [
-                tensordict.TensorDict(self.compute_edges_values(triangulation))
-                for triangulation in fracture_triangulations
-            ],
-            dim=0,
-        )
 
         fractures_2d_vertices = stack_vertices[:, :3, :]
 
@@ -403,10 +332,6 @@ class Fractures(AbstractMesh):
             torch.arange(stack_vertices_3d.shape[0])[:, None, None], stack_triangles
         ]
 
-        stack_normal4inner_edges_3d = fractures_map_int(
-            stack_edge_parameters["normal4inner_edges"].unsqueeze(-2)
-        )
-
         stack_triangulation = tensordict.TensorDict(
             vertices=stack_vertices,
             vertices_3D=stack_vertices_3d,
@@ -421,41 +346,9 @@ class Fractures(AbstractMesh):
             det_fractures_map_jacobian=det_fractures_map_jacobian,
             fractures_map_jacobian_inv=fractures_map_jacobian_inv,
             fractures_map_int=fractures_map_int,
-            normal4inner_edges_3D=stack_normal4inner_edges_3d,
         )
 
-        return stack_triangulation, stack_edge_parameters
-
-    @staticmethod
-    def get_edges_idx(nodes4elements, nodes4unique_edges):
-        i0 = nodes4elements[..., 0]
-        i1 = nodes4elements[..., 1]
-        i2 = nodes4elements[..., 2]
-
-        tri_edges = torch.stack(
-            [
-                torch.stack([torch.min(i0, i1), torch.max(i0, i1)], dim=1),
-                torch.stack([torch.min(i1, i2), torch.max(i1, i2)], dim=1),
-                torch.stack([torch.min(i2, i0), torch.max(i2, i0)], dim=1),
-            ],
-            dim=1,
-        )
-
-        m = nodes4elements.max().item() + 1
-        tri_keys = tri_edges[:, :, 0] * m + tri_edges[:, :, 1]
-
-        edge_keys = (
-            nodes4unique_edges.min(dim=-1).values * m
-            + nodes4unique_edges.max(dim=-1).values
-        )
-
-        sorted_keys, sorted_idx = torch.sort(edge_keys)
-        flat_tri_keys = tri_keys.flatten()
-
-        edge_pos = torch.searchsorted(sorted_keys, flat_tri_keys)
-        edge_indices = sorted_idx[edge_pos].reshape(tri_keys.shape)
-
-        return edge_indices
+        return (stack_triangulation,)
 
     @staticmethod
     def compute_coords4nodes(coords4nodes, nodes4elements):
