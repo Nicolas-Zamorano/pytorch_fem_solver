@@ -5,7 +5,6 @@ import torch
 import triangle as tr
 from skfem.helpers import dot, grad
 import meshio
-import matplotlib.pyplot as plt
 
 from fem import Basis, ElementLine, ElementTri, InteriorEdgesBasis, MeshTri
 
@@ -14,12 +13,6 @@ torch.set_default_dtype(torch.float64)
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]}, "qena0.25"
 )
-
-fig, ax = plt.subplots()
-
-tr.plot(ax, **mesh_data)
-
-plt.show()
 
 mesh_data_meshio = meshio.Mesh(
     points=mesh_data["vertices"], cells=[("triangle", mesh_data["triangles"])]
@@ -100,7 +93,7 @@ def a(basis):
 
 def l(basis):
     """Linear form."""
-    return f(*basis.integration_points) * basis.v
+    return f(basis.integration_points) * basis.v
 
 
 A = V.reduce(V.integrate_bilinear_form(a))
@@ -109,9 +102,9 @@ b = V.reduce(V.integrate_linear_form(l))
 sol = torch.zeros(V.basis_parameters["linear_form_shape"])
 sol[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
 
-V_inner_edges = InteriorEdgesBasis(
-    mesh, ElementLine(polynomial_order=1, integration_order=2)
-)
+element_inner_edges = ElementLine(polynomial_order=1, integration_order=2)
+
+V_inner_edges = InteriorEdgesBasis(mesh, element_inner_edges)
 
 I_u, I_u_grad = V.interpolate(V_inner_edges, sol)
 
@@ -153,6 +146,9 @@ print(
         torch.norm(I_u_grad.squeeze(-2) - I_u_grad_sk.mT) / torch.norm(I_u_grad_sk)
     ).item(),
 )
+
+print("Size of    I_u_grad: ", I_u_grad.size())
+print("Size of I_u_grad_sk: ", I_u_grad_sk.size())
 
 
 def jump(_, h_element, n_element, solution_grad):
