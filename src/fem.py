@@ -61,10 +61,7 @@ class AbstractMesh(abc.ABC):
             batch_size=[],
         )
 
-        if mesh_tensordict.batch_dims == 0:
-            return mesh_tensordict.unsqueeze(0).auto_batch_size_()
-        else:
-            return mesh_tensordict.auto_batch_size_()
+        return mesh_tensordict.auto_batch_size_()
 
     def build_optional_parameters(self, triangulation: tensordict.TensorDict):
         """Compute parameters that are not in mesh dict."""
@@ -79,21 +76,20 @@ class AbstractMesh(abc.ABC):
             triangulation["edges"]["indices"] = vertices_4_unique_edges
             triangulation["edges"]["markers"] = boundary_mask
 
-        interior_edges, boundary_edges = self.compute_inner_and_outer_edges(
+        interior_edges, boundary_edges = self.compute_interior_and_boundary_edges(
             triangulation
         )
 
-        if triangulation.batch_size == torch.Size([1]):
-            triangulation["interior_edges"] = interior_edges.unsqueeze(0)
-            triangulation["boundary_edges"] = boundary_edges.unsqueeze(0)
-        else:
-            triangulation["interior_edges"] = interior_edges
-            triangulation["boundary_edges"] = boundary_edges
+        cells_lenght = self.compute_cells_min_length(triangulation)
+
+        triangulation["interior_edges"] = interior_edges
+        triangulation["boundary_edges"] = boundary_edges
+        triangulation["cells"]["lenght"] = cells_lenght
 
         return triangulation
 
-    def compute_inner_and_outer_edges(self, triangulation: tensordict.TensorDict):
-        """Compute interior nad boundary edges."""
+    def compute_interior_and_boundary_edges(self, triangulation: tensordict.TensorDict):
+        """Compute interior and boundary edges."""
 
         indices_4_edges = triangulation["edges"]["indices"]
         markers_4_edges = triangulation["edges"]["markers"].squeeze(-1)
@@ -104,14 +100,14 @@ class AbstractMesh(abc.ABC):
         if "neighbors" in triangulation["cells"]:
             neighbors = triangulation["cells"]["neighbors"]
 
-            _, number_cells, dimension_cells = triangulation["cells"]["indices"].shape
+            number_cells, dimension_cells = triangulation["cells"]["indices"].shape
 
             interior_edges = []
             boundary_edges = []
 
             for t in range(number_cells):
                 for i in range(dimension_cells):
-                    t_neigh = neighbors[:, t, i].item()
+                    t_neigh = neighbors[t, i].item()
                     if t_neigh != -1:
                         if (
                             t < t_neigh
@@ -200,14 +196,14 @@ class AbstractMesh(abc.ABC):
             {
                 "cells": cells_4_boundary_edges,
                 "indices": indices_4_boundary_edges,
-                "coordinates": coordinates_4_interior_edges,
+                "coordinates": coordinates_4_boundary_edges,
             }
         ).auto_batch_size_()
         interior_edges = tensordict.TensorDict(
             {
                 "cells": cells_4_interior_edges,
                 "indices": indices_4_interior_edges,
-                "coordinates": coordinates_4_boundary_edges,
+                "coordinates": coordinates_4_interior_edges,
                 "length": interior_edges_length,
                 "normals": normal_4_interior_edges,
             }
@@ -220,9 +216,7 @@ class AbstractMesh(abc.ABC):
         coordinates_4_nodes: torch.Tensor, indices_4_cells: torch.Tensor
     ):
         """Compute the coordinates of the cells in the mesh."""
-        return coordinates_4_nodes[
-            torch.arange(coordinates_4_nodes.shape[0])[:, None, None], indices_4_cells
-        ]
+        return coordinates_4_nodes[indices_4_cells]
 
     def compute_edges_indices(self, triangulation: tensordict.TensorDict):
         """Compute indices for unique edges."""
@@ -755,7 +749,7 @@ class AbstractBasis(abc.ABC):
 
     def interpolate(self, basis: "AbstractBasis", tensor: torch.Tensor = None):
         """Interpolate a tensor from the current basis to another basis."""
-        if basis == self:
+        if basis is self:
             indices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
 
             v = self.v
@@ -781,7 +775,7 @@ class AbstractBasis(abc.ABC):
         #         new_integrations_points.squeeze(-2), inv_map_jacobian
         #     )
 
-        if basis.__class__ == InteriorEdgesBasis:
+        elif basis.__class__ == InteriorEdgesBasis:
 
             # elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
 
@@ -795,13 +789,16 @@ class AbstractBasis(abc.ABC):
 
             coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
                 self.mesh["cells"]["coordinates"][..., [0], :], cells_4_interior_edges
-            )
+            ).unsqueeze(-3)
 
             inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
                 self.inv_map_jacobian, cells_4_interior_edges
             )
 
-            integration_points = basis.integration_points.unsqueeze(-4)
+            integration_points = basis.integration_points.unsqueeze(-3)
+
+            # For computing the inverse mapping of the integrations points of the interior edges,
+            # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
 
             new_integrations_points = self.element.compute_inverse_map(
                 coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
@@ -834,17 +831,17 @@ class AbstractBasis(abc.ABC):
 
         else:
 
-            nodes = torch.split(self.coords4global_dofs, 1, dim=-1)
+            nodes = self.coords4global_dofs
 
             def interpolator(function):
-                return (function(*nodes)[indices_4_cells_4_interior_edges] * v).sum(
+                return (function(nodes)[indices_4_cells_4_interior_edges] * v).sum(
                     -2, keepdim=True
                 )
 
             def interpolator_grad(function):
-                return (
-                    function(*nodes)[indices_4_cells_4_interior_edges] * v_grad
-                ).sum(-2, keepdim=True)
+                return (function(nodes)[indices_4_cells_4_interior_edges] * v_grad).sum(
+                    -2, keepdim=True
+                )
 
             return interpolator, interpolator_grad
 
