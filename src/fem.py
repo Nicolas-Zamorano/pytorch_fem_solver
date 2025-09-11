@@ -783,22 +783,28 @@ class AbstractBasis(abc.ABC):
 
         if basis.__class__ == InteriorFacetBasis:
 
-            elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
+            # elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
 
-            dofs_idx = basis.mesh.nodes4elements[elements_mask].unsqueeze(-2)
+            cells_4_interior_edges = basis.mesh["interior_edges"]["cells"]
 
-            coords4elements_first_node = self.coords4elements[..., [0], :][
-                elements_mask
-            ].unsqueeze(-3)
+            # dofs_idx = basis.mesh.nodes4elements[elements_mask].unsqueeze(-2)
 
-            inv_map_jacobian = self.inv_map_jacobian[elements_mask]
+            indices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
+                basis.mesh["cells"]["indices"], cells_4_interior_edges
+            ).unsqueeze(-2)
 
-            integration_points = torch.split(
-                torch.cat(basis.integration_points, dim=-1).unsqueeze(-4), 1, dim=-1
+            coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
+                self.mesh["cells"]["coordinates"][..., [0], :], cells_4_interior_edges
             )
 
+            inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
+                self.inv_map_jacobian, cells_4_interior_edges
+            )
+
+            integration_points = basis.integration_points.unsqueeze(-4)
+
             new_integrations_points = self.element.compute_inverse_map(
-                coords4elements_first_node, integration_points, inv_map_jacobian
+                coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
             )
 
             bar_coords = self.element.compute_barycentric_coordinates(
@@ -816,9 +822,13 @@ class AbstractBasis(abc.ABC):
 
         if tensor is not None:
 
-            interpolation = (tensor[dofs_idx] * v).sum(-2, keepdim=True)
+            interpolation = (tensor[indices_4_cells_4_interior_edges] * v).sum(
+                -2, keepdim=True
+            )
 
-            interpolation_grad = (tensor[dofs_idx] * v_grad).sum(-2, keepdim=True)
+            interpolation_grad = (
+                tensor[indices_4_cells_4_interior_edges] * v_grad
+            ).sum(-2, keepdim=True)
 
             return interpolation, interpolation_grad
 
@@ -827,10 +837,14 @@ class AbstractBasis(abc.ABC):
             nodes = torch.split(self.coords4global_dofs, 1, dim=-1)
 
             def interpolator(function):
-                return (function(*nodes)[dofs_idx] * v).sum(-2, keepdim=True)
+                return (function(*nodes)[indices_4_cells_4_interior_edges] * v).sum(
+                    -2, keepdim=True
+                )
 
             def interpolator_grad(function):
-                return (function(*nodes)[dofs_idx] * v_grad).sum(-2, keepdim=True)
+                return (
+                    function(*nodes)[indices_4_cells_4_interior_edges] * v_grad
+                ).sum(-2, keepdim=True)
 
             return interpolator, interpolator_grad
 
@@ -952,6 +966,69 @@ class Basis(AbstractBasis):
 
     def compute_integration_points(self, mesh, bar_coords):
         return bar_coords.mT @ mesh["cells"]["coordinates"].unsqueeze(-3)
+
+    def compute_integral_weights(self, element, det_map_jacobian):
+        return (
+            element.reference_element_area * element.gaussian_weights * det_map_jacobian
+        )
+
+
+class InteriorFacetBasis(AbstractBasis):
+    """Class for basis representation on interior facets"""
+
+    def compute_dofs(
+        self,
+        mesh: AbstractMesh,
+        element: AbstractElement,
+    ):
+
+        if element.polynomial_order == 1:
+            ## WARNING !!!! THIS IS NOT CORRECT, NEED TO FIX
+            coords_4_global_dofs = mesh["vertices"]["coordinates"]
+            global_dofs_4_elements = mesh["cells"]["indices"]
+            nodes4boundary_dofs = mesh["vertices"]["markers"]
+        else:
+            raise NotImplementedError("Polynomial order not implemented")
+
+        coords4elements = mesh.compute_coordinates_4_cells(
+            coords_4_global_dofs, global_dofs_4_elements
+        )
+
+        return (
+            coords_4_global_dofs,
+            global_dofs_4_elements,
+            nodes4boundary_dofs,
+            coords4elements,
+        )
+
+    def compute_basis_parameters(
+        self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
+    ):
+
+        nb_global_dofs = coords4global_dofs.shape[-2]
+        nb_local_dofs = global_dofs4elements.shape[-1]
+
+        inner_dofs = torch.nonzero(nodes4boundary_dofs != 1, as_tuple=True)[-2]
+
+        rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
+        cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
+
+        form_idx = global_dofs4elements.reshape(-1)
+
+        return {
+            "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
+            "bilinear_form_idx": (rows_idx, cols_idx),
+            "linear_form_shape": (nb_global_dofs, 1),
+            "linear_form_idx": (form_idx,),
+            "inner_dofs": inner_dofs,
+            "nb_dofs": nb_global_dofs,
+        }
+
+    def compute_jacobian_map(self, mesh, element):
+        return mesh["interior_edges"]["coordinates"].mT @ element.barycentric_grad
+
+    def compute_integration_points(self, mesh, bar_coords):
+        return bar_coords.mT @ mesh["interior_edges"]["coordinates"].unsqueeze(-3)
 
     def compute_integral_weights(self, element, det_map_jacobian):
         return (
@@ -1150,74 +1227,6 @@ class FractureBasis(AbstractBasis):
         }
 
         return basis_parameters
-
-
-class InteriorFacetBasis(AbstractBasis):
-    """Class for basis representation on interior facets"""
-
-    def compute_integral_values(self, mesh, element):
-
-        coords4inner_facet = mesh.coords4nodes[
-            mesh.edges_parameters["nodes4inner_edges"]
-        ]
-
-        map_jacobian = coords4inner_facet.mT @ element.barycentric_grad
-
-        det_map_jacobian, inv_map_jacobian = element.compute_det_and_inv_map(
-            map_jacobian
-        )
-
-        bar_coords = element.compute_barycentric_coordinates(element.gaussian_nodes)
-
-        v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
-
-        integration_points = bar_coords.mT @ coords4inner_facet.unsqueeze(-3)
-
-        dx = (
-            element.reference_element_area * element.gaussian_weights * det_map_jacobian
-        )
-
-        return v, v_grad, integration_points, dx, inv_map_jacobian
-
-    def compute_dofs(
-        self,
-        mesh: AbstractMesh,
-        element: AbstractElement,
-    ):
-
-        if element.polynomial_order == 1:
-            coords4global_dofs = mesh.coords4nodes
-            global_dofs4elements = mesh.nodes4elements
-            nodes4boundary_dofs = mesh.nodes4boundary
-
-        else:
-            raise NotImplementedError("Polynomial order not implemented")
-
-        return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
-
-    def compute_basis_parameters(
-        self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
-    ):
-
-        nb_global_dofs = coords4global_dofs.shape[-2]
-        nb_local_dofs = global_dofs4elements.shape[-1]
-
-        inner_dofs = torch.arange(nb_global_dofs)[
-            ~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)
-        ]
-
-        rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
-        cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
-
-        form_idx = global_dofs4elements.reshape(-1)
-
-        return {
-            "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
-            "bilinear_form_idx": (rows_idx, cols_idx),
-            "linear_form_shape": (nb_global_dofs, 1),
-            "linear_form_idx": (form_idx,),
-            "inner_dofs": (inner_dofs),
-        }
 
 
 class InteriorFacetFractureBasis(AbstractBasis):
