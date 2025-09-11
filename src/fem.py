@@ -781,7 +781,7 @@ class AbstractBasis(abc.ABC):
         #         new_integrations_points.squeeze(-2), inv_map_jacobian
         #     )
 
-        if basis.__class__ == InteriorFacetBasis:
+        if basis.__class__ == InteriorEdgesBasis:
 
             # elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
 
@@ -973,8 +973,8 @@ class Basis(AbstractBasis):
         )
 
 
-class InteriorFacetBasis(AbstractBasis):
-    """Class for basis representation on interior facets"""
+class InteriorEdgesBasis(AbstractBasis):
+    """Class for basis representation on interior edges"""
 
     def compute_dofs(
         self,
@@ -1229,8 +1229,8 @@ class FractureBasis(AbstractBasis):
         return basis_parameters
 
 
-class InteriorFacetFractureBasis(AbstractBasis):
-    """Class for basis representation on interior facets of fractures"""
+class InteriorEdgesFractureBasis(AbstractBasis):
+    """Class for basis representation on interior edges of fractures"""
 
     def compute_integral_values(self, mesh: AbstractMesh, element: AbstractElement):
 
