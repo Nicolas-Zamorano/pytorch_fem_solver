@@ -18,7 +18,8 @@ def rhs(x, y):
 
 def l(basis):
     """Linear form."""
-    x, y = basis.integration_points
+    integration_points = basis.integration_points
+    x, y = torch.split(integration_points, 1, dim=-1)
 
     v = basis.v
 
@@ -52,14 +53,16 @@ def exact_dy(x, y):
 
 def h1_exact(basis):
     """H1 norm of the exact solution."""
-    x, y = basis.integration_points
+    integration_points = basis.integration_points
+    x, y = torch.split(integration_points, 1, dim=-1)
 
     return exact(x, y) ** 2 + exact_dx(x, y) ** 2 + exact_dy(x, y) ** 2
 
 
 def h1_norm(basis, solution, solution_grad):
     """H1 norm of the FEM solution."""
-    x, y = basis.integration_points
+    integration_points = basis.integration_points
+    x, y = torch.split(integration_points, 1, dim=-1)
 
     solution_dx, solution_dy = torch.split(solution_grad, 1, dim=-1)
 
@@ -89,7 +92,7 @@ fracture_triangulation = td.TensorDict(
 
 mesh = MeshTri(triangulation=fracture_triangulation)
 
-elements = ElementTri(P_order=1, int_order=1)
+elements = ElementTri(polynomial_order=1, integration_order=1)
 
 V = Basis(mesh, elements)
 
@@ -105,7 +108,7 @@ u_h = torch.zeros(V.basis_parameters["linear_form_shape"])
 
 u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
 
-exact_value = exact(*torch.unbind(mesh.coords4nodes, -1))
+exact_value = exact(*torch.unbind(mesh["vertices"]["coordinates"], -1))
 
 I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 
@@ -123,10 +126,10 @@ fig.suptitle(r"FEM computed for $\omega_1$", fontsize=16)
 ax1 = fig.add_subplot(1, 3, 1, projection="3d")
 
 ax1.plot_trisurf(
-    mesh.coords4nodes[:, 0],
-    mesh.coords4nodes[:, 1],
+    mesh["vertices"]["coordinates"][:, 0],
+    mesh["vertices"]["coordinates"][:, 1],
     u_h.squeeze(-1),
-    triangles=mesh.nodes4elements,
+    triangles=mesh["cells"]["indices"],
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,
@@ -140,10 +143,10 @@ ax1.set_zlabel(r"$u_h(x,y)$")
 ax2 = fig.add_subplot(1, 3, 2, projection="3d")
 
 ax2.plot_trisurf(
-    mesh.coords4nodes[:, 0],
-    mesh.coords4nodes[:, 1],
+    mesh["vertices"]["coordinates"][:, 0],
+    mesh["vertices"]["coordinates"][:, 1],
     exact_value,
-    triangles=mesh.nodes4elements,
+    triangles=mesh["cells"]["indices"],
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,
@@ -157,10 +160,10 @@ ax2.set_zlabel(r"$u(x,y)$")
 ax3 = fig.add_subplot(1, 3, 3, projection="3d")
 
 ax3.plot_trisurf(
-    mesh.coords4nodes[:, 0],
-    mesh.coords4nodes[:, 1],
+    mesh["vertices"]["coordinates"][:, 0],
+    mesh["vertices"]["coordinates"][:, 1],
     abs(exact_value - u_h.squeeze(-1)),
-    triangles=mesh.nodes4elements,
+    triangles=mesh["cells"]["indices"],
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,

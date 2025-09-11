@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import skfem
 import torch
 
-from fem import Basis, ElementLine, ElementTri, InteriorFacetBasis, MeshTri
+from fem import Basis, ElementLine, ElementTri, InteriorEdgesBasis, MeshTri
 from neural_network import NeuralNetwork
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
@@ -77,7 +77,7 @@ elements = ElementTri(polynomial_order=1, integration_order=2)
 
 elements_1D = ElementLine(polynomial_order=1, integration_order=2)
 
-V_edges = InteriorFacetBasis(mesh, elements_1D)
+V_edges = InteriorEdgesBasis(mesh, elements_1D)
 
 V = Basis(mesh, elements)
 

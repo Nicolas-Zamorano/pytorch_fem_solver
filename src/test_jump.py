@@ -1,16 +1,34 @@
 """Test jump functional implementation against skfem."""
 
 import skfem
-import tensordict as td
 import torch
 import triangle as tr
 from skfem.helpers import dot, grad
+import meshio
+import matplotlib.pyplot as plt
 
-from fem import Basis, ElementLine, ElementTri, InteriorFacetBasis, MeshTri
+from fem import Basis, ElementLine, ElementTri, InteriorEdgesBasis, MeshTri
 
 torch.set_default_dtype(torch.float64)
 
-mesh_sk = skfem.MeshTri1().refined(1)
+mesh_data = tr.triangulate(
+    {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]}, "qena0.25"
+)
+
+fig, ax = plt.subplots()
+
+tr.plot(ax, **mesh_data)
+
+plt.show()
+
+mesh_data_meshio = meshio.Mesh(
+    points=mesh_data["vertices"], cells=[("triangle", mesh_data["triangles"])]
+)
+
+mesh_sk = skfem.MeshTri(
+    doflocs=mesh_data_meshio.points.T,
+    t=mesh_data_meshio.cells_dict["triangle"].T,
+)
 
 elem_sk = skfem.ElementTriP1()
 
@@ -31,7 +49,7 @@ def a_sk(u, v, _):
 @skfem.LinearForm
 def l_sk(v, w):
     """Linear form."""
-    return f(*w.x) * v
+    return f(w.x) * v
 
 
 A_sk = a_sk.assemble(V_sk)
@@ -68,15 +86,7 @@ def jump_sk(w):
 
 eta_E_sk = torch.tensor(jump_sk.elemental(fbasis[0], **u_facet))
 
-coords4nodes = mesh_sk.p.T
-
-nodes4elements = mesh_sk.t.T
-
-triangulation = tr.triangulate(
-    dict(vertices=coords4nodes, triangles=nodes4elements), "e"
-)
-
-mesh = MeshTri(td.TensorDict(triangulation))
+mesh = MeshTri(mesh_data)
 
 element = ElementTri(polynomial_order=1, integration_order=2)
 
@@ -99,14 +109,14 @@ b = V.reduce(V.integrate_linear_form(l))
 sol = torch.zeros(V.basis_parameters["linear_form_shape"])
 sol[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
 
-V_inner_edges = InteriorFacetBasis(
+V_inner_edges = InteriorEdgesBasis(
     mesh, ElementLine(polynomial_order=1, integration_order=2)
 )
 
 I_u, I_u_grad = V.interpolate(V_inner_edges, sol)
 
-h_E = V.mesh.edges_parameters["inner_edges_length"].unsqueeze(-2)
-n_E = V.mesh.edges_parameters["normal4inner_edges"].unsqueeze(-2)
+h_E = V.mesh["interior_edges"]["length"].unsqueeze(-2)
+n_E = V.mesh["interior_edges"]["normals"].unsqueeze(-2)
 
 I_u_values, I_u_count = torch.unique(
     torch.round(I_u.reshape(-1), decimals=16), return_counts=True

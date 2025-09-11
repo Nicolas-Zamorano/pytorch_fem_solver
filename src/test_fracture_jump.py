@@ -11,8 +11,8 @@ from fem import (
     ElementTri,
     FractureBasis,
     FracturesTri,
-    InteriorFacetBasis,
-    InteriorFacetFractureBasis,
+    InteriorEdgesBasis,
+    InteriorEdgesFractureBasis,
     MeshTri,
 )
 
@@ -68,7 +68,7 @@ b = V.reduce(V.integrate_linear_form(l, rhs))
 u = torch.zeros(V.basis_parameters["linear_form_shape"])
 u[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
 
-V_inner_edges = InteriorFacetBasis(mesh, ElementLine(P_order=1, int_order=2))
+V_inner_edges = InteriorEdgesBasis(mesh, ElementLine(P_order=1, int_order=2))
 
 I_u, I_u_grad = V.interpolate(V_inner_edges, u)
 
@@ -111,7 +111,7 @@ b_f = V_f.reduce(V_f.integrate_linear_form(l, rhs_3d))
 u_f = torch.zeros(V_f.basis_parameters["linear_form_shape"])
 u_f[V_f.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_f, b_f)
 
-V_f_inner_edges = InteriorFacetFractureBasis(
+V_f_inner_edges = InteriorEdgesFractureBasis(
     mesh_f, ElementLine(P_order=1, int_order=2)
 )
 

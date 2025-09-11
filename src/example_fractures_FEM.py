@@ -14,7 +14,7 @@ from fem import (
     ElementTri,
     FractureBasis,
     FracturesTri,
-    InteriorFacetFractureBasis,
+    InteriorEdgesFractureBasis,
 )
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
@@ -312,7 +312,7 @@ u_h_fracture_1, u_h_fracture_2 = torch.unbind(
 
 ### --- TRACE PARAMETERS --- ###
 
-V_inner_edges = InteriorFacetFractureBasis(
+V_inner_edges = InteriorEdgesFractureBasis(
     mesh, ElementLine(polynomial_order=1, integration_order=2)
 )
 

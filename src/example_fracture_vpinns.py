@@ -18,7 +18,7 @@ from fem import (
     ElementTri,
     FractureBasis,
     FracturesTri,
-    InteriorFacetFractureBasis,
+    InteriorEdgesFractureBasis,
 )
 from neural_network import NeuralNetwork3D
 
@@ -395,7 +395,7 @@ u_NN_trace = u_NN_global[V.global_triangulation["traces__global_vertices_idx"]].
 
 ### --- JUMP PARAMETERS --- ###
 
-V_inner_edges = InteriorFacetFractureBasis(
+V_inner_edges = InteriorEdgesFractureBasis(
     mesh, ElementLine(polynomial_order=1, integration_order=2)
 )
 
