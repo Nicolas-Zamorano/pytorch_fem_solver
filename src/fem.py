@@ -153,31 +153,64 @@ class AbstractMesh(abc.ABC):
             triangulation["vertices"]["coordinates"], indices_4_interior_edges
         )
 
-            cells_4_boundary_edges = (
-                (
-                    indices_4_boundary_edges.unsqueeze(-2).unsqueeze(-2)
-                    == indices_4_cells.unsqueeze(-1).unsqueeze(-4)
-                )
-                .any(dim=-2)
-                .all(dim=-1)
-                .float()
-                .argmax(dim=-1, keepdim=True)
+        coordinates_4_boundary_edges = self.compute_coordinates_4_cells(
+            triangulation["vertices"]["coordinates"], indices_4_boundary_edges
+        )
+
+        (
+            coordinates_4_interior_edges_first_vertex,
+            coordinates_4_interior_edges_second_vertex,
+        ) = torch.split(coordinates_4_interior_edges, 1, dim=-2)
+
+        interior_edges_vector = (
+            coordinates_4_interior_edges_second_vertex
+            - coordinates_4_interior_edges_first_vertex
+        )
+
+        interior_edges_length = torch.norm(interior_edges_vector, dim=-1, keepdim=True)
+
+        normal_4_interior_edges = (
+            interior_edges_vector[..., [1, 0]]
+            * torch.tensor([-1.0, 1.0])
+            / interior_edges_length
+        )
+
+        # Fix orientation
+
+        centroid_4_interior_edges = self.compute_coordinates_4_cells(
+            triangulation["cells"]["coordinates"], cells_4_interior_edges
+        ).mean(dim=-2)
+
+        (
+            centroid_4_interior_edges_first_coordinate,
+            centroid_4_interior_edges_second_coordinate,
+        ) = torch.split(centroid_4_interior_edges, 1, dim=-2)
+
+        normal_direction_4_interior_edges = (
+            normal_4_interior_edges
+            * (
+                centroid_4_interior_edges_second_coordinate
+                - centroid_4_interior_edges_first_coordinate
             )
-            cells_4_interior_edges = torch.nonzero(
-                (
-                    indices_4_interior_edges.unsqueeze(-2).unsqueeze(-2)
-                    == indices_4_cells.unsqueeze(-1).unsqueeze(-4)
-                )
-                .any(dim=-2)
-                .all(dim=-1),
-                as_tuple=True,
-            )[1].reshape(-1, triangulation["vertices"]["coordinates"].shape[-1])
+        ).sum(dim=-1)
+
+        normal_4_interior_edges[normal_direction_4_interior_edges < 0] *= -1
 
         boundary_edges = tensordict.TensorDict(
-            {"cells": cells_4_boundary_edges, "indices": indices_4_boundary_edges}
+            {
+                "cells": cells_4_boundary_edges,
+                "indices": indices_4_boundary_edges,
+                "coordinates": coordinates_4_interior_edges,
+            }
         ).auto_batch_size_()
         interior_edges = tensordict.TensorDict(
-            {"cells": cells_4_interior_edges, "indices": indices_4_interior_edges}
+            {
+                "cells": cells_4_interior_edges,
+                "indices": indices_4_interior_edges,
+                "coordinates": coordinates_4_boundary_edges,
+                "length": interior_edges_length,
+                "normals": normal_4_interior_edges,
+            }
         ).auto_batch_size_()
 
         return interior_edges, boundary_edges
@@ -197,14 +230,31 @@ class AbstractMesh(abc.ABC):
 
         return indices_4_unique_edges, boundary_mask
 
-    @staticmethod
-    def compute_coordinates_4_cells(
-        coordinates_4_nodes: torch.Tensor, indices_4_cells: torch.Tensor
-    ):
-        """Compute the coordinates of the cells in the mesh."""
-        return coordinates_4_nodes[
-            torch.arange(coordinates_4_nodes.shape[0])[:, None, None], indices_4_cells
-        ]
+    def compute_cells_min_length(self, triangulation: tensordict.TensorDict):
+        """For each cells, compute the smaller length of the edges."""
+        indices_4_edges, _ = torch.sort(
+            triangulation["cells"]["indices"][..., self.edges_permutations], dim=-1
+        )
+
+        coordinates_4_edges = self.compute_coordinates_4_cells(
+            triangulation["vertices"]["coordinates"], indices_4_edges
+        )
+
+        coordinates_4_edges_first_vertex, coordinates_4_edges_second_vertex = (
+            torch.split(coordinates_4_edges, 1, dim=-2)
+        )
+
+        diameter_4_cells = torch.min(
+            torch.norm(
+                coordinates_4_edges_second_vertex - coordinates_4_edges_first_vertex,
+                dim=-1,
+                keepdim=True,
+            ),
+            dim=-2,
+            keepdim=True,
+        )[0]
+
+        return diameter_4_cells
 
     @property
     @abc.abstractmethod
