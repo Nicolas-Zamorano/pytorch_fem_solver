@@ -68,6 +68,10 @@ class AbstractMesh(abc.ABC):
 
     def build_optional_parameters(self, triangulation: tensordict.TensorDict):
         """Compute parameters that are not in mesh dict."""
+        triangulation["cells"]["coordinates"] = self.compute_coordinates_4_cells(
+            triangulation["vertices"]["coordinates"], triangulation["cells"]["indices"]
+        )
+
         if "indices" not in triangulation["edges"]:
             vertices_4_unique_edges, boundary_mask = self.compute_edges_indices(
                 triangulation,
@@ -85,10 +89,6 @@ class AbstractMesh(abc.ABC):
         else:
             triangulation["interior_edges"] = interior_edges
             triangulation["boundary_edges"] = boundary_edges
-
-        triangulation["cells"]["coordinates"] = self.compute_coordinates_4_cells(
-            triangulation["vertices"]["coordinates"], triangulation["cells"]["indices"]
-        )
 
         return triangulation
 
@@ -214,6 +214,15 @@ class AbstractMesh(abc.ABC):
         ).auto_batch_size_()
 
         return interior_edges, boundary_edges
+
+    @staticmethod
+    def compute_coordinates_4_cells(
+        coordinates_4_nodes: torch.Tensor, indices_4_cells: torch.Tensor
+    ):
+        """Compute the coordinates of the cells in the mesh."""
+        return coordinates_4_nodes[
+            torch.arange(coordinates_4_nodes.shape[0])[:, None, None], indices_4_cells
+        ]
 
     def compute_edges_indices(self, triangulation: tensordict.TensorDict):
         """Compute indices for unique edges."""
@@ -412,7 +421,6 @@ class AbstractElement(abc.ABC):
         inv_map_jacobian: torch.Tensor,
     ):
         """Compute the inverse map from physical coordinates to reference coordinates"""
-        integration_points = torch.concat(integration_points, dim=-1)
 
         return (integration_points - first_node) @ inv_map_jacobian.mT
 
@@ -745,10 +753,10 @@ class AbstractBasis(abc.ABC):
         idx = self.basis_parameters["inner_dofs"]
         return tensor[idx, :][:, idx] if tensor.shape[-1] != 1 else tensor[idx]
 
-    def interpolate(self, basis, tensor=None):
+    def interpolate(self, basis: "AbstractBasis", tensor: torch.Tensor = None):
         """Interpolate a tensor from the current basis to another basis."""
         if basis == self:
-            dofs_idx = self.global_dofs4elements.unsqueeze(-2)
+            indices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
