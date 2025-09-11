@@ -125,7 +125,33 @@ class AbstractMesh(abc.ABC):
             cells_4_interior_edges = torch.tensor(interior_edges, dtype=torch.long)
 
         else:
-            indices_4_cells = triangulation["cells"]["indices"]
+            raise NotImplementedError
+            # WARNING!!! DOESN'T WORK AS INTENDED
+            # indices_4_cells = triangulation["cells"]["indices"]
+
+            # cells_4_boundary_edges = (
+            #     (
+            #         indices_4_boundary_edges.unsqueeze(-2).unsqueeze(-2)
+            #         == indices_4_cells.unsqueeze(-1).unsqueeze(-4)
+            #     )
+            #     .any(dim=-2)
+            #     .all(dim=-1)
+            #     .float()
+            #     .argmax(dim=-1, keepdim=True)
+            # )
+            # cells_4_interior_edges = torch.nonzero(
+            #     (
+            #         indices_4_interior_edges.unsqueeze(-2).unsqueeze(-2)
+            #         == indices_4_cells.unsqueeze(-1).unsqueeze(-4)
+            #     )
+            #     .any(dim=-2)
+            #     .all(dim=-1),
+            #     as_tuple=True,
+            # )[1].reshape(-1, triangulation["vertices"]["coordinates"].shape[-1])
+
+        coordinates_4_interior_edges = self.compute_coordinates_4_cells(
+            triangulation["vertices"]["coordinates"], indices_4_interior_edges
+        )
 
             cells_4_boundary_edges = (
                 (
