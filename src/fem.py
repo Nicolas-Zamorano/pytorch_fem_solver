@@ -22,12 +22,6 @@ class AbstractMesh(abc.ABC):
     def __setitem__(self, key: str, value):
         self._triangulation[key] = value
 
-    def __iter__(self):
-        return iter(self._triangulation)
-
-    def __len__(self):
-        return len(self._triangulation)
-
     @staticmethod
     def triangle_to_tensordict(mesh_dict: dict):
         """Convert a mesh dictionary from 'triangle' library to a TensorDict"""
