@@ -103,25 +103,47 @@ class AbstractMesh(abc.ABC):
         if "neighbors" in triangulation["cells"]:
             neighbors = triangulation["cells"]["neighbors"]
 
-            number_cells, dimension_cells = triangulation["cells"]["indices"].size()
+            # number_cells, dimension_cells = triangulation["cells"]["vertices"].size()
 
-            interior_edges = []
-            boundary_edges = []
+            # interior_edges = []
+            # boundary_edges = []
 
-            for t in range(number_cells):
-                for i in range(dimension_cells):
-                    t_neigh = neighbors[t, i].item()
-                    if t_neigh != -1:
-                        if (
-                            t < t_neigh
-                        ):  # to avoid append the same edge but seems for the
-                            # other triangle perspective (ex: [1,2] and [2,1])
-                            interior_edges.append([t, t_neigh])
-                    else:
-                        boundary_edges.append([t])
+            # for t in range(number_cells):
+            #     for i in range(dimension_cells):
+            #         t_neigh = neighbors[t, i].item()
+            #         if t_neigh != -1:
+            #             if (
+            #                 t < t_neigh
+            #             ):  # to avoid append the same edge but seems for the
+            #                 # other triangle perspective (ex: [1,2] and [2,1])
+            #                 interior_edges.append([t, t_neigh])
+            #         else:
+            #             boundary_edges.append([t])
 
-            cells_4_boundary_edges = torch.tensor(boundary_edges, dtype=torch.long)
-            cells_4_interior_edges = torch.tensor(interior_edges, dtype=torch.long)
+            # cells_4_boundary_edges = torch.tensor(boundary_edges, dtype=torch.long)
+            # cells_4_interior_edges = torch.tensor(interior_edges, dtype=torch.long)
+
+            number_neighbors = neighbors.size(-2)
+
+            cells_idx = torch.arange(number_neighbors).repeat_interleave(
+                triangulation["cells"]["vertices"].size(-1)
+            )
+
+            neigh_flat = neighbors.reshape(-1)
+
+            mask_inner = neigh_flat != -1
+            mask_boundary = neigh_flat == -1
+
+            tri1 = cells_idx[mask_inner]
+            tri2 = neigh_flat[mask_inner]
+
+            pair = torch.stack(
+                [torch.minimum(tri1, tri2), torch.maximum(tri1, tri2)], dim=1
+            )
+
+            cells_4_interior_edges = torch.unique(pair, dim=0)
+
+            cells_4_boundary_edges = cells_idx[mask_boundary].unsqueeze(1)
 
         else:
             raise NotImplementedError
