@@ -39,12 +39,12 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
 
     def build_network(
         self,
-        input_dimension,
-        output_dimension,
-        nb_layers,
-        neurons_per_layers,
-        activation_function,
-        use_xavier_initialization,
+        input_dimension: int,
+        output_dimension: int,
+        nb_layers: int,
+        neurons_per_layers: int,
+        activation_function: torch.nn.Module,
+        use_xavier_initialization: bool,
     ):
         """Build the neural network architecture."""
         layers = []
@@ -65,22 +65,48 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
 
         return torch.nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         """Forward pass through the network."""
         return self._neural_network(x) * self._boundary_condition_modifier(x)
 
-    def gradient(self, x):
-        """Compute the gradient of the network output with respect to its inputs."""
-        x.requires_grad_(True)
-        output = self.forward(x)
+    def gradient(self, inputs: torch.Tensor):
+        """Compute the gradient of the neural network with respect to its inputs."""
+        inputs.requires_grad_(True)
+        output = self.forward(inputs)
         gradients = torch.autograd.grad(
             outputs=output,
-            inputs=x,
+            inputs=inputs,
             grad_outputs=torch.ones_like(output),
             retain_graph=True,
             create_graph=True,
         )[0]
         return gradients
+
+    def laplacian(self, inputs: torch.Tensor):
+        """Compute the laplacian of the neural network with respect to its inputs."""
+        inputs.requires_grad_(True)
+        output = self.forward(inputs)
+        gradients = torch.autograd.grad(
+            outputs=output,
+            inputs=inputs,
+            grad_outputs=torch.ones_like(output),
+            retain_graph=True,
+            create_graph=True,
+        )[0]
+
+        laplacian = torch.zeros_like(output)
+
+        for i in range(inputs.size(-1)):
+            grad2 = torch.autograd.grad(
+                gradients[..., [i]],
+                inputs,
+                grad_outputs=torch.ones_like(gradients[..., [i]]),
+                create_graph=True,
+                retain_graph=True,
+            )[0][..., [i]]
+            laplacian += grad2
+
+        return laplacian
 
 
 class Model:
@@ -92,9 +118,9 @@ class Model:
         training_step: callable,
         epochs: int = 5000,
         optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
-        optimizer_kwargs: dict = {"lr": 1e-3},
+        optimizer_kwargs: dict = None,
         learning_rate_scheduler: type[torch.optim.lr_scheduler.LRScheduler] = None,
-        scheduler_kwargs: dict = {},
+        scheduler_kwargs: dict = None,
         use_early_stopping: bool = False,
         early_stopping_patience: int = 10,
         min_delta: float = 1e-12,
@@ -102,6 +128,8 @@ class Model:
         self._neural_network = neural_network
         self._training_step = training_step
         self._epochs = epochs
+        if optimizer_kwargs is None:
+            optimizer_kwargs = {"lr": 0.001}
         self._optimizer = optimizer(
             self._neural_network.parameters(), **optimizer_kwargs
         )
@@ -110,6 +138,8 @@ class Model:
             self._learning_rate_scheduler = learning_rate_scheduler(
                 self._optimizer, **scheduler_kwargs
             )
+        else:
+            self._learning_rate_scheduler = None
 
         self._use_early_stopping = use_early_stopping
         self._early_stopping_patience = early_stopping_patience
@@ -175,14 +205,26 @@ class Model:
         """Load the optimal parameters of the neural network."""
         self._neural_network.load_state_dict(self.optimal_parameters)
 
-    def plot_training_history(self):
+    def plot_training_history(
+        self,
+        plot_names: dict = None,
+    ):
         """Plot the training history."""
+        if plot_names is None:
+            plot_names = {
+                "loss": "Training loss",
+                "validation": "Validation loss",
+                "accuracy": "Accuracy",
+                "title": "Training history",
+            }
 
         _, axis_loss = plt.subplots()
-        axis_loss.semilogy(self._loss_history, label="Training loss")
-        axis_loss.semilogy(self._validation_loss_history, label="Validation loss")
-        axis_loss.semilogy(self._accuracy_history, label="Accuracy")
+        axis_loss.semilogy(self._loss_history, label=plot_names["loss"])
+        axis_loss.semilogy(
+            self._validation_loss_history, label=plot_names["validation"]
+        )
+        axis_loss.semilogy(self._accuracy_history, label=plot_names["accuracy"])
         axis_loss.set_xlabel("# Epochs")
         axis_loss.set_ylabel("Loss")
-        axis_loss.set_title("Training history")
+        axis_loss.set_title(plot_names["title"])
         axis_loss.legend()
