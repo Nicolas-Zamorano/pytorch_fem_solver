@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 import triangle as tr
 
-from fem import Basis, ElementTri, MeshTri
+from fem import Basis, ElementTri, MeshTri, ElementLine, InteriorEdgesBasis
 from model import FeedForwardNeuralNetwork as NeuralNetwork, Model
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
@@ -43,6 +43,18 @@ elements = ElementTri(polynomial_order=1, integration_order=2)
 
 discrete_basis = Basis(mesh, elements)
 
+elements_1D = ElementLine(polynomial_order=1, integration_order=2)
+
+V_edges = InteriorEdgesBasis(mesh, elements_1D)
+
+_, interpolator_to_edges_grad = discrete_basis.interpolate(V_edges)
+
+_, interpolators_grad = discrete_basis.interpolate(discrete_basis)
+
+h_T = discrete_basis.mesh["cells"]["length"]
+h_E = discrete_basis.mesh["interior_edges"]["length"].unsqueeze(-2)
+n_E = discrete_basis.mesh["interior_edges"]["normals"].unsqueeze(-2)
+
 # ---------------------- Residual Parameters ----------------------#
 
 
@@ -51,12 +63,11 @@ def rhs(x, y):
     return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
 
-def residual(basis, gradient):
+def residual(basis, neural_network):
     """Residual of the PDE."""
-    integration_points = basis.integration_points
-    x, y = torch.split(integration_points, 1, dim=-1)
+    x, y = torch.split(basis.integration_points, 1, dim=-1)
 
-    grad = gradient(integration_points)
+    grad = interpolators_grad(neural_network)
 
     v = basis.v
     v_grad = basis.v_grad
@@ -70,6 +81,31 @@ def gram_matrix(basis):
     v_grad = basis.v_grad
 
     return v_grad @ v_grad.mT
+
+
+def jump(_, normal_elements, edge_size, nn):
+    """Jump term for discontinuous solutions"""
+    interpolator_u_grad_plus, interpolator_u_grad_minus = torch.unbind(
+        interpolator_to_edges_grad(nn), dim=-4
+    )
+    return (
+        edge_size
+        * (
+            (interpolator_u_grad_plus * normal_elements).sum(-1, keepdim=True)
+            + (interpolator_u_grad_minus * -normal_elements).sum(-1, keepdim=True)
+        )
+        ** 2
+    )
+
+
+def rhs_term(basis, triangle_size, nn):
+    """Residual term for the right-hand side"""
+    integration_points = basis.integration_points
+    x, y = torch.split(integration_points, 1, dim=-1)
+
+    # return triangle_size**2 * (rhs(x, y) + interpolators_grad(nn))
+
+    return triangle_size**2 * (rhs(x, y) + nn(integration_points))
 
 
 gram_matrix_inverse = torch.inverse(
@@ -128,7 +164,13 @@ def training_step(neural_network):
 
     loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
 
-    # loss_value = torch.sum(residual_vector**2, dim=0)
+    posteriori = (
+        discrete_basis.integrate_functional(rhs_term, h_T, neural_network) ** 2
+    ).sum() + (V_edges.integrate_functional(jump, n_E, h_E, neural_network) ** 2).sum()
+
+    # loss_value = torch.sum(residual_vector**2) + posteriori
+
+    loss_value += posteriori
 
     relative_loss = torch.sqrt(loss_value) / exact_norm**2
 
@@ -155,7 +197,6 @@ model = Model(
     early_stopping_patience=50,
     min_delta=1e-12,
 )
-
 
 model.train()
 
@@ -198,7 +239,7 @@ model.plot_training_history(
         "loss": r"$\mathcal{L}(u_{\theta})$",
         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-        "title": "RVPINNs",
+        "title": " RVPINNs + a posteriori estimator",
     }
 )
 

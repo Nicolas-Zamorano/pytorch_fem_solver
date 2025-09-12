@@ -55,7 +55,7 @@ def rhs(x, y):
     return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
 
-h_T = V.mesh["cells"]["lenght"]
+h_T = V.mesh["cells"]["length"]
 h_E = V.mesh["interior_edges"]["length"].unsqueeze(-2)
 n_E = V.mesh["interior_edges"]["normals"].unsqueeze(-2)
 
@@ -148,9 +148,9 @@ model = Model(
     training_step=training_step,
     epochs=15000,
     optimizer=torch.optim.Adam,
-    optimizer_kwargs={"lr": 0.01},
-    learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
-    scheduler_kwargs={"gamma": 0.9},
+    optimizer_kwargs={"lr": 0.001},
+    # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
+    # scheduler_kwargs={"gamma": 0.9},
     use_early_stopping=False,
     early_stopping_patience=100,
     min_delta=1e-12,
@@ -192,6 +192,13 @@ axis_solution.set_ylabel("y")
 axis_solution.set_title(r"$|u-u_\theta|$")
 plt.tight_layout()
 
-model.plot_training_history()
+model.plot_training_history(
+    plot_names={
+        "loss": r"$\mathcal{L}(u_{\theta})$",
+        "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
+        "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
+        "title": "only a posteriori estimator",
+    }
+)
 
 plt.show()

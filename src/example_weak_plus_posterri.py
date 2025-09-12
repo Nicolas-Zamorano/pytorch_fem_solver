@@ -49,9 +49,7 @@ V_edges = InteriorEdgesBasis(mesh, elements_1D)
 
 _, interpolator_to_edges_grad = discrete_basis.interpolate(V_edges)
 
-_, interpolators_grad = discrete_basis.interpolate(discrete_basis)
-
-h_T = discrete_basis.mesh["cells"]["lenght"]
+h_T = discrete_basis.mesh["cells"]["length"]
 h_E = discrete_basis.mesh["interior_edges"]["length"].unsqueeze(-2)
 n_E = discrete_basis.mesh["interior_edges"]["normals"].unsqueeze(-2)
 
@@ -63,12 +61,11 @@ def rhs(x, y):
     return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
 
 
-def residual(basis, gradient):
+def residual(basis, neural_network):
     """Residual of the PDE."""
-    integration_points = basis.integration_points
-    x, y = torch.split(integration_points, 1, dim=-1)
+    x, y = torch.split(basis.integration_points, 1, dim=-1)
 
-    grad = gradient(integration_points)
+    grad = neural_network.gradient(basis.integration_points)
 
     v = basis.v
     v_grad = basis.v_grad
@@ -84,10 +81,10 @@ def gram_matrix(basis):
     return v_grad @ v_grad.mT
 
 
-def jump(_, normal_elements, edge_size, nn):
+def jump(_, normal_elements, edge_size, neural_network):
     """Jump term for discontinuous solutions"""
     interpolator_u_grad_plus, interpolator_u_grad_minus = torch.unbind(
-        interpolator_to_edges_grad(nn), dim=-4
+        interpolator_to_edges_grad(neural_network), dim=-4
     )
     return (
         edge_size
@@ -99,11 +96,13 @@ def jump(_, normal_elements, edge_size, nn):
     )
 
 
-def rhs_term(basis, triangle_size, nn):
+def rhs_term(basis, triangle_size, neural_network):
     """Residual term for the right-hand side"""
     x, y = torch.split(basis.integration_points, 1, dim=-1)
 
-    return triangle_size**2 * (rhs(x, y) + interpolators_grad(nn))
+    return triangle_size**2 * (
+        rhs(x, y) + neural_network.laplacian(basis.integration_points)
+    )
 
 
 gram_matrix_inverse = torch.inverse(
@@ -157,16 +156,18 @@ exact_norm = torch.sqrt(torch.sum(discrete_basis.integrate_functional(h1_exact))
 def training_step(neural_network):
     """Training step for the neural network."""
     residual_vector = discrete_basis.reduce(
-        discrete_basis.integrate_linear_form(residual, neural_network.gradient)
+        discrete_basis.integrate_linear_form(residual, neural_network)
     )
 
-    # loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
+    loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
 
-    posterri = (
+    posteriori = (
         discrete_basis.integrate_functional(rhs_term, h_T, neural_network) ** 2
     ).sum() + (V_edges.integrate_functional(jump, n_E, h_E, neural_network) ** 2).sum()
 
-    loss_value = torch.sum(residual_vector**2) + posterri
+    # loss_value = torch.sum(residual_vector**2) + posteriori
+
+    loss_value += posteriori
 
     relative_loss = torch.sqrt(loss_value) / exact_norm**2
 
@@ -184,13 +185,13 @@ def training_step(neural_network):
 model = Model(
     neural_network=NN,
     training_step=training_step,
-    epochs=4000,
+    epochs=8000,
     optimizer=torch.optim.Adam,
     optimizer_kwargs={"lr": 0.001},
-    learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
-    scheduler_kwargs={"gamma": 0.9},
+    # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
+    # scheduler_kwargs={"gamma": 0.99**100},
     use_early_stopping=True,
-    early_stopping_patience=100,
+    early_stopping_patience=50,
     min_delta=1e-12,
 )
 
@@ -230,6 +231,13 @@ axis_solution.set_ylabel("y")
 axis_solution.set_title(r"$|u-u_\theta|$")
 plt.tight_layout()
 
-model.plot_training_history()
+model.plot_training_history(
+    plot_names={
+        "loss": r"$\mathcal{L}(u_{\theta})$",
+        "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
+        "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
+        "title": " RVPINNs + a posteriori estimator",
+    }
+)
 
 plt.show()
