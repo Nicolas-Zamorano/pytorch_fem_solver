@@ -12,9 +12,9 @@ class AbstractMesh(abc.ABC):
 
     def __init__(self, triangulation: dict):
 
-        triangulation_tensordict = self.triangle_to_tensordict(triangulation)
+        triangulation_tensordict = self._triangle_to_tensordict(triangulation)
 
-        self._triangulation = self.build_optional_parameters(triangulation_tensordict)
+        self._triangulation = self._build_optional_parameters(triangulation_tensordict)
 
     def __getitem__(self, key: str):
         return self._triangulation[key]
@@ -23,7 +23,7 @@ class AbstractMesh(abc.ABC):
         self._triangulation[key] = value
 
     @staticmethod
-    def triangle_to_tensordict(mesh_dict: dict):
+    def _triangle_to_tensordict(mesh_dict: dict):
         """Convert a mesh dictionary from 'triangle' library to a TensorDict"""
         key_map = {
             "vertices": ("vertices", "coordinates"),
@@ -63,32 +63,34 @@ class AbstractMesh(abc.ABC):
 
         return mesh_tensordict.auto_batch_size_()
 
-    def build_optional_parameters(self, triangulation: tensordict.TensorDict):
+    def _build_optional_parameters(self, triangulation: tensordict.TensorDict):
         """Compute parameters that are not in mesh dict."""
         triangulation["cells"]["coordinates"] = self.compute_coordinates_4_cells(
             triangulation["vertices"]["coordinates"], triangulation["cells"]["indices"]
         )
 
         if "indices" not in triangulation["edges"]:
-            vertices_4_unique_edges, boundary_mask = self.compute_edges_indices(
+            vertices_4_unique_edges, boundary_mask = self._compute_edges_indices(
                 triangulation,
             )
             triangulation["edges"]["indices"] = vertices_4_unique_edges
             triangulation["edges"]["markers"] = boundary_mask
 
-        interior_edges, boundary_edges = self.compute_interior_and_boundary_edges(
+        interior_edges, boundary_edges = self._compute_interior_and_boundary_edges(
             triangulation
         )
 
-        cells_lenght = self.compute_cells_min_length(triangulation)
+        cells_length = self._compute_cells_min_length(triangulation)
 
         triangulation["interior_edges"] = interior_edges
         triangulation["boundary_edges"] = boundary_edges
-        triangulation["cells"]["lenght"] = cells_lenght
+        triangulation["cells"]["length"] = cells_length
 
         return triangulation
 
-    def compute_interior_and_boundary_edges(self, triangulation: tensordict.TensorDict):
+    def _compute_interior_and_boundary_edges(
+        self, triangulation: tensordict.TensorDict
+    ):
         """Compute interior and boundary edges."""
 
         indices_4_edges = triangulation["edges"]["indices"]
@@ -100,7 +102,7 @@ class AbstractMesh(abc.ABC):
         if "neighbors" in triangulation["cells"]:
             neighbors = triangulation["cells"]["neighbors"]
 
-            number_cells, dimension_cells = triangulation["cells"]["indices"].shape
+            number_cells, dimension_cells = triangulation["cells"]["indices"].size()
 
             interior_edges = []
             boundary_edges = []
@@ -143,7 +145,7 @@ class AbstractMesh(abc.ABC):
             #     .any(dim=-2)
             #     .all(dim=-1),
             #     as_tuple=True,
-            # )[1].reshape(-1, triangulation["vertices"]["coordinates"].shape[-1])
+            # )[1].reshape(-1, triangulation["vertices"]["coordinates"].size(-1))
 
         coordinates_4_interior_edges = self.compute_coordinates_4_cells(
             triangulation["vertices"]["coordinates"], indices_4_interior_edges
@@ -218,10 +220,10 @@ class AbstractMesh(abc.ABC):
         """Compute the coordinates of the cells in the mesh."""
         return coordinates_4_nodes[indices_4_cells]
 
-    def compute_edges_indices(self, triangulation: tensordict.TensorDict):
+    def _compute_edges_indices(self, triangulation: tensordict.TensorDict):
         """Compute indices for unique edges."""
 
-        indices_4_edges = triangulation["cells"]["indices"][self.edges_permutations]
+        indices_4_edges = triangulation["cells"]["indices"][self._edges_permutations]
 
         indices_4_unique_edges, _, boundary_mask = torch.unique(
             indices_4_edges.reshape(-1, 2).mT,
@@ -233,10 +235,10 @@ class AbstractMesh(abc.ABC):
 
         return indices_4_unique_edges, boundary_mask
 
-    def compute_cells_min_length(self, triangulation: tensordict.TensorDict):
+    def _compute_cells_min_length(self, triangulation: tensordict.TensorDict):
         """For each cells, compute the smaller length of the edges."""
         indices_4_edges, _ = torch.sort(
-            triangulation["cells"]["indices"][..., self.edges_permutations], dim=-1
+            triangulation["cells"]["indices"][..., self._edges_permutations], dim=-1
         )
 
         coordinates_4_edges = self.compute_coordinates_4_cells(
@@ -261,7 +263,7 @@ class AbstractMesh(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def edges_permutations(self):
+    def _edges_permutations(self):
         """Return the local node indices defining each edge of the element.
         the convection is the i-th node share numbering with the edge opposite to it."""
         raise NotImplementedError
@@ -271,11 +273,11 @@ class MeshTri(AbstractMesh):
     """Class for triangular mesh representation"""
 
     @property
-    def edges_permutations(self):
+    def _edges_permutations(self):
         return torch.tensor([[0, 1], [1, 2], [0, 2]])
 
     @staticmethod
-    def map_fine_mesh(c4e_coarser_mesh: torch.Tensor, c4e_finer_mesh: torch.Tensor):
+    def _map_fine_mesh(c4e_coarser_mesh: torch.Tensor, c4e_finer_mesh: torch.Tensor):
         """Map each element of a finer mesh to an element of the current coarser mesh."""
         centroids_h = c4e_finer_mesh.mean(dim=-2)  # (n_elem_h, 2)
 
@@ -303,12 +305,12 @@ class MeshTri(AbstractMesh):
 
         inside = (u >= 0) & (v >= 0) & (u + v <= 1)  # (n_elem_h, n_elem_H)
 
-        mapping = torch.full((c4e_finer_mesh.shape[0],), -1, dtype=torch.long)
+        mapping = torch.full((c4e_finer_mesh.size(0),), -1, dtype=torch.long)
 
-        candidates = inside.nonzero(as_tuple=False)  # shape (n_matches, 2)
+        candidates = inside.nonzero(as_tuple=False)  # (n_matches, 2)
 
-        seen = torch.zeros(c4e_finer_mesh.shape[0], dtype=torch.bool)
-        for i in range(candidates.shape[0]):
+        seen = torch.zeros(c4e_finer_mesh.size(0), dtype=torch.bool)
+        for i in range(candidates.size(0)):
             idx_finer_mesh, idx_coarser_mesh = candidates[i]
             if not seen[idx_finer_mesh]:
                 mapping[idx_finer_mesh] = idx_coarser_mesh
@@ -322,21 +324,21 @@ class FracturesTri(MeshTri):
 
     def __init__(self, triangulations: list, fractures_3d_data: torch.Tensor):
 
-        triangulations = self.stack_triangulations(triangulations)
+        triangulations = self._stack_triangulations(triangulations)
 
         super().__init__(triangulations)
 
-        self.compute_fracture_map(fractures_3d_data)
+        self._compute_fracture_map(fractures_3d_data)
 
-        self["vertices"]["coordinates_3d"] = self.fracture_map(
+        self["vertices"]["coordinates_3d"] = self._fracture_map(
             self["vertices"]["coordinates"]
         )
 
     @property
-    def edges_permutations(self):
+    def _edges_permutations(self):
         return torch.tensor([[0, 1], [1, 2], [0, 2]])
 
-    def stack_triangulations(self, fracture_triangulations: list):
+    def _stack_triangulations(self, fracture_triangulations: list):
         """Stack multiple fracture triangulations into a single TensorDict"""
 
         fracture_triangulations_tensordict = [
@@ -350,7 +352,7 @@ class FracturesTri(MeshTri):
 
         return stacked_fractured_triangulations
 
-    def compute_fracture_map(self, fractures_3d_data: torch.Tensor):
+    def _compute_fracture_map(self, fractures_3d_data: torch.Tensor):
         """compute mapping for each fracture from the 2D space to 3D."""
         vertices_2d = self["vertices"]["coordinates"][:, :3, :]
 
@@ -382,13 +384,13 @@ class FracturesTri(MeshTri):
         self["translation_vector"] = translation_vector
 
     @staticmethod
-    def compute_coords4nodes(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
+    def _compute_coords4nodes(coords4nodes: torch.Tensor, nodes4elements: torch.Tensor):
         """Compute the coordinates of the nodes in the mesh."""
         return coords4nodes[
-            torch.arange(coords4nodes.shape[0])[:, None, None], nodes4elements
+            torch.arange(coords4nodes.size(0))[:, None, None], nodes4elements
         ]
 
-    def fracture_map(self, coordinate_2d: torch.Tensor):
+    def _fracture_map(self, coordinate_2d: torch.Tensor):
         """For each fracture, compute the map from the 2D
         coordinate to his position of in 3D space"""
         return (
@@ -406,7 +408,7 @@ class AbstractElement(abc.ABC):
         self.integration_order = integration_order
         self.inv_map_jacobian = None
 
-        self.gaussian_nodes, self.gaussian_weights = self.compute_gauss_values()
+        self.gaussian_nodes, self.gaussian_weights = self._compute_gauss_values()
 
     def compute_inverse_map(
         self,
@@ -426,7 +428,7 @@ class AbstractElement(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_gauss_values(self):
+    def _compute_gauss_values(self):
         """Compute the Gaussian integration points and weights"""
         raise NotImplementedError
 
@@ -467,7 +469,7 @@ class ElementLine(AbstractElement):
     def compute_barycentric_coordinates(self, x: torch.Tensor):
         return torch.concat([0.5 * (1.0 - x), 0.5 * (1.0 + x)], dim=-1)
 
-    def compute_gauss_values(self):
+    def _compute_gauss_values(self):
 
         if self.integration_order == 2:
 
@@ -586,7 +588,7 @@ class ElementTri(AbstractElement):
 
         return v, v_grad
 
-    def compute_gauss_values(self):
+    def _compute_gauss_values(self):
 
         if self.integration_order == 1:
 
@@ -671,30 +673,30 @@ class AbstractBasis(abc.ABC):
             self.integration_points,
             self.dx,
             self.inv_map_jacobian,
-        ) = self.compute_integral_values(mesh, element)
+        ) = self._compute_integral_values(mesh, element)
 
         (
             self.coords4global_dofs,
             self.global_dofs4elements,
             self.nodes4boundary_dofs,
             self.coords4elements,
-        ) = self.compute_dofs(
+        ) = self._compute_dofs(
             mesh,
             element,
         )
 
-        self.basis_parameters = self.compute_basis_parameters(
+        self.basis_parameters = self._compute_basis_parameters(
             self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs
         )
 
-    def compute_integral_values(
+    def _compute_integral_values(
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
     ):
         """Compute the values for the numerical integration"""
 
-        map_jacobian = self.compute_jacobian_map(mesh, element)
+        map_jacobian = self._compute_jacobian_map(mesh, element)
 
         det_map_jacobian, inv_map_jacobian = element.compute_det_and_inv_map(
             map_jacobian
@@ -704,9 +706,9 @@ class AbstractBasis(abc.ABC):
 
         v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
 
-        integration_points = self.compute_integration_points(mesh, bar_coords)
+        integration_points = self._compute_integration_points(mesh, bar_coords)
 
-        dx = self.compute_integral_weights(element, det_map_jacobian)
+        dx = self._compute_integral_weights(element, det_map_jacobian)
 
         return v, v_grad, integration_points, dx, inv_map_jacobian
 
@@ -745,7 +747,7 @@ class AbstractBasis(abc.ABC):
     def reduce(self, tensor: torch.Tensor):
         """Reduce a tensor to only include inner degrees of freedom"""
         idx = self.basis_parameters["inner_dofs"]
-        return tensor[idx, :][:, idx] if tensor.shape[-1] != 1 else tensor[idx]
+        return tensor[idx, :][:, idx] if tensor.size(-1) != 1 else tensor[idx]
 
     def interpolate(self, basis: "AbstractBasis", tensor: torch.Tensor = None):
         """Interpolate a tensor from the current basis to another basis."""
@@ -846,7 +848,7 @@ class AbstractBasis(abc.ABC):
             return interpolator, interpolator_grad
 
     @abc.abstractmethod
-    def compute_dofs(
+    def _compute_dofs(
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
@@ -855,25 +857,25 @@ class AbstractBasis(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_basis_parameters(
+    def _compute_basis_parameters(
         self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
     ):
         """Compute parameters related to the basis functions"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_jacobian_map(self, mesh: AbstractMesh, element: AbstractElement):
+    def _compute_jacobian_map(self, mesh: AbstractMesh, element: AbstractElement):
         """Compute the jacobian of the map that maps the local element to the physical one."""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
+    def _compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
         """Compute the integration points, applying to map to the local quadrature points
         to obtain the physical integration points for each element"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_integral_weights(
+    def _compute_integral_weights(
         self, element: AbstractMesh, det_map_jacobian: torch.Tensor
     ):
         """Compute the integration weight, composing of the quadrature weights, area of the
@@ -885,7 +887,7 @@ class AbstractBasis(abc.ABC):
 class Basis(AbstractBasis):
     """Class for standard basis representation"""
 
-    def compute_dofs(
+    def _compute_dofs(
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
@@ -935,12 +937,12 @@ class Basis(AbstractBasis):
             coords4elements,
         )
 
-    def compute_basis_parameters(
+    def _compute_basis_parameters(
         self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
     ):
 
-        nb_global_dofs = coords4global_dofs.shape[-2]
-        nb_local_dofs = global_dofs4elements.shape[-1]
+        nb_global_dofs = coords4global_dofs.size(-2)
+        nb_local_dofs = global_dofs4elements.size(-1)
 
         inner_dofs = torch.nonzero(nodes4boundary_dofs != 1, as_tuple=True)[-2]
 
@@ -958,13 +960,13 @@ class Basis(AbstractBasis):
             "nb_dofs": nb_global_dofs,
         }
 
-    def compute_jacobian_map(self, mesh, element):
+    def _compute_jacobian_map(self, mesh, element):
         return mesh["cells"]["coordinates"].mT @ element.barycentric_grad
 
-    def compute_integration_points(self, mesh, bar_coords):
+    def _compute_integration_points(self, mesh, bar_coords):
         return bar_coords.mT @ mesh["cells"]["coordinates"].unsqueeze(-3)
 
-    def compute_integral_weights(self, element, det_map_jacobian):
+    def _compute_integral_weights(self, element, det_map_jacobian):
         return (
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
         )
@@ -973,7 +975,7 @@ class Basis(AbstractBasis):
 class InteriorEdgesBasis(AbstractBasis):
     """Class for basis representation on interior edges"""
 
-    def compute_dofs(
+    def _compute_dofs(
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
@@ -998,12 +1000,12 @@ class InteriorEdgesBasis(AbstractBasis):
             coords4elements,
         )
 
-    def compute_basis_parameters(
+    def _compute_basis_parameters(
         self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
     ):
 
-        nb_global_dofs = coords4global_dofs.shape[-2]
-        nb_local_dofs = global_dofs4elements.shape[-1]
+        nb_global_dofs = coords4global_dofs.size(-2)
+        nb_local_dofs = global_dofs4elements.size(-1)
 
         inner_dofs = torch.nonzero(nodes4boundary_dofs != 1, as_tuple=True)[-2]
 
@@ -1021,13 +1023,13 @@ class InteriorEdgesBasis(AbstractBasis):
             "nb_dofs": nb_global_dofs,
         }
 
-    def compute_jacobian_map(self, mesh, element):
+    def _compute_jacobian_map(self, mesh, element):
         return mesh["interior_edges"]["coordinates"].mT @ element.barycentric_grad
 
-    def compute_integration_points(self, mesh, bar_coords):
+    def _compute_integration_points(self, mesh, bar_coords):
         return bar_coords.mT @ mesh["interior_edges"]["coordinates"].unsqueeze(-3)
 
-    def compute_integral_weights(self, element, det_map_jacobian):
+    def _compute_integral_weights(self, element, det_map_jacobian):
         return (
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
         )
@@ -1037,15 +1039,15 @@ class FractureBasis(AbstractBasis):
     """Class for basis representation on fractures"""
 
     def __init__(self, mesh: AbstractMesh, element: AbstractElement):
-        self.global_triangulation = self.build_global_triangulation(mesh)
+        self.global_triangulation = self._build_global_triangulation(mesh)
 
         super().__init__(mesh, element)
 
-    def build_global_triangulation(self, mesh):
+    def _build_global_triangulation(self, mesh):
         """Build a global triangulation from local triangulations of multiple fractures."""
-        nb_fractures, nb_vertices, _ = mesh["vertices"]["coordinates"].shape
+        nb_fractures, nb_vertices, _ = mesh["vertices"]["coordinates"].size()
 
-        nb_edges = mesh["edges"]["indices"].shape[-2]
+        nb_edges = mesh["edges"]["indices"].size(-2)
 
         local_triangulation_3d_coords = mesh["vertices_3D"].reshape(-1, 3)
 
@@ -1056,7 +1058,7 @@ class FractureBasis(AbstractBasis):
             return_counts=True,
         )
 
-        nb_global_vertices = global_vertices_3d.shape[-2]
+        nb_global_vertices = global_vertices_3d.size(-2)
 
         traces_global_vertices_idx = torch.nonzero(vertex_counts > 1, as_tuple=True)[0]
 
@@ -1105,7 +1107,7 @@ class FractureBasis(AbstractBasis):
             - edge_offset
         )
 
-        nb_global_edges = global_edges.shape[-2]
+        nb_global_edges = global_edges.size(-2)
 
         local2global_edges_idx = torch.full(
             (nb_global_edges,), (nb_fractures * nb_edges) + 1, dtype=torch.int64
@@ -1142,7 +1144,7 @@ class FractureBasis(AbstractBasis):
 
         return global_triangulation
 
-    def compute_integral_values(self, mesh: AbstractMesh, element: AbstractElement):
+    def _compute_integral_values(self, mesh: AbstractMesh, element: AbstractElement):
 
         map_jacobian = mesh.coords4elements.mT @ element.barycentric_grad
 
@@ -1175,7 +1177,7 @@ class FractureBasis(AbstractBasis):
 
         return v, v_grad, integration_points, dx, inv_map_jacobian
 
-    def compute_dofs(self, mesh, element):
+    def _compute_dofs(self, mesh, element):
 
         if element.polynomial_order == 1:
 
@@ -1190,12 +1192,12 @@ class FractureBasis(AbstractBasis):
 
         return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
 
-    def compute_basis_parameters(
+    def _compute_basis_parameters(
         self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
     ):
 
-        nb_global_dofs = self.global_triangulation["vertices_2D"].shape[-2]
-        nb_local_dofs = self.global_triangulation["triangles"].shape[-1]
+        nb_global_dofs = self.global_triangulation["vertices_2D"].size(-2)
+        nb_local_dofs = self.global_triangulation["triangles"].size(-1)
 
         inner_dofs = torch.arange(nb_global_dofs)[
             ~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)
@@ -1229,12 +1231,12 @@ class FractureBasis(AbstractBasis):
 class InteriorEdgesFractureBasis(AbstractBasis):
     """Class for basis representation on interior edges of fractures"""
 
-    def compute_integral_values(self, mesh: AbstractMesh, element: AbstractElement):
+    def _compute_integral_values(self, mesh: AbstractMesh, element: AbstractElement):
 
         nodes4elements = mesh.edges_parameters["nodes4inner_edges"]
         coords4nodes = mesh.local_triangulations["vertices"]
         coords4elements = coords4nodes[
-            torch.arange(coords4nodes.shape[0])[:, None, None], nodes4elements
+            torch.arange(coords4nodes.size(0))[:, None, None], nodes4elements
         ]
 
         map_jacobian = coords4elements.mT @ element.barycentric_grad
@@ -1268,7 +1270,7 @@ class InteriorEdgesFractureBasis(AbstractBasis):
 
         return v, v_grad, integration_points, dx, inv_map_jacobian
 
-    def compute_dofs(
+    def _compute_dofs(
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
@@ -1284,12 +1286,12 @@ class InteriorEdgesFractureBasis(AbstractBasis):
 
         return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
 
-    def compute_basis_parameters(
+    def _compute_basis_parameters(
         self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
     ):
 
-        nb_global_dofs = coords4global_dofs.shape[-2]
-        nb_local_dofs = global_dofs4elements.shape[-1]
+        nb_global_dofs = coords4global_dofs.size(-2)
+        nb_local_dofs = global_dofs4elements.size(-1)
 
         inner_dofs = torch.arange(nb_global_dofs)[
             ~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)
