@@ -369,7 +369,7 @@ class FracturesTri(MeshTri):
             for fracture_triangulation in fracture_triangulations
         ]
 
-        stacked_fractured_triangulations = torch.cat(
+        stacked_fractured_triangulations = torch.stack(
             fracture_triangulations_tensordict, dim=0
         )
 
