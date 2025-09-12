@@ -5,49 +5,55 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 with open("H1_norm_converge_NN.pkl", "rb") as f:
-    dofs_NN, errors_NN = pickle.load(f)
+    dofs_neural_network, errors_neural_network = pickle.load(f)
 
 with open("H1_norm_converge_FEM.pkl", "rb") as f:
-    dofs_FEM, errors_FEM = pickle.load(f)
+    dofs_finite_element, errors_finite_element = pickle.load(f)
 
-dofs_NN = np.array(dofs_NN)
-errors_NN = np.array(errors_NN)
-dofs_FEM = np.array(dofs_FEM)
-errors_FEM = np.array(errors_FEM)
+dofs_neural_network = np.array(dofs_neural_network)
+errors_neural_network = np.array(errors_neural_network)
+dofs_finite_element = np.array(dofs_finite_element)
+errors_finite_element = np.array(errors_finite_element)
 
-log_dofs_NN = np.log10(dofs_NN)
-log_errors_NN = np.log10(errors_NN)
-slope_NN, intercept_NN = np.polyfit(log_dofs_NN, log_errors_NN, 1)
-fit_NN = 10**intercept_NN * dofs_NN**slope_NN
+log_dofs_neural_network = np.log10(dofs_neural_network)
+log_errors_neural_network = np.log10(errors_neural_network)
+slope_neural_network, intercept_neural_network = np.polyfit(
+    log_dofs_neural_network, log_errors_neural_network, 1
+)
+fit_NN = 10**intercept_neural_network * dofs_neural_network**slope_neural_network
 
-log_dofs_FEM = np.log10(dofs_FEM)
-log_errors_FEM = np.log10(errors_FEM)
-slope_FEM, intercept_FEM = np.polyfit(log_dofs_FEM, log_errors_FEM, 1)
-fit_FEM = 10**intercept_FEM * dofs_FEM**slope_FEM
+log_dofs_finite_element = np.log10(dofs_finite_element)
+log_errors_finite_element = np.log10(errors_finite_element)
+slope_finite_element, intercept_finite_element = np.polyfit(
+    log_dofs_finite_element, log_errors_finite_element, 1
+)
+fit_finite_element = (
+    10**intercept_finite_element * dofs_finite_element**slope_finite_element
+)
 
 fig, ax = plt.subplots(dpi=500)
 ax.loglog(
-    dofs_FEM,
-    errors_FEM,
+    dofs_finite_element,
+    errors_finite_element,
     "s",
     color="blue",
     markersize=7,
     markeredgecolor="black",
-    label=f"FEM (decay = {-slope_FEM:.2f})",
+    label=f"FEM (decay = {-slope_finite_element:.2f})",
 )
-ax.loglog(dofs_FEM, fit_FEM, ":", color="blue", alpha=0.5)
+ax.loglog(dofs_finite_element, fit_finite_element, ":", color="blue", alpha=0.5)
 
 ax.loglog(
-    dofs_NN,
-    errors_NN,
+    dofs_neural_network,
+    errors_neural_network,
     "^",
     color="orange",
     markersize=7,
     markeredgecolor="black",
-    label=f"VPINNs (decay rate = {-slope_NN:.2f})",
+    label=f"VPINNs (decay rate = {-slope_neural_network:.2f})",
 )
 
-ax.loglog(dofs_NN, fit_NN, "-.", color="orange", alpha=0.5)
+ax.loglog(dofs_neural_network, fit_NN, "-.", color="orange", alpha=0.5)
 ax.set_xlabel("# DOFs")
 ax.set_ylabel("Relative $H^1$ Error")
 ax.legend()

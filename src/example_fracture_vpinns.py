@@ -20,70 +20,36 @@ from fem import (
     FracturesTri,
     InteriorEdgesFractureBasis,
 )
-from neural_network import NeuralNetwork3D
+
+from model import FeedForwardNeuralNetwork as NeuralNetwork, Model
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
-# ---------------------- Neural Network Functions ----------------------#
 
-
-def nn_gradient(neural_network, x, y, z):
-    """Compute gradient of a Neural Network w.r.t inputs."""
-    x.requires_grad_(True)
-    y.requires_grad_(True)
-    z.requires_grad_(True)
-
-    output = neural_network(x, y, z)
-
-    gradients = torch.autograd.grad(
-        outputs=output,
-        inputs=(x, y, z),
-        grad_outputs=torch.ones_like(output),
-        retain_graph=True,
-        create_graph=True,
+def boundary_constraint(x):
+    """enforces Dirichlet boundary condition"""
+    return (
+        (x[..., [0]] + 1)
+        * (x[..., [0]] - 1)
+        * (x[..., [1]])
+        * (x[..., [1]] - 1)
+        * (x[..., [2]] + 1)
+        * (x[..., [2]] - 1)
     )
 
-    return torch.concat(gradients, dim=-1)
 
-
-def optimizer_step(opt, value_loss):
-    """Perform an optimization step."""
-    opt.zero_grad()
-    value_loss.backward(retain_graph=True)
-    opt.step()
-    scheduler.step()
-
-
-# ---------------------- Neural Network Parameters ----------------------#
-
-EPOCHS = 5000
-LEARNING_RATE = 0.2e-3
-DECAY_RATE = 0.98
-DECAY_STEPS = 200
-
-NN = torch.jit.script(
-    NeuralNetwork3D(
-        input_dimension=3,
-        output_dimension=1,
-        deep_layers=4,
-        hidden_layers_dimension=15,
-        activation_function=torch.nn.ReLU(),
-    )
+NN = NeuralNetwork(
+    input_dimension=2,
+    output_dimension=1,
+    nb_hidden_layers=4,
+    neurons_per_layers=25,
+    boundary_condition_modifier=boundary_constraint,
 )
 
-optimizer = torch.optim.Adam(NN.parameters(), lr=LEARNING_RATE)
-
-scheduler = torch.optim.lr_scheduler.ExponentialLR(
-    optimizer, DECAY_RATE ** (1 / DECAY_STEPS)
-)
 
 # ---------------------- FEM Parameters ----------------------#
-
-ELEMENT_SIZE = 0.5
-
-EXPONENT = 10
 
 fracture_2d_data = {
     "vertices": [
@@ -97,13 +63,9 @@ fracture_2d_data = {
     "segments": [[0, 2], [0, 4], [1, 3], [1, 4], [2, 5], [3, 5], [4, 5]],
 }
 
-fracture_triangulation = tr.triangulate(
-    fracture_2d_data, "pqsea" + str(ELEMENT_SIZE**EXPONENT)
-)
+fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsea" + str(0.5**10))
 
-fracture_triangulation_torch = td.TensorDict(fracture_triangulation)
-
-fractures_triangulation = (fracture_triangulation_torch, fracture_triangulation_torch)
+fractures_triangulation = [fracture_triangulation, fracture_triangulation]
 
 fractures_data = torch.tensor(
     [
@@ -112,14 +74,13 @@ fractures_data = torch.tensor(
     ]
 )
 
-
 mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
 elements = ElementTri(polynomial_order=1, integration_order=2)
 
-V = FractureBasis(mesh, elements)
+discrete_basis = FractureBasis(mesh, elements)
 
 # ---------------------- Residual Parameters ----------------------#
 
@@ -160,11 +121,11 @@ def gram_matrix(basis):
     return v_grad @ v_grad.mT
 
 
-A = V.reduce(V.integrate_bilinear_form(gram_matrix))
+gram_matrix_inverse = torch.inverse(
+    discrete_basis.reduce(discrete_basis.integrate_bilinear_form(gram_matrix))
+)
 
-A_inv = torch.inverse(A)
-
-Ih, Ih_grad = V.interpolate(V)
+Ih, Ih_grad = discrete_basis.interpolate(discrete_basis)
 
 
 def interpolation_nn(_):
@@ -176,9 +137,6 @@ def grad_interpolation_nn(_):
     """Interpolation of the Neural Network gradient in the FEM basis."""
     return Ih_grad(NN)
 
-
-# interpolation_nn = lambda x, y, z : neural_network(x, y, z)
-# grad_interpolation_nn = lambda x, y, z : NN_gradient(neural_network, x, y, z)
 
 # ---------------------- Error Parameters ----------------------#
 
@@ -290,68 +248,42 @@ def h1_norm(basis, solution, solution_grad):
     # return L2_error
 
 
-exact_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_exact)))
-
-loss_list = []
-relative_loss_list = []
-H1_error_list = []
-
-OPTIMAL_LOSS = 10e4
-params_opt = NN.state_dict()
+exact_norm = torch.sqrt(torch.sum(discrete_basis.integrate_functional(h1_exact)))
 
 # ---------------------- Training ----------------------#
 
 start_time = datetime.now()
 
-for epoch in range(EPOCHS):
-    current_time = datetime.now().strftime("%H:%M:%S")
-    print(f"{'='*20} [{current_time}] Epoch:{epoch + 1}/{EPOCHS} {'='*20}")
 
-    residual_value = V.reduce(V.integrate_linear_form(residual, grad_interpolation_nn))
+def training_step(neural_network):
+    """Training step for the neural network."""
+    residual_vector = discrete_basis.reduce(
+        discrete_basis.integrate_linear_form(residual, neural_network.gradient)
+    )
 
-    loss_value = residual_value.T @ (A_inv @ residual_value)
+    loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
 
-    # loss_value = (residual_value**2).sum()
+    # loss_value = torch.sum(residual_vector**2, dim=0)
 
-    optimizer_step(optimizer, loss_value)
+    relative_loss = torch.sqrt(loss_value) / exact_norm**2
 
-    error_norm = (
-        torch.sqrt(
-            torch.sum(
-                V.integrate_functional(h1_norm, interpolation_nn, grad_interpolation_nn)
+    h1_error = torch.sqrt(
+        torch.sum(
+            discrete_basis.integrate_functional(
+                h1_norm, neural_network, neural_network.gradient
             )
         )
-        / exact_norm
     )
 
-    relative_loss = torch.sqrt(loss_value) / exact_norm
+    return loss_value, relative_loss, h1_error / exact_norm
 
-    print(
-        f"Loss: {loss_value.item():.8f} Relative Loss: {relative_loss.item():.8f} Relative error: {error_norm.item():.8f}"
-    )
-
-    if loss_value < OPTIMAL_LOSS:
-        OPTIMAL_LOSS = loss_value
-        params_opt = NN.state_dict()
-
-    loss_list.append(loss_value.item())
-    relative_loss_list.append(relative_loss.item())
-    H1_error_list.append(error_norm.item())
-
-end_time = datetime.now()
-
-execution_time = end_time - start_time
-
-print(f"Training time: {execution_time}")
 
 # ---------------------- Plot Values ----------------------#
 
-NN.load_state_dict(params_opt)
-
 ### --- FEM SOLUTION PARAMETERS --- ###
 
-local_vertices_3D = V.global_triangulation["vertices_3D"][
-    V.global_triangulation["global2local_idx"].reshape(2, -1)
+local_vertices_3D = discrete_basis.global_triangulation["vertices_3D"][
+    discrete_basis.global_triangulation["global2local_idx"].reshape(2, -1)
 ]
 
 vertices_fracture_1, vertices_fracture_2 = torch.unbind(
@@ -369,29 +301,31 @@ u_NN_fracture_1, u_NN_fracture_2 = torch.unbind(u_NN_local, dim=0)
 
 ### --- TRACE PARAMETERS --- ###
 
-trace_nodes = V.global_triangulation["vertices_3D"][
-    V.global_triangulation["traces__global_vertices_idx"], 1
+trace_nodes = discrete_basis.global_triangulation["vertices_3D"][
+    discrete_basis.global_triangulation["traces__global_vertices_idx"], 1
 ].numpy(force=True)
 
-local_vertices_3D = V.global_triangulation["vertices_3D"][
-    V.global_triangulation["global2local_idx"].reshape(2, -1)
+local_vertices_3D = discrete_basis.global_triangulation["vertices_3D"][
+    discrete_basis.global_triangulation["global2local_idx"].reshape(2, -1)
 ]
 
 exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1))
 
 exact_value_global = exact_value_local.reshape(-1, 1)[
-    V.global_triangulation["local2global_idx"]
+    discrete_basis.global_triangulation["local2global_idx"]
 ]
 
 exact_trace = exact_value_global[
-    V.global_triangulation["traces__global_vertices_idx"]
+    discrete_basis.global_triangulation["traces__global_vertices_idx"]
 ].numpy(force=True)
 
-u_NN_global = u_NN_local.reshape(-1, 1)[V.global_triangulation["local2global_idx"]]
+u_NN_global = u_NN_local.reshape(-1, 1)[
+    discrete_basis.global_triangulation["local2global_idx"]
+]
 
-u_NN_trace = u_NN_global[V.global_triangulation["traces__global_vertices_idx"]].numpy(
-    force=True
-)
+u_NN_trace = u_NN_global[
+    discrete_basis.global_triangulation["traces__global_vertices_idx"]
+].numpy(force=True)
 
 ### --- JUMP PARAMETERS --- ###
 
@@ -399,15 +333,15 @@ V_inner_edges = InteriorEdgesFractureBasis(
     mesh, ElementLine(polynomial_order=1, integration_order=2)
 )
 
-traces_local_edges_idx = V.global_triangulation["traces_local_edges_idx"]
+traces_local_edges_idx = discrete_basis.global_triangulation["traces_local_edges_idx"]
 
-n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
+n_E = discrete_basis.mesh.local_triangulations["normal4inner_edges_3D"]
 
 n4e_u = mesh.edges_parameters["nodes4unique_edges"]
 
 nodes4trace = n4e_u[torch.arange(n4e_u.shape[0])[:, None], traces_local_edges_idx]
 
-c4n = V.mesh.local_triangulations["vertices"]
+c4n = discrete_basis.mesh.local_triangulations["vertices"]
 
 coords4trace = c4n[torch.arange(c4n.shape[0]), nodes4trace]
 
@@ -421,7 +355,7 @@ points_trace_fracture_1, points_trace_fracture_2 = torch.unbind(
 
 # COMPUTE JUMP neural_network SOLUTION
 
-_, I_E_grad = V.interpolate(V_inner_edges)
+_, I_E_grad = discrete_basis.interpolate(V_inner_edges)
 
 I_E_NN_grad = I_E_grad(NN)
 
@@ -443,21 +377,21 @@ jump_u_NN_trace_fracture_1, jump_u_NN_trace_fracture_2 = torch.unbind(
 
 # COMPUTE JUMP EXACT
 
-local_vertices_3D = V.global_triangulation["vertices_3D"][
-    V.global_triangulation["global2local_idx"].reshape(2, -1)
+local_vertices_3D = discrete_basis.global_triangulation["vertices_3D"][
+    discrete_basis.global_triangulation["global2local_idx"].reshape(2, -1)
 ]
 
 exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1))
 
 exact_value_global = exact_value_local.reshape(-1, 1)[
-    V.global_triangulation["local2global_idx"]
+    discrete_basis.global_triangulation["local2global_idx"]
 ]
 
-I_E_u, I_E_u_grad = V.interpolate(V_inner_edges, exact_value_global)
+I_E_u, I_E_u_grad = discrete_basis.interpolate(V_inner_edges, exact_value_global)
 
 I_E_u_grad_K_plus, I_E_u_grad_minus = torch.unbind(I_E_u_grad, dim=-4)
 
-n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
+n_E = discrete_basis.mesh.local_triangulations["normal4inner_edges_3D"]
 
 jump_u = (I_E_u_grad_K_plus * n_E).sum(-1) + (I_E_u_grad_minus * -n_E).sum(-1)
 
@@ -471,8 +405,10 @@ jump_u_trace_fracture_1, jump_u_trace_fracture_2 = torch.unbind(
 
 ### --- ERROR PARAMETERS --- ###
 
-numerator = V.integrate_functional(h1_norm, interpolation_nn, grad_interpolation_nn)
-denominator = V.integrate_functional(h1_exact)
+numerator = discrete_basis.integrate_functional(
+    h1_norm, interpolation_nn, grad_interpolation_nn
+)
+denominator = discrete_basis.integrate_functional(h1_exact)
 
 EPSILON = 1e-10
 safe_denominator = torch.where(
@@ -494,7 +430,9 @@ H1_error_fracture_1, H1_error_fracture_2 = torch.unbind(
 print(
     torch.sqrt(
         torch.sum(
-            V.integrate_functional(h1_norm, interpolation_nn, grad_interpolation_nn)
+            discrete_basis.integrate_functional(
+                h1_norm, interpolation_nn, grad_interpolation_nn
+            )
         )
     )
     / exact_norm
@@ -642,92 +580,3 @@ plt.ylabel("jump value")
 plt.legend()
 plt.tight_layout()
 plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_2.png"))
-
-
-# ------------------ ERROR EVOLUTION ------------------
-
-# Relative Loss & H1 Error (semilogy)
-fig = plt.figure(dpi=300)
-plt.semilogy(
-    relative_loss_list,
-    label=r"$\frac{\sqrt{\mathcal{L}(u_\theta)}}{\|u\|_{U}}$",
-    linestyle="-.",
-)
-plt.semilogy(
-    H1_error_list, label=r"$\frac{\|u-u_\theta\|_{U}}{\|u\|_{U}}$", linestyle=":"
-)
-plt.legend(fontsize=10)
-plt.tight_layout()
-plt.ylabel("Value")
-plt.xlabel("# Epochs")
-plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_error_evolution.png"))
-
-
-# # Relative Loss vs H1 Error (loglog)
-# fig = plt.figure(dpi=300)
-# plt.loglog(relative_loss_list, H1_error_list)
-# plt.title(f"Error vs Loss comparison of VPINNs ({NAME})")
-# plt.xlabel("Relative Loss")
-# plt.ylabel("Relative Error")
-# plt.tight_layout()
-# plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_error_vs_loss.png"))
-#
-
-# ------------------ RELATIVE ERROR ------------------
-
-# Convert to numpy
-H1_error_fracture_1 = H1_error_fracture_1.numpy(force=True)
-c4e_fracture_1 = c4e_fracture_1.numpy(force=True)
-H1_error_fracture_2 = H1_error_fracture_2.numpy(force=True)
-c4e_fracture_2 = c4e_fracture_2.numpy(force=True)
-
-# Shared color scale
-all_errors = np.concatenate([H1_error_fracture_1, H1_error_fracture_2])
-norm = colors.Normalize(vmin=all_errors.min(), vmax=all_errors.max())
-cmap = cm.viridis()
-
-# Fracture 1
-fig, ax = plt.subplots(dpi=200)
-face_colors = cmap(norm(H1_error_fracture_1))
-collection = PolyCollection(
-    c4e_fracture_1, facecolors=face_colors, edgecolors="black", linewidths=0.2
-)
-ax.add_collection(collection)
-ax.autoscale()
-ax.set_aspect("equal")
-ax.set_xlim([-1, 1])
-ax.set_ylim([0, 1])
-# ax.set_title("Fracture 1")
-ax.tick_params(labelsize=8)
-sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-sm.set_array([])
-fig.colorbar(
-    sm, ax=ax, orientation="vertical", label=r"$H^1$ relative error", fraction=0.025
-)
-plt.xlabel("x")
-plt.ylabel("y")
-plt.tight_layout()
-plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_relative_error_fracture_1.png"))
-
-
-fig, ax = plt.subplots(dpi=200)
-face_colors = cmap(norm(H1_error_fracture_2))
-collection = PolyCollection(
-    c4e_fracture_2, facecolors=face_colors, edgecolors="black", linewidths=0.2
-)
-ax.add_collection(collection)
-ax.autoscale()
-ax.set_aspect("equal")
-ax.set_xlim([-1, 1])
-ax.set_ylim([0, 1])
-# ax.set_title("Fracture 2")
-ax.tick_params(labelsize=8)
-sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-sm.set_array([])
-fig.colorbar(
-    sm, ax=ax, orientation="vertical", label=r"$H^1$ relative error", fraction=0.025
-)
-plt.xlabel("x")
-plt.ylabel("y")
-plt.tight_layout()
-plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_relative_error_fracture_2.png"))

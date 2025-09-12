@@ -138,7 +138,7 @@ print(
 )
 print(
     "I_u error        norm:",
-    (torch.norm(I_u.squeeze(-1).squeeze(-1).mT - I_u_sk) / torch.norm(I_u_sk)).item(),
+    (torch.norm(I_u.squeeze(-1).squeeze(-1) - I_u_sk) / torch.norm(I_u_sk)).item(),
 )
 print(
     "I_u_grad         norm:",

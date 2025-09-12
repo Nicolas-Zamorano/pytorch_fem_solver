@@ -34,7 +34,7 @@ NN = NeuralNetwork(
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**8),
+    "Dqena" + str(0.5**1),
 )
 
 mesh = MeshTri(triangulation=mesh_data)

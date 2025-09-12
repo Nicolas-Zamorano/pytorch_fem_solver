@@ -30,7 +30,7 @@ fracture_2d_data = {
 }
 
 fracture_triangulation = td.TensorDict(
-    tr.triangulate(fracture_2d_data, "pqsea" + str(MESH_SIZE))
+    tr.triangulate(fracture_2d_data, "pqsena" + str(MESH_SIZE))
 )
 
 fractures_triangulation = [fracture_triangulation]
@@ -49,7 +49,7 @@ mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
-elements = ElementTri(P_order=1, int_order=1)
+elements = ElementTri(polynomial_order=1, integration_order=1)
 
 V = FractureBasis(mesh, elements)
 
