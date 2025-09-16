@@ -22,6 +22,10 @@ class AbstractMesh(abc.ABC):
     def __setitem__(self, key: str, value):
         self._triangulation[key] = value
 
+    def batch_size(self):
+        """return batch_size of triangulation tensordict"""
+        return self._triangulation.batch_size
+
     @staticmethod
     def _triangle_to_tensordict(mesh_dict: dict):
         """Convert a mesh dictionary from 'triangle' library to a TensorDict"""
