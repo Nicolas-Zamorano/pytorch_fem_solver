@@ -1,17 +1,16 @@
 """Example of Variational Physics-Informed Neural Networks (VPINNs) for a 3D fracture problem."""
 
 import os
-from datetime import datetime
 
-import matplotlib.cm as cm
-import matplotlib.colors as colors
+# import matplotlib.cm as cm
+# import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
-import tensordict as td
 import torch
 import triangle as tr
-from matplotlib.collections import PolyCollection
+
+# from matplotlib.collections import PolyCollection
 
 from fem import (
     ElementLine,
@@ -28,24 +27,22 @@ torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
 
-def boundary_constraint(x):
-    """enforces Dirichlet boundary condition"""
-    return (
-        (x[..., [0]] + 1)
-        * (x[..., [0]] - 1)
-        * (x[..., [1]])
-        * (x[..., [1]] - 1)
-        * (x[..., [2]] + 1)
-        * (x[..., [2]] - 1)
-    )
+class BoundaryConstrain(torch.nn.Module):
+    """Class to strongly apply bc"""
+
+    def forward(self, inputs):
+        """Boundary condition modifier function."""
+        x, y, z = torch.split(inputs, 1, dim=-1)
+        return (x + 1) * (x - 1) * y * (y - 1) * (z + 1) * (z - 1)
 
 
 NN = NeuralNetwork(
-    input_dimension=2,
+    input_dimension=3,
     output_dimension=1,
     nb_hidden_layers=4,
-    neurons_per_layers=25,
-    boundary_condition_modifier=boundary_constraint,
+    neurons_per_layers=15,
+    activation_function=torch.nn.ReLU(),
+    boundary_condition_modifier=BoundaryConstrain(),
 )
 
 
@@ -63,7 +60,7 @@ fracture_2d_data = {
     "segments": [[0, 2], [0, 4], [1, 3], [1, 4], [2, 5], [3, 5], [4, 5]],
 }
 
-fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsea" + str(0.5**10))
+fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsena" + str(0.5**10))
 
 fractures_triangulation = [fracture_triangulation, fracture_triangulation]
 
@@ -85,8 +82,9 @@ discrete_basis = FractureBasis(mesh, elements)
 # ---------------------- Residual Parameters ----------------------#
 
 
-def rhs(x, y, z):
+def rhs(coordinates):
     """Right-hand side function for facture problem."""
+    x, y, z = torch.split(coordinates, 1, dim=-1)
     x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
     _, z_fracture_2 = torch.split(z, 1, dim=0)
@@ -105,11 +103,12 @@ def rhs(x, y, z):
 
 def residual(basis, u_grad):
     """Residual functional for fracture problem."""
-    u_grad = u_grad(*basis.integration_points)
+    integration_points = basis.integration_points
+    u_grad = u_grad(integration_points)
 
     v = basis.v
     v_grad = basis.v_grad
-    rhs_value = rhs(*basis.integration_points)
+    rhs_value = rhs(integration_points)
 
     return rhs_value * v - v_grad @ u_grad.mT
 
@@ -141,8 +140,9 @@ def grad_interpolation_nn(_):
 # ---------------------- Error Parameters ----------------------#
 
 
-def exact(x, y, z):
+def exact(coordinates):
     """Exact solution for fracture problem."""
+    x, y, z = torch.split(coordinates, 1, dim=-1)
     x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
     _, z_fracture_2 = torch.split(z, 1, dim=0)
@@ -165,8 +165,9 @@ def exact(x, y, z):
     return exact_value
 
 
-def exact_grad(x, y, z):
+def exact_grad(coordinates):
     """Gradient of the exact solution for fracture problem."""
+    x, y, z = torch.split(coordinates, 1, dim=-1)
     x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
     _, z_fracture_2 = torch.split(z, 1, dim=0)
@@ -212,10 +213,11 @@ def exact_grad(x, y, z):
 
 def h1_exact(basis):
     """H1 norm of the exact solution for fracture problem."""
-    exact_value = exact(*basis.integration_points)
+    integration_points = basis.integration_points
+    exact_value = exact(integration_points)
 
     exact_dx_value, exact_dy_value, exact_dz_value = torch.split(
-        exact_grad(*basis.integration_points), 1, dim=-1
+        exact_grad(integration_points), 1, dim=-1
     )
 
     return exact_value**2 + exact_dx_value**2 + exact_dy_value**2 + exact_dz_value**2
@@ -225,16 +227,18 @@ def h1_exact(basis):
 
 def h1_norm(basis, solution, solution_grad):
     """H1 norm of the Neural Network solution for fracture problem."""
-    exact_value = exact(*basis.integration_points)
+    integration_points = basis.integration_points
 
-    l2_error = (exact_value - solution(*basis.integration_points)) ** 2
+    exact_value = exact(integration_points)
+
+    l2_error = (exact_value - solution(integration_points)) ** 2
 
     exact_dx_value, exact_dy_value, exact_dz_value = torch.split(
-        exact_grad(*basis.integration_points), 1, dim=-1
+        exact_grad(integration_points), 1, dim=-1
     )
 
     solution_dx, solution_dy, solution_dz = torch.split(
-        solution_grad(*basis.integration_points), 1, dim=-1
+        solution_grad(integration_points), 1, dim=-1
     )
 
     h1_0_error = (
@@ -251,8 +255,6 @@ def h1_norm(basis, solution, solution_grad):
 exact_norm = torch.sqrt(torch.sum(discrete_basis.integrate_functional(h1_exact)))
 
 # ---------------------- Training ----------------------#
-
-start_time = datetime.now()
 
 
 def training_step(neural_network):
@@ -278,6 +280,21 @@ def training_step(neural_network):
     return loss_value, relative_loss, h1_error / exact_norm
 
 
+model = Model(
+    neural_network=NN,
+    training_step=training_step,
+    epochs=5000,
+    optimizer=torch.optim.Adam,
+    optimizer_kwargs={"lr": 0.2e-3},
+    learning_rate_scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
+    # scheduler_kwargs={"gamma": 0.99**100},
+    use_early_stopping=True,
+    early_stopping_patience=50,
+    min_delta=1e-12,
+)
+
+model.train()
+
 # ---------------------- Plot Values ----------------------#
 
 ### --- FEM SOLUTION PARAMETERS --- ###
@@ -287,11 +304,11 @@ local_vertices_3D = discrete_basis.global_triangulation["vertices_3D"][
 ]
 
 vertices_fracture_1, vertices_fracture_2 = torch.unbind(
-    mesh.local_triangulations["vertices"], dim=0
+    mesh["vertices", "coordinates_3d"], dim=0
 )
 
 triangles_fracture_1, triangles_fracture_2 = torch.unbind(
-    mesh.local_triangulations["triangles"], dim=0
+    mesh["cells", "vertices"], dim=0
 )
 
 u_NN_local = NN(*torch.split(local_vertices_3D, 1, -1))
@@ -337,7 +354,7 @@ traces_local_edges_idx = discrete_basis.global_triangulation["traces_local_edges
 
 n_E = discrete_basis.mesh.local_triangulations["normal4inner_edges_3D"]
 
-n4e_u = mesh.edges_parameters["nodes4unique_edges"]
+n4e_u = discrete_basis.mesh["edges", "vertices"]
 
 nodes4trace = n4e_u[torch.arange(n4e_u.shape[0])[:, None], traces_local_edges_idx]
 
@@ -438,9 +455,7 @@ print(
     / exact_norm
 )
 
-c4e_fracture_1, c4e_fracture_2 = torch.unbind(
-    mesh.local_triangulations["coords4triangles"], dim=0
-)
+c4e_fracture_1, c4e_fracture_2 = torch.unbind(mesh["cells", "coordinates"], dim=0)
 
 # ---------------------- Plot ---------------------- #
 
@@ -488,9 +503,9 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 # plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_nn_solution_fracture_2.png"))
 #
 
-vertices = torch.unbind(mesh.local_triangulations["vertices_3D"], dim=0)
+vertices = torch.unbind(mesh["vertices", "coordinates_3d"], dim=0)
 
-triangles = torch.unbind(mesh.local_triangulations["triangles"], dim=0)
+triangles = torch.unbind(mesh["cells", "vertices"], dim=0)
 
 u_h = torch.unbind(u_NN_local, dim=0)
 
