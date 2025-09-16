@@ -1305,7 +1305,7 @@ class FractureBasis(AbstractBasis):
             element.reference_element_area
             * element.gaussian_weights
             * det_map_jacobian
-            * self.mesh["det_jacobian_fracture_map"]
+            * self.mesh["det_jacobian_fracture_map"].unsqueeze(-1).unsqueeze(-1)
         )
 
     def _compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
