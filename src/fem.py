@@ -353,10 +353,10 @@ class FracturesTri(MeshTri):
         vertices_3d = fractures_3d_data[:, :3, :]
 
         extended_vertices_2d = torch.cat(
-            [vertices_2d.mT, torch.ones_like(vertices_3d[:, [-1], :])], dim=-2
+            [vertices_2d, torch.ones_like(vertices_3d[..., [-1]])], dim=-1
         )
 
-        linear_equation = vertices_3d @ torch.inverse(extended_vertices_2d)
+        linear_equation = vertices_3d.mT @ torch.inverse(extended_vertices_2d).mT
 
         jacobian_fracture_map = linear_equation[..., :2]
         translation_vector = linear_equation[..., [-1]]
