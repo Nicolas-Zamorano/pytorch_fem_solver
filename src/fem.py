@@ -1181,56 +1181,33 @@ class FractureBasis(AbstractBasis):
 
         return global_triangulation
 
-    def _compute_integral_values(self, mesh: AbstractMesh, element: AbstractElement):
-
-        map_jacobian = mesh.coords4elements.mT @ element.barycentric_grad
-
-        det_map_jacobian, inv_map_jacobian = element.compute_det_and_inv_map(
-            map_jacobian
-        )
-
-        inv_map_jacobian_3d = (
-            inv_map_jacobian @ mesh.local_triangulations["fractures_map_jacobian_inv"]
-        )
-
-        bar_coords = element.compute_barycentric_coordinates(element.gaussian_nodes)
-
-        v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian_3d)
-
-        mapped_gaussian_nodes = bar_coords.mT @ mesh.coords4elements.unsqueeze(-3)
-
-        mapped_3d_gaussian_nodes = mesh.local_triangulations["fractures_map_int"](
-            mapped_gaussian_nodes
-        )
-
-        integration_points = mapped_3d_gaussian_nodes
-
-        dx = (
-            element.reference_element_area
-            * element.gaussian_weights
-            * det_map_jacobian
-            * mesh.local_triangulations["det_fractures_map_jacobian"]
-        )
-
-        return v, v_grad, integration_points, dx, inv_map_jacobian
-
-    def _compute_dofs(self, mesh, element):
+    def _compute_dofs(self, mesh: AbstractMesh, element: AbstractElement):
 
         if element.polynomial_order == 1:
 
-            coords4global_dofs = self.global_triangulation["vertices_2D"]
-            global_dofs4elements = self.global_triangulation["triangles"]
-            nodes4boundary_dofs = torch.nonzero(
+            coords_4_global_dofs = self.global_triangulation["vertices_2D"]
+            global_dofs_4_elements = self.global_triangulation["triangles"]
+            nodes_4_boundary_dofs = torch.nonzero(
                 self.global_triangulation["vertex_markers"] == 1
             )[:, 0]
 
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
-        return coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
+        coords_4_elements = coords_4_global_dofs[global_dofs_4_elements]
+
+        return (
+            coords_4_global_dofs,
+            global_dofs_4_elements,
+            nodes_4_boundary_dofs,
+            coords_4_elements,
+        )
 
     def _compute_basis_parameters(
-        self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
+        self,
+        coords4global_dofs: torch.Tensor,
+        global_dofs4elements: torch.Tensor,
+        nodes4boundary_dofs: torch.Tensor,
     ):
 
         nb_global_dofs = self.global_triangulation["vertices_2D"].size(-2)
@@ -1264,48 +1241,29 @@ class FractureBasis(AbstractBasis):
 
         return basis_parameters
 
-
-class InteriorEdgesFractureBasis(AbstractBasis):
-    """Class for basis representation on interior edges of fractures"""
-
-    def _compute_integral_values(self, mesh: AbstractMesh, element: AbstractElement):
-
-        nodes4elements = mesh.edges_parameters["nodes4inner_edges"]
-        coords4nodes = mesh.local_triangulations["vertices"]
-        coords4elements = coords4nodes[
-            torch.arange(coords4nodes.size(0))[:, None, None], nodes4elements
-        ]
-
-        map_jacobian = coords4elements.mT @ element.barycentric_grad
-
-        det_map_jacobian, inv_map_jacobian = element.compute_det_and_inv_map(
-            map_jacobian
-        )
-
-        inv_map_jacobian_3d = (
-            inv_map_jacobian @ mesh.local_triangulations["fractures_map_jacobian_inv"]
-        )
-
-        bar_coords = element.compute_barycentric_coordinates(element.gaussian_nodes)
-
-        v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian_3d)
-
-        mapped_gaussian_nodes = bar_coords.mT @ coords4elements.unsqueeze(-3)
-
-        mapped_3d_gaussian_nodes = mesh.local_triangulations["fractures_map_int"](
-            mapped_gaussian_nodes
-        )
-
-        integration_points = mapped_3d_gaussian_nodes
-
-        dx = (
+    def _compute_integral_weights(
+        self, element: AbstractElement, det_map_jacobian: torch.Tensor
+    ):
+        return (
             element.reference_element_area
             * element.gaussian_weights
             * det_map_jacobian
-            * mesh.local_triangulations["det_fractures_map_jacobian"]
+            * self.mesh["det_jacobian_fracture_map"]
         )
 
-        return v, v_grad, integration_points, dx, inv_map_jacobian
+    def _compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
+        return mesh.fracture_map(
+            bar_coords.mT @ mesh["cells", "coordinates"].unsqueeze(-3)
+        )
+
+    def _compute_jacobian_map(self, mesh, element):
+        return mesh["cells", "coordinates"].mT @ element.barycentric_grad
+
+
+class InteriorEdgesFractureBasis(
+    AbstractBasis,
+):
+    """Class for basis representation on interior edges of fractures"""
 
     def _compute_dofs(
         self,
