@@ -1,7 +1,5 @@
 """Test fracture jump implementation by comparison with 2D implementation."""
 
-import matplotlib.pyplot as plt
-import tensordict as td
 import torch
 import triangle as tr
 
@@ -22,22 +20,14 @@ MESH_SIZE = 0.5**4
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqea" + str(MESH_SIZE),
+    "Dqena" + str(MESH_SIZE),
 )
 
-mesh_data_torch = td.TensorDict(mesh_data)
+mesh = MeshTri(mesh_data)
 
-mesh = MeshTri(triangulation=mesh_data_torch)
-
-elements = ElementTri(P_order=1, int_order=4)
+elements = ElementTri(polynomial_order=1, integration_order=4)
 
 V = Basis(mesh, elements)
-
-fig, ax_mesh = plt.subplots()
-
-tr.plot(ax_mesh, **mesh_data)
-
-plt.show()
 
 
 def rhs(_):
@@ -59,7 +49,7 @@ def a(basis):
 
 def l(basis, right_hand_side):
     """Linear form."""
-    return right_hand_side(*basis.integration_points) * basis.v
+    return right_hand_side(basis.integration_points) * basis.v
 
 
 A = V.reduce(V.integrate_bilinear_form(a))
@@ -68,12 +58,14 @@ b = V.reduce(V.integrate_linear_form(l, rhs))
 u = torch.zeros(V.basis_parameters["linear_form_shape"])
 u[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
 
-V_inner_edges = InteriorEdgesBasis(mesh, ElementLine(P_order=1, int_order=2))
+V_inner_edges = InteriorEdgesBasis(
+    mesh, ElementLine(polynomial_order=1, integration_order=2)
+)
 
 I_u, I_u_grad = V.interpolate(V_inner_edges, u)
 
-h_E = V.mesh.edges_parameters["inner_edges_length"].unsqueeze(-2)
-n_E = V.mesh.edges_parameters["normal4inner_edges"].unsqueeze(-2)
+h_E = V.mesh["interior_edges", "length"].unsqueeze(-2)
+n_E = V.mesh["interior_edges", "normals"].unsqueeze(-2)
 
 
 def jump(_, h_element, n_element, solution_grad):
@@ -91,17 +83,17 @@ def jump(_, h_element, n_element, solution_grad):
 
 eta_E = V_inner_edges.integrate_functional(jump, h_E, n_E, I_u_grad).squeeze(-1)
 
-fractures_triangulation = [mesh_data_torch]
+fractures_triangulation = [mesh_data]
 
 fractures_data = torch.tensor(
     [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]]]
 )
 
 mesh_f = FracturesTri(
-    triangulations=fractures_triangulation, fractures_3D_data=fractures_data
+    triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
-elements_f = ElementTri(P_order=1, int_order=2)
+elements_f = ElementTri(polynomial_order=1, integration_order=2)
 
 V_f = FractureBasis(mesh_f, elements_f)
 
@@ -112,13 +104,13 @@ u_f = torch.zeros(V_f.basis_parameters["linear_form_shape"])
 u_f[V_f.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_f, b_f)
 
 V_f_inner_edges = InteriorEdgesFractureBasis(
-    mesh_f, ElementLine(P_order=1, int_order=2)
+    mesh_f, ElementLine(polynomial_order=1, integration_order=2)
 )
 
 I_u_f, I_u_f_grad = V_f.interpolate(V_f_inner_edges, u_f)
 
-h_E_f = V_f.mesh.edges_parameters["inner_edges_length"].unsqueeze(-2)
-n_E_f = V_f.mesh.local_triangulations["normal4inner_edges_3D"]
+h_E_f = V_f.mesh["interior_edges", "length"].unsqueeze(-2)
+n_E_f = V_f.mesh["interior_edges", "normals_3d"]
 
 I_u_values, I_u_count = torch.unique(
     torch.round(I_u.reshape(-1), decimals=12), return_counts=True

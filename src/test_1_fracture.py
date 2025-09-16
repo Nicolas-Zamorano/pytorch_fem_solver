@@ -14,7 +14,7 @@ torch.set_default_dtype(torch.float64)
 
 # ---------------------- FEM Parameters ----------------------#
 
-MESH_SIZE = 0.5 ** (10)
+MESH_SIZE = 0.5 ** (4)
 
 fracture_2d_data = {
     "vertices": [
@@ -72,7 +72,7 @@ def rhs(x, y, _):
 
 def l(basis):
     """Linear form."""
-    x, y, z = basis.integration_points
+    x, y, z = torch.split(basis.integration_points, 1, dim=-1)
 
     v = basis.v
     rhs_value = rhs(x, y, z)
@@ -134,21 +134,18 @@ def exact_dy(x, y, _):
 
 def h1_exact(basis):
     """H1 norm of the exact solution."""
-    return (
-        exact(*basis.integration_points) ** 2
-        + exact_dx(*basis.integration_points) ** 2
-        + exact_dy(*basis.integration_points) ** 2
-    )
+    x, y, z = torch.split(basis.integration_points, 1, dim=-1)
+    return exact(x, y, z) ** 2 + exact_dx(x, y, z) ** 2 + exact_dy(x, y, z) ** 2
 
 
 def h1_norm(basis, solution, solution_grad):
     """H1 norm of the error."""
     solution_dx, solution_dy, _ = torch.split(solution_grad, 1, dim=-1)
-
+    x, y, z = torch.split(basis.integration_points, 1, dim=-1)
     return (
-        (exact(*basis.integration_points) - solution) ** 2
-        + (exact_dx(*basis.integration_points) - solution_dx) ** 2
-        + (exact_dy(*basis.integration_points) - solution_dy) ** 2
+        (exact(x, y, z) - solution) ** 2
+        + (exact_dx(x, y, z) - solution_dx) ** 2
+        + (exact_dy(x, y, z) - solution_dy) ** 2
     )
 
 
@@ -166,7 +163,7 @@ u_h = torch.zeros(V.basis_parameters["linear_form_shape"])
 
 u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
 
-I_u_h, I_u_h_grad = V.interpolate(u_h)
+I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 
 exact_H1_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_exact)))
 
@@ -178,10 +175,10 @@ print((H1_norm_value / exact_H1_norm).item())
 
 # ---------------------- Computation Parameters ----------------------#
 
-nb_fractures = mesh.mesh_parameters["nb_fractures"]
+NB_FRACTURES = 1
 
 local_vertices_3D = V.global_triangulation["vertices_3D"][
-    V.global_triangulation["global2local_idx"].reshape(nb_fractures, -1)
+    V.global_triangulation["global2local_idx"].reshape(NB_FRACTURES, -1)
 ]
 
 exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1)).reshape(-1)
@@ -191,9 +188,8 @@ exact_value_global = exact_value_local.reshape(-1, 1)[
 ].numpy()
 
 u_h_local = u_h[V.global_triangulation["global2local_idx"]].reshape(-1)
-vertices = mesh.local_triangulations["vertices"].squeeze(0)
-triangles = mesh.local_triangulations["triangles"]
-
+vertices = mesh["vertices"]["coordinates"].squeeze(0)
+triangles = mesh["cells"]["vertices"]
 
 # ---------------------- Plot ----------------------#
 
@@ -252,7 +248,4 @@ ax3.set_xlabel("x")
 ax3.set_ylabel("y")
 ax3.set_zlabel(r"$|u-u_h|$")
 
-
 plt.show()
-
-xd_1 = I_u_h

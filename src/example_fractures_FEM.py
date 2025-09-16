@@ -78,12 +78,7 @@ fracture_triangulation = tr.triangulate(
 
 fracture_triangulation_torch = td.TensorDict(fracture_triangulation)
 
-tr.compare(plt, fracture_2d_data, fracture_triangulation)
-
-plt.show()
-
 fractures_triangulation = (fracture_triangulation_torch, fracture_triangulation_torch)
-
 
 fractures_data = torch.tensor(
     [
@@ -299,11 +294,11 @@ I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 ### --- FEM SOLUTION PARAMETERS --- ###
 
 vertices_fracture_1, vertices_fracture_2 = torch.unbind(
-    mesh.local_triangulations["vertices"], dim=0
+    mesh["vertices"]["coordinates"], dim=0
 )
 
 triangles_fracture_1, triangles_fracture_2 = torch.unbind(
-    mesh.local_triangulations["triangles"], dim=0
+    mesh["cells"]["vertices"], dim=0
 )
 
 u_h_fracture_1, u_h_fracture_2 = torch.unbind(
@@ -320,7 +315,7 @@ traces_local_edges_idx = V.global_triangulation["traces_local_edges_idx"]
 
 n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
 
-n4e_u = mesh.edges_parameters["nodes4unique_edges"]
+n4e_u = mesh["edges"]["vertices"]
 
 nodes4trace = n4e_u[torch.arange(n4e_u.shape[0])[:, None], traces_local_edges_idx]
 
@@ -394,9 +389,7 @@ H1_error_fracture_1, H1_error_fracture_2 = torch.unbind(
     dim=0,
 )
 
-c4e_fracture_1, c4e_fracture_2 = torch.unbind(
-    mesh.local_triangulations["coords4triangles"], dim=0
-)
+c4e_fracture_1, c4e_fracture_2 = torch.unbind(mesh["cells"]["vertices"], dim=0)
 
 # ---------------------- Plot ----------------------#
 
@@ -498,7 +491,7 @@ c4e_fracture_2 = c4e_fracture_2.numpy(force=True)
 # Shared color scale
 all_errors = np.concatenate([H1_error_fracture_1, H1_error_fracture_2])
 norm = colors.Normalize(vmin=all_errors.min(), vmax=all_errors.max())
-cmap = cm.viridis
+cmap = plt.get_cmap("viridis")
 
 # fracture 1
 fig, ax = plt.subplots(dpi=200)

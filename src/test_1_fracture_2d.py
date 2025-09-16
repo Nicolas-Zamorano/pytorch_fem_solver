@@ -33,9 +33,6 @@ def a(basis):
     return v_grad @ v_grad.mT
 
 
-MESH_SIZE = 0.5**10
-
-
 def exact(x, y):
     """Exact solution."""
     return y * (1 - y) * x * (1 - x**2)
@@ -73,6 +70,8 @@ def h1_norm(basis, solution, solution_grad):
     )
 
 
+MESH_SIZE = 0.5**4
+
 fracture_2d_data = {
     "vertices": [
         [-1.0, 0.0],
@@ -87,7 +86,7 @@ fracture_2d_data = {
 }
 
 fracture_triangulation = td.TensorDict(
-    tr.triangulate(fracture_2d_data, "pqsena" + str(MESH_SIZE))
+    tr.triangulate(fracture_2d_data, "pqsea" + str(MESH_SIZE))
 )
 
 mesh = MeshTri(triangulation=fracture_triangulation)
@@ -129,7 +128,7 @@ ax1.plot_trisurf(
     mesh["vertices"]["coordinates"][:, 0],
     mesh["vertices"]["coordinates"][:, 1],
     u_h.squeeze(-1),
-    triangles=mesh["cells"]["indices"],
+    triangles=mesh["cells"]["vertices"],
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,
@@ -146,7 +145,7 @@ ax2.plot_trisurf(
     mesh["vertices"]["coordinates"][:, 0],
     mesh["vertices"]["coordinates"][:, 1],
     exact_value,
-    triangles=mesh["cells"]["indices"],
+    triangles=mesh["cells"]["vertices"],
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,
@@ -163,7 +162,7 @@ ax3.plot_trisurf(
     mesh["vertices"]["coordinates"][:, 0],
     mesh["vertices"]["coordinates"][:, 1],
     abs(exact_value - u_h.squeeze(-1)),
-    triangles=mesh["cells"]["indices"],
+    triangles=mesh["cells"]["vertices"],
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,
