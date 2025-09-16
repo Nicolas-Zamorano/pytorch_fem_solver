@@ -38,8 +38,6 @@ class AbstractMesh(abc.ABC):
             "vertices": {},
             "cells": {},
             "edges": {},
-            "boundary_edges": {},
-            "interior_edges": {},
         }
 
         for key, value in mesh_dict.items():
@@ -66,16 +64,16 @@ class AbstractMesh(abc.ABC):
     def _build_optional_parameters(self, triangulation: tensordict.TensorDict):
         """Compute parameters that are not in mesh dict."""
 
-        triangulation["cells"]["coordinates"] = self.compute_coordinates_4_cells(
-            triangulation["vertices"]["coordinates"], triangulation["cells"]["vertices"]
+        triangulation["cells", "coordinates"] = self.compute_coordinates_4_cells(
+            triangulation["vertices", "coordinates"], triangulation["cells"]["vertices"]
         )
 
         if "vertices" not in triangulation["edges"]:
-            vertices_4_unique_edges, boundary_mask = self._compute_edges_indices(
+            vertices_4_unique_edges, boundary_mask = self._compute_edges_vertices(
                 triangulation,
             )
-            triangulation["edges"]["vertices"] = vertices_4_unique_edges
-            triangulation["edges"]["markers"] = boundary_mask
+            triangulation["edges", "vertices"] = vertices_4_unique_edges
+            triangulation["edges", "markers"] = boundary_mask
 
         interior_edges, boundary_edges = self._compute_interior_and_boundary_edges(
             triangulation
@@ -85,7 +83,7 @@ class AbstractMesh(abc.ABC):
 
         triangulation["interior_edges"] = interior_edges
         triangulation["boundary_edges"] = boundary_edges
-        triangulation["cells"]["length"] = cells_length
+        triangulation["cells", "length"] = cells_length
 
         return triangulation
 
@@ -199,7 +197,7 @@ class AbstractMesh(abc.ABC):
         # Fix orientation
 
         centroid_4_interior_edges = self.compute_coordinates_4_cells(
-            triangulation["cells"]["coordinates"], cells_4_interior_edges
+            triangulation["cells", "coordinates"], cells_4_interior_edges
         ).mean(dim=-2)
 
         (
@@ -220,14 +218,14 @@ class AbstractMesh(abc.ABC):
         boundary_edges = tensordict.TensorDict(
             {
                 "cells": cells_4_boundary_edges,
-                "vertices": indices_4_boundary_edges,
+                "vertices": vertices_4_boundary_edges,
                 "coordinates": coordinates_4_boundary_edges,
             }
         ).auto_batch_size_()
         interior_edges = tensordict.TensorDict(
             {
                 "cells": cells_4_interior_edges,
-                "vertices": indices_4_interior_edges,
+                "vertices": vertices_4_interior_edges,
                 "coordinates": coordinates_4_interior_edges,
                 "length": interior_edges_length,
                 "normals": normal_4_interior_edges,
@@ -243,29 +241,29 @@ class AbstractMesh(abc.ABC):
         """Compute the coordinates of the cells in the mesh."""
         return coordinates_4_vertices[vertices_4_cells]
 
-    def _compute_edges_indices(self, triangulation: tensordict.TensorDict):
+    def _compute_edges_vertices(self, triangulation: tensordict.TensorDict):
         """Compute vertices for unique edges."""
 
-        indices_4_edges = triangulation["cells"]["vertices"][self._edges_permutations]
+        vertices_4_edges = triangulation["cells", "vertices"][self._edges_permutations]
 
-        indices_4_unique_edges, _, boundary_mask = torch.unique(
-            indices_4_edges.reshape(-1, 2).mT,
+        vertices_4_unique_edges, _, boundary_mask = torch.unique(
+            vertices_4_edges.reshape(-1, 2).mT,
             return_inverse=True,
             sorted=False,
             return_counts=True,
             dim=-1,
         )
 
-        return indices_4_unique_edges, boundary_mask
+        return vertices_4_unique_edges, boundary_mask
 
     def _compute_cells_min_length(self, triangulation: tensordict.TensorDict):
         """For each cells, compute the smaller length of the edges."""
-        indices_4_edges, _ = torch.sort(
-            triangulation["cells"]["vertices"][..., self._edges_permutations], dim=-1
+        vertices_4_edges, _ = torch.sort(
+            triangulation["cells", "vertices"][..., self._edges_permutations], dim=-1
         )
 
         coordinates_4_edges = self.compute_coordinates_4_cells(
-            triangulation["vertices"]["coordinates"], indices_4_edges
+            triangulation["vertices", "coordinates"], vertices_4_edges
         )
 
         coordinates_4_edges_first_vertex, coordinates_4_edges_second_vertex = (
@@ -353,8 +351,16 @@ class FracturesTri(MeshTri):
 
         self._compute_fracture_map(fractures_3d_data)
 
-        self["vertices"]["coordinates_3d"] = self._fracture_map(
-            self["vertices"]["coordinates"]
+        self["vertices", "coordinates_3d"] = self.fracture_map(
+            self["vertices", "coordinates"]
+        )
+
+        self["cells", "coordinates_3d"] = self.compute_coordinates_4_cells(
+            self["vertices", "coordinates_3d"], self["cells", "vertices"]
+        )
+
+        self["interior_edges", "normals_3d"] = self.fracture_map(
+            self["interior_edges", "normals"]
         )
 
     @property
@@ -377,7 +383,7 @@ class FracturesTri(MeshTri):
 
     def _compute_fracture_map(self, fractures_3d_data: torch.Tensor):
         """compute mapping for each fracture from the 2D space to 3D."""
-        vertices_2d = self["vertices"]["coordinates"][:, :3, :]
+        vertices_2d = self["vertices", "coordinates"][:, :3, :]
 
         vertices_3d = fractures_3d_data[:, :3, :]
 
@@ -432,7 +438,6 @@ class AbstractElement(abc.ABC):
 
         self.polynomial_order = polynomial_order
         self.integration_order = integration_order
-        self.inv_map_jacobian = None
 
         self.gaussian_nodes, self.gaussian_weights = self._compute_gauss_values()
 
@@ -778,7 +783,7 @@ class AbstractBasis(abc.ABC):
     def interpolate(self, basis: "AbstractBasis", tensor: torch.Tensor = None):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            indices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
+            vertices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
@@ -841,18 +846,16 @@ class AbstractBasis(abc.ABC):
             )
 
         else:
-            raise NotImplementedError(
-                "Interpolation between different basis not implemented"
-            )
+            raise NotImplementedError("Interpolation for this basis not implemented")
 
         if tensor is not None:
 
-            interpolation = (tensor[indices_4_cells_4_interior_edges] * v).sum(
+            interpolation = (tensor[vertices_4_cells_4_interior_edges] * v).sum(
                 -2, keepdim=True
             )
 
             interpolation_grad = (
-                tensor[indices_4_cells_4_interior_edges] * v_grad
+                tensor[vertices_4_cells_4_interior_edges] * v_grad
             ).sum(-2, keepdim=True)
 
             return interpolation, interpolation_grad
@@ -862,14 +865,14 @@ class AbstractBasis(abc.ABC):
             nodes = self.coords4global_dofs
 
             def interpolator(function):
-                return (function(nodes)[indices_4_cells_4_interior_edges] * v).sum(
+                return (function(nodes)[vertices_4_cells_4_interior_edges] * v).sum(
                     -2, keepdim=True
                 )
 
             def interpolator_grad(function):
-                return (function(nodes)[indices_4_cells_4_interior_edges] * v_grad).sum(
-                    -2, keepdim=True
-                )
+                return (
+                    function(nodes)[vertices_4_cells_4_interior_edges] * v_grad
+                ).sum(-2, keepdim=True)
 
             return interpolator, interpolator_grad
 
@@ -921,9 +924,9 @@ class Basis(AbstractBasis):
 
         if element.polynomial_order == 1:
 
-            coords_4_global_dofs = mesh["vertices"]["coordinates"]
-            global_dofs_4_elements = mesh["cells"]["vertices"]
-            nodes4boundary_dofs = mesh["vertices"]["markers"]
+            coords_4_global_dofs = mesh["vertices", "coordinates"]
+            global_dofs_4_elements = mesh["cells", "vertices"]
+            nodes_4_boundary_dofs = mesh["vertices", "markers"]
 
         # need to be refactored to account for deprecation of get_edges_idx function
         # elif element.polynomial_order == 2:
@@ -952,15 +955,15 @@ class Basis(AbstractBasis):
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
-        coords4elements = mesh.compute_coordinates_4_cells(
+        coords_4_elements = mesh.compute_coordinates_4_cells(
             coords_4_global_dofs, global_dofs_4_elements
         )
 
         return (
             coords_4_global_dofs,
             global_dofs_4_elements,
-            nodes4boundary_dofs,
-            coords4elements,
+            nodes_4_boundary_dofs,
+            coords_4_elements,
         )
 
     def _compute_basis_parameters(
@@ -987,10 +990,10 @@ class Basis(AbstractBasis):
         }
 
     def _compute_jacobian_map(self, mesh, element):
-        return mesh["cells"]["coordinates"].mT @ element.barycentric_grad
+        return mesh["cells", "coordinates"].mT @ element.barycentric_grad
 
     def _compute_integration_points(self, mesh, bar_coords):
-        return bar_coords.mT @ mesh["cells"]["coordinates"].unsqueeze(-3)
+        return bar_coords.mT @ mesh["cells", "coordinates"].unsqueeze(-3)
 
     def _compute_integral_weights(self, element, det_map_jacobian):
         return (
@@ -1009,9 +1012,9 @@ class InteriorEdgesBasis(AbstractBasis):
 
         if element.polynomial_order == 1:
             ## WARNING !!!! THIS IS NOT CORRECT, NEED TO FIX
-            coords_4_global_dofs = mesh["vertices"]["coordinates"]
-            global_dofs_4_elements = mesh["cells"]["vertices"]
-            nodes4boundary_dofs = mesh["vertices"]["markers"]
+            coords_4_global_dofs = mesh["vertices", "coordinates"]
+            global_dofs_4_elements = mesh["cells", "vertices"]
+            nodes4boundary_dofs = mesh["vertices", "markers"]
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
@@ -1050,10 +1053,10 @@ class InteriorEdgesBasis(AbstractBasis):
         }
 
     def _compute_jacobian_map(self, mesh, element):
-        return mesh["interior_edges"]["coordinates"].mT @ element.barycentric_grad
+        return mesh["interior_edges", "coordinates"].mT @ element.barycentric_grad
 
     def _compute_integration_points(self, mesh, bar_coords):
-        return bar_coords.mT @ mesh["interior_edges"]["coordinates"].unsqueeze(-3)
+        return bar_coords.mT @ mesh["interior_edges", "coordinates"].unsqueeze(-3)
 
     def _compute_integral_weights(self, element, det_map_jacobian):
         return (
@@ -1069,13 +1072,21 @@ class FractureBasis(AbstractBasis):
 
         super().__init__(mesh, element)
 
-    def _build_global_triangulation(self, mesh):
+        self.v_grad = self.v_grad @ mesh["inv_jacobian_fracture_map"]
+
+        self.inv_map_jacobian = (
+            self.inv_map_jacobian @ mesh["inv_jacobian_fracture_map"]
+        )
+
+    def _build_global_triangulation(self, mesh: AbstractMesh):
         """Build a global triangulation from local triangulations of multiple fractures."""
-        nb_fractures, nb_vertices, _ = mesh["vertices"]["coordinates"].size()
+        nb_fractures, nb_vertices, _ = mesh["vertices", "coordinates"].size()
 
-        nb_edges = mesh["edges"]["vertices"].size(-2)
+        nb_edges = mesh["edges", "vertices"].size(-2)
 
-        local_triangulation_3d_coords = mesh["vertices_3D"].reshape(-1, 3)
+        local_triangulation_3d_coords = mesh["vertices", "coordinates_3d"].reshape(
+            -1, 3
+        )
 
         global_vertices_3d, global2local_idx, vertex_counts = torch.unique(
             local_triangulation_3d_coords,
@@ -1100,18 +1111,18 @@ class FractureBasis(AbstractBasis):
             include_self=True,
         )
 
-        global_vertices_2d = mesh["vertices"]["coordinates"].reshape(-1, 2)[
+        global_vertices_2d = mesh["vertices", "coordinates"].reshape(-1, 2)[
             local2global_idx
         ]
 
         vertices_offset = torch.arange(nb_fractures)[:, None, None] * nb_vertices
 
         global_triangles = global2local_idx[
-            mesh["triangles"] + vertices_offset
+            mesh["cells", "vertices"] + vertices_offset
         ].reshape(-1, 3)
 
         local_edges_2_global = global2local_idx[
-            mesh["edges"] + vertices_offset
+            mesh["edges", "vertices"] + vertices_offset
         ].reshape(-1, 2)
 
         global_edges, global2local_edges_idx, edges_counts = torch.unique(
@@ -1147,10 +1158,10 @@ class FractureBasis(AbstractBasis):
             include_self=True,
         )
 
-        global_vertices_marker = mesh["vertices"]["markers"].reshape(-1)[
+        global_vertices_marker = mesh["vertices", "markers"].reshape(-1)[
             local2global_idx
         ]
-        global_edges_marker = mesh["edges"]["markers"].reshape(-1)[
+        global_edges_marker = mesh["edges", "markers"].reshape(-1)[
             local2global_edges_idx
         ]
 
