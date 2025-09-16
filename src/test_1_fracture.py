@@ -14,7 +14,7 @@ torch.set_default_dtype(torch.float64)
 
 # ---------------------- FEM Parameters ----------------------#
 
-MESH_SIZE = 0.5 ** (4)
+MESH_SIZE = 0.5 ** (9)
 
 fracture_2d_data = {
     "vertices": [
@@ -49,7 +49,7 @@ mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
-elements = ElementTri(polynomial_order=1, integration_order=1)
+elements = ElementTri(polynomial_order=1, integration_order=2)
 
 V = FractureBasis(mesh, elements)
 

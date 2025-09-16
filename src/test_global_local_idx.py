@@ -6,128 +6,9 @@ import tensordict as td
 import triangle as tr
 import pyvista as pv
 
+from fem import FracturesTri, FractureBasis, ElementTri
+
 torch.set_default_dtype(torch.float64)
-
-
-def stack_triangulations(fracture_triangulations: tuple):
-    """Stack a list of triangulations into a single batched triangulation."""
-    local_vertices = torch.stack(
-        [triangulation["vertices"] for triangulation in fracture_triangulations], dim=0
-    )
-    local_vertices_marker = torch.stack(
-        [triangulation["vertex_markers"] for triangulation in fracture_triangulations],
-        dim=0,
-    )
-
-    local_triangles = torch.stack(
-        [triangulation["triangles"] for triangulation in fracture_triangulations], dim=0
-    )
-
-    local_edges = torch.stack(
-        [triangulation["edges"] for triangulation in fracture_triangulations], dim=0
-    )
-    local_edges_marker = torch.stack(
-        [triangulation["edge_markers"] for triangulation in fracture_triangulations],
-        dim=0,
-    )
-
-    local_triangulation = td.TensorDict(
-        vertices=local_vertices,
-        vertex_markers=local_vertices_marker,
-        triangles=local_triangles,
-        edges=local_edges,
-        edge_markers=local_edges_marker,
-    )
-
-    return local_triangulation
-
-
-def compute_barycentric_coordinates(x):
-    """Compute barycentric coordinates of points in 2D."""
-    return torch.stack(
-        [1.0 - x[..., [0]] - x[..., [1]], x[..., [0]], x[..., [1]]], dim=-2
-    )
-
-
-def build_global_triangulation(local_triangulation):
-    """Build a global triangulation from a batched local triangulation."""
-    local_triangulation_bar_coords = compute_barycentric_coordinates(
-        local_triangulation["vertices"]
-    )
-
-    nb_fractures, nb_vertices, _ = local_triangulation["vertices"].shape
-
-    nb_edges = local_triangulation["edges"].shape[-2]
-
-    local_triangulation_3d_coords = (
-        local_triangulation_bar_coords.mT @ fractures_3D_vertices
-    ).reshape(-1, 3)
-
-    global_vertices_3d, global2local_idx = torch.unique(
-        local_triangulation_3d_coords,
-        dim=0,
-        return_inverse=True,
-    )
-
-    nb_global_vertices = global_vertices_3d.shape[-2]
-
-    local2global_idx = torch.full(
-        (nb_global_vertices,), (nb_fractures * nb_vertices) + 1, dtype=torch.int64
-    )
-
-    local2global_idx.scatter_reduce_(
-        0,
-        global2local_idx,
-        torch.arange(nb_fractures * nb_vertices),
-        reduce="amin",
-        include_self=True,
-    )
-
-    vertices_offset = torch.arange(nb_fractures)[:, None, None] * nb_vertices
-    global_triangles = global2local_idx[
-        local_triangulations["triangles"] + vertices_offset
-    ].reshape(-1, 3)
-
-    local_edges_2_global = global2local_idx[
-        local_triangulations["edges"] + vertices_offset
-    ].reshape(-1, 2)
-
-    global_edges, global2local_edges_idx = torch.unique(
-        local_edges_2_global.reshape(-1, 2), dim=0, return_inverse=True
-    )
-
-    nb_global_edges = global_edges.shape[-2]
-
-    local2global_edges_idx = torch.full(
-        (nb_global_edges,), (nb_fractures * nb_edges) + 1, dtype=torch.int64
-    )
-
-    local2global_edges_idx.scatter_reduce_(
-        0,
-        global2local_edges_idx,
-        torch.arange(nb_fractures * nb_edges),
-        reduce="amin",
-        include_self=True,
-    )
-
-    global_vertices_marker = local_triangulations["vertex_markers"].reshape(-1)[
-        local2global_idx
-    ]
-    global_edges_marker = local_triangulations["edge_markers"].reshape(-1)[
-        local2global_edges_idx
-    ]
-
-    global_triangulation = td.TensorDict(
-        vertices=global_vertices_3d,
-        vertex_markers=global_vertices_marker,
-        triangles=global_triangles,
-        edges=global_edges,
-        edge_markers=global_edges_marker,
-        global2local_idx=global2local_idx,
-        local2global_idx=local2global_idx,
-    )
-
-    return global_triangulation
 
 
 def exact(x, y, z):
@@ -172,47 +53,44 @@ def exact(x, y, z):
 #     return rhs_value
 
 
-MESH_SIZE = 0.5**5
+MESH_SIZE = 0.5**1
 
 fracture_2d_data = {
     "vertices": [
-        [0.0, 0.0],
-        [0.5, 0.0],
+        [-1.0, 0.0],
         [1.0, 0.0],
-        [0.5, 0.5],
-        [0.0, 1.0],
-        [0.5, 1.0],
+        [-1.0, 1.0],
         [1.0, 1.0],
+        [0.0, 0.0],
+        [0.0, 1.0],
     ],
-    "segments": [[0, 1], [0, 4], [1, 2], [1, 3], [2, 6], [3, 5], [4, 5], [5, 6]],
+    "segments": [[0, 2], [0, 4], [1, 3], [1, 4], [2, 5], [3, 5], [4, 5]],
+    "segment_markers": [[1], [1], [1], [1], [1], [1], [0]],
 }
 
-fracture_triangulation = td.TensorDict(
-    tr.triangulate(fracture_2d_data, "pqsena" + str(MESH_SIZE))
-)
+fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsena" + str(MESH_SIZE))
 
-# tr.compare(plt, fracture_2d_data, fracture_triangulation)
 
-fractures_triangulation = (fracture_triangulation, fracture_triangulation)
+fractures_triangulation = [fracture_triangulation, fracture_triangulation]
 
-fractures_3D_data = torch.tensor(
+fractures_data = torch.tensor(
     [
         [[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [-1.0, 1.0, 0.0], [1.0, 1.0, 0.0]],
         [[0.0, 0.0, -1.0], [0.0, 0.0, 1.0], [0.0, 1.0, -1.0], [0.0, 1.0, 1.0]],
     ]
 )
 
-fractures_3D_vertices = fractures_3D_data[:, :3, :].unsqueeze(-3)
+fractures = FracturesTri(fractures_triangulation, fractures_data)
 
-local_triangulations = stack_triangulations(fractures_triangulation)
+V = FractureBasis(fractures, ElementTri(1, 2))
 
-global_triangulations = build_global_triangulation(local_triangulations)
+global_triangulations = V.global_triangulation
 
-local_vertices_3D = global_triangulations["vertices"][
+local_vertices_3D = global_triangulations["vertices_3D"][
     global_triangulations["global2local_idx"].reshape(2, -1)
 ]
 
-vertices = global_triangulations["vertices"].numpy()
+vertices = global_triangulations["vertices_3D"].numpy()
 
 exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1))
 

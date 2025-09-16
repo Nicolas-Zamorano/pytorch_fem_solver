@@ -1,13 +1,15 @@
 """Example of FEM solver for 2D fractures in 3D."""
 
-import matplotlib.cm as cm
-import matplotlib.colors as colors
+# import matplotlib.cm as cm
+# import matplotlib.colors as colors
 import matplotlib.pyplot as plt
-import numpy as np
+
+# import numpy as np
 import tensordict as td
 import torch
 import triangle as tr
-from matplotlib.collections import PolyCollection
+
+# from matplotlib.collections import PolyCollection
 
 from fem import (
     ElementLine,
@@ -25,7 +27,7 @@ torch.set_default_dtype(torch.float64)
 
 MESH_SIZE = 0.5
 
-EXPONENT = 2
+EXPONENT = 10
 
 # fracture_2d_data = {"vertices" : [[-1., 0.],
 #                                   [ 1., 0.],
@@ -73,7 +75,7 @@ fracture_2d_data = {
 }
 
 fracture_triangulation = tr.triangulate(
-    fracture_2d_data, "pqsea" + str(MESH_SIZE**EXPONENT)
+    fracture_2d_data, "pqsena" + str(MESH_SIZE**EXPONENT)
 )
 
 fracture_triangulation_torch = td.TensorDict(fracture_triangulation)
@@ -91,15 +93,16 @@ mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
-elements = ElementTri(polynomial_order=1, integration_order=4)
+elements = ElementTri(polynomial_order=1, integration_order=2)
 
 V = FractureBasis(mesh, elements)
 
 # ---------------------- Residual Parameters ----------------------#
 
 
-def rhs(x, y, z):
+def rhs(coordinates):
     """Right-hand side function."""
+    x, y, z = torch.split(coordinates, 1, dim=-1)
     x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
     _, z_fracture_2 = torch.split(z, 1, dim=0)
@@ -132,10 +135,10 @@ def rhs(x, y, z):
 
 def l(basis):
     """Linear functional."""
-    x, y, z = basis.integration_points
+    integration_points = basis.integration_points
 
     v = basis.v
-    rhs_value = rhs(x, y, z)
+    rhs_value = rhs(integration_points)
 
     return rhs_value * v
 
@@ -156,8 +159,9 @@ def a(basis):
 # ---------------------- Error Parameters ----------------------#
 
 
-def exact(x, y, z):
+def exact(coordinates):
     """Exact solution."""
+    x, y, z = torch.split(coordinates, 1, dim=-1)
     x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
     _, z_fracture_2 = torch.split(z, 1, dim=0)
@@ -180,8 +184,9 @@ def exact(x, y, z):
     return exact_value
 
 
-def exact_grad(x, y, z):
+def exact_grad(coordinates):
     """Gradient of the exact solution."""
+    x, y, z = torch.split(coordinates, 1, dim=-1)
     x_fracture_1, _ = torch.split(x, 1, dim=0)
     y_fracture_1, y_fracture_2 = torch.split(y, 1, dim=0)
     _, z_fracture_2 = torch.split(z, 1, dim=0)
@@ -227,10 +232,12 @@ def exact_grad(x, y, z):
 
 def h1_exact(basis):
     """H1 norm of the exact solution."""
-    exact_value = exact(*basis.integration_points)
+    integration_points = basis.integration_points
+
+    exact_value = exact(integration_points)
 
     exact_dx_value, exact_dy_value, exact_dz_value = torch.split(
-        exact_grad(*basis.integration_points), 1, dim=-1
+        exact_grad(integration_points), 1, dim=-1
     )
 
     return exact_value**2 + exact_dx_value**2 + exact_dy_value**2 + exact_dz_value**2
@@ -238,10 +245,12 @@ def h1_exact(basis):
 
 def h1_norm(basis, solution, solution_grad):
     """H1 norm of the error."""
-    exact_value = exact(*basis.integration_points)
+    integration_points = basis.integration_points
+
+    exact_value = exact(integration_points)
 
     exact_dx_value, exact_dy_value, exact_dz_value = torch.split(
-        exact_grad(*basis.integration_points), 1, dim=-1
+        exact_grad(integration_points), 1, dim=-1
     )
 
     solution_dx, solution_dy, solution_dz = torch.split(solution_grad, 1, dim=-1)
@@ -275,20 +284,6 @@ u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
 
 I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 
-# non_zero_dirichlet_dofs = torch.nonzero(V.global_triangulation["vertex_markers"] == 2)[:, 0]
-
-# A_tilde, b_tilde = V.apply_BC(A, b, g, non_zero_dirichlet_dofs)
-
-# u_h = torch.zeros(V.basis_parameters["linear_form_shape"])
-
-# A_reduced = V.reduce(A_tilde)
-
-# b_reduced = V.reduce(b_tilde)
-
-# u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
-
-# I_u_h, I_u_h_grad = V.interpolate(u_h)
-
 # ---------------------- Plot Values ----------------------#
 
 ### --- FEM SOLUTION PARAMETERS --- ###
@@ -313,13 +308,13 @@ V_inner_edges = InteriorEdgesFractureBasis(
 
 traces_local_edges_idx = V.global_triangulation["traces_local_edges_idx"]
 
-n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
+n_E = V.mesh["interior_edges", "normals_3d"].unsqueeze(-2)
 
-n4e_u = mesh["edges"]["vertices"]
+n4e_u = mesh["edges", "vertices"]
 
 nodes4trace = n4e_u[torch.arange(n4e_u.shape[0])[:, None], traces_local_edges_idx]
 
-c4n = V.mesh.local_triangulations["vertices"]
+c4n = V.mesh["vertices", "coordinates_3d"]
 
 coords4trace = c4n[torch.arange(c4n.shape[0]), nodes4trace]
 
@@ -357,7 +352,7 @@ local_vertices_3D = V.global_triangulation["vertices_3D"][
     V.global_triangulation["global2local_idx"].reshape(2, -1)
 ]
 
-exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1))
+exact_value_local = exact(local_vertices_3D)
 
 exact_value_global = exact_value_local.reshape(-1, 1)[
     V.global_triangulation["local2global_idx"]
@@ -366,8 +361,6 @@ exact_value_global = exact_value_local.reshape(-1, 1)[
 I_E_u, I_E_u_grad = V.interpolate(V_inner_edges, exact_value_global)
 
 I_E_u_grad_K_plus, I_E_u_grad_minus = torch.unbind(I_E_u_grad, dim=-4)
-
-n_E = V.mesh.local_triangulations["normal4inner_edges_3D"]
 
 jump_u = (I_E_u_grad_K_plus * n_E).sum(-1) + (I_E_u_grad_minus * -n_E).sum(-1)
 
@@ -411,10 +404,7 @@ ax.set_xlabel(r"$x$")
 ax.set_ylabel(r"$y$")
 ax.set_zlabel(r"pressure")
 ax.tick_params(labelsize=8)
-
-plt.tight_layout()
 # plt.savefig("fem_solution_fracture_1.png")
-plt.show()
 
 # Fracture 2
 fig = plt.figure(dpi=200)
@@ -431,10 +421,8 @@ ax.plot_trisurf(
 ax.set_xlabel(r"$x$")
 ax.set_ylabel(r"$y$")
 ax.set_zlabel(r"pressure")
-plt.tight_layout()
 ax.tick_params(labelsize=8)
 # plt.savefig("fem_solution_fracture_2.png")
-plt.show()
 
 # ------------------ TRACES (JUMPS) ------------------
 
@@ -455,9 +443,7 @@ plt.scatter(
 plt.xlabel("trace length")
 plt.ylabel("jump value")
 plt.legend()
-plt.tight_layout()
 # plt.savefig("trace_jump_fracture_1.png")
-plt.show()
 
 # fracture 2
 fig = plt.figure(dpi=200)
@@ -476,61 +462,61 @@ plt.scatter(
 plt.xlabel("trace length")
 plt.ylabel("jump value")
 plt.legend()
-plt.tight_layout()
 # plt.savefig("trace_jump_fracture_2.png")
-plt.show()
 
-# ------------------ RELATIVE ERROR ------------------
+# # ------------------ RELATIVE ERROR ------------------
 
-# Convert to numpy
-H1_error_fracture_1 = H1_error_fracture_1.numpy(force=True)
-c4e_fracture_1 = c4e_fracture_1.numpy(force=True)
-H1_error_fracture_2 = H1_error_fracture_2.numpy(force=True)
-c4e_fracture_2 = c4e_fracture_2.numpy(force=True)
+# # Convert to numpy
+# H1_error_fracture_1 = H1_error_fracture_1.numpy(force=True)
+# c4e_fracture_1 = c4e_fracture_1.numpy(force=True)
+# H1_error_fracture_2 = H1_error_fracture_2.numpy(force=True)
+# c4e_fracture_2 = c4e_fracture_2.numpy(force=True)
 
-# Shared color scale
-all_errors = np.concatenate([H1_error_fracture_1, H1_error_fracture_2])
-norm = colors.Normalize(vmin=all_errors.min(), vmax=all_errors.max())
-cmap = plt.get_cmap("viridis")
+# # Shared color scale
+# all_errors = np.concatenate([H1_error_fracture_1, H1_error_fracture_2])
+# norm = colors.Normalize(vmin=all_errors.min(), vmax=all_errors.max())
+# cmap = plt.get_cmap("viridis")
 
-# fracture 1
-fig, ax = plt.subplots(dpi=200)
-face_colors = cmap(norm(H1_error_fracture_1))
-collection = PolyCollection(
-    c4e_fracture_1, facecolors=face_colors, edgecolors="black", linewidths=0.2
-)
-ax.add_collection(collection)
-ax.autoscale()
-ax.set_aspect("equal")
-ax.set_xlim([-1, 1])
-ax.set_ylim([0, 1])
-ax.tick_params(labelsize=8)
-sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-sm.set_array([])
-fig.colorbar(sm, ax=ax, orientation="vertical", label=r"$H^1$ relative error")
-plt.xlabel("x")
-plt.ylabel("y")
-plt.tight_layout()
-# plt.savefig("relative_error_fracture_1.png")
-plt.show()
+# # fracture 1
+# fig, ax = plt.subplots(dpi=200)
+# face_colors = cmap(norm(H1_error_fracture_1))
+# collection = PolyCollection(
+#     c4e_fracture_1, facecolors=face_colors, edgecolors="black", linewidths=0.2
+# )
+# ax.add_collection(collection)
+# ax.autoscale()
+# ax.set_aspect("equal")
+# ax.set_xlim([-1, 1])
+# ax.set_ylim([0, 1])
+# ax.tick_params(labelsize=8)
+# sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+# sm.set_array([])
+# fig.colorbar(sm, ax=ax, orientation="vertical", label=r"$H^1$ relative error")
+# plt.xlabel("x")
+# plt.ylabel("y")
+# plt.tight_layout()
+# # plt.savefig("relative_error_fracture_1.png")
+# plt.show()
 
-# fracture 2
-fig, ax = plt.subplots(dpi=200)
-face_colors = cmap(norm(H1_error_fracture_2))
-collection = PolyCollection(
-    c4e_fracture_2, facecolors=face_colors, edgecolors="black", linewidths=0.2
-)
-ax.add_collection(collection)
-ax.autoscale()
-ax.set_aspect("equal")
-ax.set_xlim([-1, 1])
-ax.set_ylim([0, 1])
-ax.tick_params(labelsize=8)
-sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-sm.set_array([])
-plt.xlabel("x")
-plt.ylabel("y")
-fig.colorbar(sm, ax=ax, orientation="vertical", label=r"$H^1$ relative error")
-plt.tight_layout()
-# plt.savefig("relative_error_fracture_2.png")
+# # fracture 2
+# fig, ax = plt.subplots(dpi=200)
+# face_colors = cmap(norm(H1_error_fracture_2))
+# collection = PolyCollection(
+#     c4e_fracture_2, facecolors=face_colors, edgecolors="black", linewidths=0.2
+# )
+# ax.add_collection(collection)
+# ax.autoscale()
+# ax.set_aspect("equal")
+# ax.set_xlim([-1, 1])
+# ax.set_ylim([0, 1])
+# ax.tick_params(labelsize=8)
+# sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+# sm.set_array([])
+# plt.xlabel("x")
+# plt.ylabel("y")
+# fig.colorbar(sm, ax=ax, orientation="vertical", label=r"$H^1$ relative error")
+# plt.tight_layout()
+# # plt.savefig("relative_error_fracture_2.png")
+#
+#
 plt.show()
