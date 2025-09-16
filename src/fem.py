@@ -92,88 +92,20 @@ class AbstractMesh(abc.ABC):
     ):
         """Compute interior and boundary edges."""
 
-        indices_4_edges = triangulation["edges"]["vertices"]
-        markers_4_edges = triangulation["edges"]["markers"].squeeze(-1)
+        vertices_4_boundary_edges, vertices_4_interior_edges = (
+            self._compute_vertices_4_edges(triangulation)
+        )
 
-        indices_4_boundary_edges = indices_4_edges[markers_4_edges == 1]
-        indices_4_interior_edges = indices_4_edges[markers_4_edges != 1]
-
-        if "neighbors" in triangulation["cells"]:
-            neighbors = triangulation["cells"]["neighbors"]
-
-            # number_cells, dimension_cells = triangulation["cells"]["vertices"].size()
-
-            # interior_edges = []
-            # boundary_edges = []
-
-            # for t in range(number_cells):
-            #     for i in range(dimension_cells):
-            #         t_neigh = neighbors[t, i].item()
-            #         if t_neigh != -1:
-            #             if (
-            #                 t < t_neigh
-            #             ):  # to avoid append the same edge but seems for the
-            #                 # other triangle perspective (ex: [1,2] and [2,1])
-            #                 interior_edges.append([t, t_neigh])
-            #         else:
-            #             boundary_edges.append([t])
-
-            # cells_4_boundary_edges = torch.tensor(boundary_edges, dtype=torch.long)
-            # cells_4_interior_edges = torch.tensor(interior_edges, dtype=torch.long)
-
-            number_neighbors = neighbors.size(-2)
-
-            cells_idx = torch.arange(number_neighbors).repeat_interleave(
-                triangulation["cells"]["vertices"].size(-1)
-            )
-
-            neigh_flat = neighbors.reshape(-1)
-
-            mask_inner = neigh_flat != -1
-            mask_boundary = neigh_flat == -1
-
-            tri1 = cells_idx[mask_inner]
-            tri2 = neigh_flat[mask_inner]
-
-            pair = torch.stack(
-                [torch.minimum(tri1, tri2), torch.maximum(tri1, tri2)], dim=1
-            )
-
-            cells_4_interior_edges = torch.unique(pair, dim=0)
-
-            cells_4_boundary_edges = cells_idx[mask_boundary].unsqueeze(1)
-
-        else:
-            raise NotImplementedError
-            # WARNING!!! DOESN'T WORK AS INTENDED
-            # indices_4_cells = triangulation["cells"]["vertices"]
-
-            # cells_4_boundary_edges = (
-            #     (
-            #         indices_4_boundary_edges.unsqueeze(-2).unsqueeze(-2)
-            #         == indices_4_cells.unsqueeze(-1).unsqueeze(-4)
-            #     )
-            #     .any(dim=-2)
-            #     .all(dim=-1)
-            #     .float()
-            #     .argmax(dim=-1, keepdim=True)
-            # )
-            # cells_4_interior_edges = torch.nonzero(
-            #     (
-            #         indices_4_interior_edges.unsqueeze(-2).unsqueeze(-2)
-            #         == indices_4_cells.unsqueeze(-1).unsqueeze(-4)
-            #     )
-            #     .any(dim=-2)
-            #     .all(dim=-1),
-            #     as_tuple=True,
-            # )[1].reshape(-1, triangulation["vertices"]["coordinates"].size(-1))
+        cells_4_boundary_edges, cells_4_interior_edges = self._compute_cells_4_edges(
+            triangulation, vertices_4_boundary_edges, vertices_4_interior_edges
+        )
 
         coordinates_4_interior_edges = self.compute_coordinates_4_cells(
-            triangulation["vertices"]["coordinates"], indices_4_interior_edges
+            triangulation["vertices", "coordinates"], vertices_4_interior_edges
         )
 
         coordinates_4_boundary_edges = self.compute_coordinates_4_cells(
-            triangulation["vertices"]["coordinates"], indices_4_boundary_edges
+            triangulation["vertices", "coordinates"], vertices_4_boundary_edges
         )
 
         (
@@ -233,6 +165,78 @@ class AbstractMesh(abc.ABC):
         ).auto_batch_size_()
 
         return interior_edges, boundary_edges
+
+    def _compute_vertices_4_edges(self, triangulation: tensordict.TensorDict):
+        """Compute vertices for interior and boundary edges. boundary edges are identify for having
+        a one in the marker for edges. every other marker is threat as interior."""
+
+        vertices_4_edges = triangulation["edges", "vertices"]
+        markers_4_edges = triangulation["edges", "markers"].squeeze(-1)
+
+        vertices_4_boundary_edges = vertices_4_edges[markers_4_edges == 1]
+
+        vertices_4_interior_edges = vertices_4_edges[markers_4_edges != 1]
+
+        return vertices_4_boundary_edges, vertices_4_interior_edges
+
+    def _compute_cells_4_edges(
+        self,
+        triangulation: tensordict.TensorDict,
+        vertices_4_boundary_edges: torch.Tensor,
+        vertices_4_interior_edges: torch.Tensor,
+    ):
+        """Compute the cells for each edge. In the case of edges in the boundary of the domain,
+        only 1 cells contain them, while 2 cells contains an edges for interior ones."""
+
+        if "neighbors" in triangulation["cells"]:
+            neighbors = triangulation["cells", "neighbors"]
+
+            number_neighbors = neighbors.size(-2)
+
+            cells_idx = torch.arange(number_neighbors).repeat_interleave(
+                triangulation["cells"]["vertices"].size(-1)
+            )
+
+            neigh_flat = neighbors.reshape(-1)
+
+            mask_inner = neigh_flat != -1
+            mask_boundary = neigh_flat == -1
+
+            tri1 = cells_idx[mask_inner]
+            tri2 = neigh_flat[mask_inner]
+
+            pair = torch.stack(
+                [torch.minimum(tri1, tri2), torch.maximum(tri1, tri2)], dim=1
+            )
+
+            cells_4_interior_edges = torch.unique(pair, dim=0)
+
+            cells_4_boundary_edges = cells_idx[mask_boundary]
+
+        else:
+            vertices_4_cells = triangulation["cells"]["vertices"]
+
+            cells_4_boundary_edges = (
+                (
+                    vertices_4_boundary_edges.unsqueeze(-2).unsqueeze(-2)
+                    == vertices_4_cells.unsqueeze(-1).unsqueeze(-4)
+                )
+                .any(dim=-2)
+                .all(dim=-1)
+                .float()
+                .argmax(dim=-1, keepdim=True)
+            )
+            cells_4_interior_edges = torch.nonzero(
+                (
+                    vertices_4_interior_edges.unsqueeze(-2).unsqueeze(-2)
+                    == vertices_4_cells.unsqueeze(-1).unsqueeze(-4)
+                )
+                .any(dim=-2)
+                .all(dim=-1),
+                as_tuple=True,
+            )[1].reshape(-1, triangulation["vertices"]["coordinates"].size(-1))
+
+        return cells_4_boundary_edges, cells_4_interior_edges
 
     @staticmethod
     def compute_coordinates_4_cells(
@@ -296,48 +300,6 @@ class MeshTri(AbstractMesh):
     @property
     def _edges_permutations(self):
         return torch.tensor([[0, 1], [1, 2], [0, 2]])
-
-    @staticmethod
-    def _map_fine_mesh(c4e_coarser_mesh: torch.Tensor, c4e_finer_mesh: torch.Tensor):
-        """Map each element of a finer mesh to an element of the current coarser mesh."""
-        centroids_h = c4e_finer_mesh.mean(dim=-2)  # (n_elem_h, 2)
-
-        p = centroids_h[:, None, :]  # (n_elem_h, 1, 2)
-        a = c4e_coarser_mesh[:, 0, 0, :][None, :, :]  # (1, n_elem_H, 2)
-        b = c4e_coarser_mesh[:, 0, 1, :][None, :, :]
-        c = c4e_coarser_mesh[:, 0, 2, :][None, :, :]
-
-        v0 = c - a  # (1, n_elem_H, 2)
-        v1 = b - a
-        v2 = p - a  # (n_elem_h, n_elem_H, 2)
-
-        dot00 = (v0 * v0).sum(dim=-1)  # (1, n_elem_H)
-        dot01 = (v0 * v1).sum(dim=-1)
-        dot11 = (v1 * v1).sum(dim=-1)
-
-        dot02 = (v0 * v2).sum(dim=-1)  # (n_elem_h, n_elem_H)
-        dot12 = (v1 * v2).sum(dim=-1)
-
-        denom = dot00 * dot11 - dot01 * dot01  # (1, n_elem_H)
-        denom = denom.clamp(min=1e-14)
-
-        u = (dot11 * dot02 - dot01 * dot12) / denom  # (n_elem_h, n_elem_H)
-        v = (dot00 * dot12 - dot01 * dot02) / denom
-
-        inside = (u >= 0) & (v >= 0) & (u + v <= 1)  # (n_elem_h, n_elem_H)
-
-        mapping = torch.full((c4e_finer_mesh.size(0),), -1, dtype=torch.long)
-
-        candidates = inside.nonzero(as_tuple=False)  # (n_matches, 2)
-
-        seen = torch.zeros(c4e_finer_mesh.size(0), dtype=torch.bool)
-        for i in range(candidates.size(0)):
-            idx_finer_mesh, idx_coarser_mesh = candidates[i]
-            if not seen[idx_finer_mesh]:
-                mapping[idx_finer_mesh] = idx_coarser_mesh
-                seen[idx_finer_mesh] = True
-
-        return mapping
 
 
 class FracturesTri(MeshTri):
@@ -429,6 +391,124 @@ class FracturesTri(MeshTri):
             self["jacobian_fracture_map"] @ coordinate_2d.mT
             + self["translation_vector"]
         ).mT
+    @staticmethod
+    def apply_mask(tensor: torch.Tensor, mask: torch.Tensor):
+        """Compute masking for batched tensors"""
+        return torch.cat(
+            [
+                batch_tensor[mask_batch].unsqueeze(0)
+                for batch_tensor, mask_batch in zip(tensor, mask)
+            ],
+            dim=0,
+        )
+
+    def _compute_cells_4_edges(
+        self,
+        triangulation: tensordict.TensorDict,
+        vertices_4_boundary_edges: torch.Tensor,
+        vertices_4_interior_edges: torch.Tensor,
+    ):
+        if "neighbors" in triangulation["cells"]:
+            neighbors = triangulation["cells", "neighbors"]
+            number_meshes, number_cells, number_edges = neighbors.shape
+
+            cells_idx = torch.arange(number_cells, device=neighbors.device)
+            cells_idx = cells_idx.repeat_interleave(number_edges)
+            cells_idx = cells_idx.unsqueeze(0).expand(number_meshes, -1)
+
+            neigh_flat = neighbors.reshape(number_meshes, -1)
+
+            mask_inner = neigh_flat != -1
+            mask_boundary = neigh_flat == -1
+
+            cells_4_interior_edges_list = []
+            cells_4_boundary_edges_list = []
+
+            for m in range(number_meshes):
+
+                mask_m = mask_inner[m]
+                tri1_m = cells_idx[m][mask_m]
+                tri2_m = neigh_flat[m][mask_m]
+
+                pair_m = torch.stack(
+                    [torch.minimum(tri1_m, tri2_m), torch.maximum(tri1_m, tri2_m)],
+                    dim=1,
+                )
+
+                edges_int = torch.unique(pair_m, dim=0)
+                edges_bou = cells_idx[m][mask_boundary[m]].unsqueeze(1)
+
+                cells_4_interior_edges_list.append(edges_int)
+                cells_4_boundary_edges_list.append(edges_bou)
+
+                cells_4_interior_edges = torch.stack(cells_4_interior_edges_list, dim=0)
+                cells_4_boundary_edges = torch.stack(cells_4_boundary_edges_list, dim=0)
+        else:
+            vertices_4_cells = triangulation["cells"]["vertices"]
+
+            number_meshes = vertices_4_cells.size(0)
+
+            cells_4_boundary_edges = (
+                (
+                    vertices_4_boundary_edges.unsqueeze(-2).unsqueeze(-2)
+                    == vertices_4_cells.unsqueeze(-1).unsqueeze(-4)
+                )
+                .any(dim=-2)
+                .all(dim=-1)
+                .float()
+                .argmax(dim=-1, keepdim=True)
+            )
+            cells_4_interior_edges = torch.nonzero(
+                (
+                    vertices_4_interior_edges.unsqueeze(-2).unsqueeze(-2)
+                    == vertices_4_cells.unsqueeze(-1).unsqueeze(-4)
+                )
+                .any(dim=-2)
+                .all(dim=-1),
+                as_tuple=True,
+            )[1].reshape(number_meshes, -1, 2)
+
+        return cells_4_boundary_edges, cells_4_interior_edges
+
+    def _compute_vertices_4_edges(self, triangulation: tensordict.TensorDict):
+        vertices_4_edges = triangulation["edges", "vertices"]
+        markers_4_edges = triangulation["edges", "markers"].squeeze(-1)
+
+        vertices_4_boundary_edges = self.apply_mask(
+            vertices_4_edges, markers_4_edges == 1
+        )
+
+        vertices_4_interior_edges = self.apply_mask(
+            vertices_4_edges, markers_4_edges != 1
+        )
+
+        return vertices_4_boundary_edges, vertices_4_interior_edges
+
+    def _compute_cells_min_length(self, triangulation: tensordict.TensorDict):
+        """For each cells, compute the smaller length of the edges."""
+        vertices_4_edges, _ = torch.sort(
+            triangulation["cells", "vertices"][..., self._edges_permutations], dim=-1
+        )
+
+        coordinates_4_edges = self.apply_mask(
+            triangulation["vertices", "coordinates"], vertices_4_edges
+        )
+
+        coordinates_4_edges_first_vertex, coordinates_4_edges_second_vertex = (
+            torch.split(coordinates_4_edges, 1, dim=-2)
+        )
+
+        diameter_4_cells = torch.min(
+            torch.norm(
+                coordinates_4_edges_second_vertex - coordinates_4_edges_first_vertex,
+                dim=-1,
+                keepdim=True,
+            ),
+            dim=-2,
+            keepdim=True,
+        )[0]
+
+        return diameter_4_cells
 
 
 class AbstractElement(abc.ABC):

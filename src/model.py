@@ -133,6 +133,8 @@ class Model:
         self._optimizer = optimizer(
             self._neural_network.parameters(), **optimizer_kwargs
         )
+        if scheduler_kwargs is None:
+            scheduler_kwargs = {}
 
         if learning_rate_scheduler is not None:
             self._learning_rate_scheduler = learning_rate_scheduler(
