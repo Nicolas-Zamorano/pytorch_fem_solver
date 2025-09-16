@@ -313,17 +313,20 @@ class FracturesTri(MeshTri):
 
         self._compute_fracture_map(fractures_3d_data)
 
-        self["vertices", "coordinates_3d"] = self.fracture_map(
-            self["vertices", "coordinates"]
-        )
+        self["vertices", "coordinates_3d"] = (
+            self["jacobian_fracture_map"] @ self["vertices", "coordinates"].mT
+            + self["translation_vector"]
+        ).mT
 
         self["cells", "coordinates_3d"] = self.compute_coordinates_4_cells(
             self["vertices", "coordinates_3d"], self["cells", "vertices"]
         )
 
-        self["interior_edges", "normals_3d"] = self.fracture_map(
-            self["interior_edges", "normals"]
-        )
+        self["interior_edges", "normals_3d"] = (
+            self["jacobian_fracture_map"].unsqueeze(-3)
+            @ self["interior_edges", "normals"].mT
+            + self["translation_vector"].unsqueeze(-3)
+        ).mT
 
     @property
     def _edges_permutations(self):
@@ -384,13 +387,6 @@ class FracturesTri(MeshTri):
             vertices_4_cells,
         ]
 
-    def _fracture_map(self, coordinate_2d: torch.Tensor):
-        """For each fracture, compute the map from the 2D
-        coordinate to his position of in 3D space"""
-        return (
-            self["jacobian_fracture_map"] @ coordinate_2d.mT
-            + self["translation_vector"]
-        ).mT
     @staticmethod
     def apply_mask(tensor: torch.Tensor, mask: torch.Tensor):
         """Compute masking for batched tensors"""
@@ -1182,11 +1178,13 @@ class FractureBasis(AbstractBasis):
 
         super().__init__(mesh, element)
 
-        self.v_grad = self.v_grad @ mesh["inv_jacobian_fracture_map"]
+        self.v_grad = self.v_grad @ mesh["inv_jacobian_fracture_map"].unsqueeze(
+            -3
+        ).unsqueeze(-3)
 
-        self.inv_map_jacobian = (
-            self.inv_map_jacobian @ mesh["inv_jacobian_fracture_map"]
-        )
+        self.inv_map_jacobian = self.inv_map_jacobian @ mesh[
+            "inv_jacobian_fracture_map"
+        ].unsqueeze(-3).unsqueeze(-3)
 
     def _build_global_triangulation(self, mesh: AbstractMesh):
         """Build a global triangulation from local triangulations of multiple fractures."""
@@ -1362,9 +1360,14 @@ class FractureBasis(AbstractBasis):
         )
 
     def _compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
-        return mesh.fracture_map(
-            bar_coords.mT @ mesh["cells", "coordinates"].unsqueeze(-3)
-        )
+        mapped_integration_points_2d = bar_coords.mT @ mesh[
+            "cells", "coordinates"
+        ].unsqueeze(-3)
+        return (
+            mesh["jacobian_fracture_map"].unsqueeze(-3).unsqueeze(-3)
+            @ mapped_integration_points_2d.mT
+            + mesh["translation_vector"].unsqueeze(-3).unsqueeze(-3)
+        ).mT
 
     def _compute_jacobian_map(self, mesh, element):
         return mesh["cells", "coordinates"].mT @ element.barycentric_grad
@@ -1434,9 +1437,14 @@ class InteriorEdgesFractureBasis(
         )
 
     def _compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
-        return mesh.fracture_map(
-            bar_coords.mT @ mesh["interior_edges", "coordinates"].unsqueeze(-3)
-        )
+        mapped_integration_points_2d = bar_coords.mT @ mesh[
+            "interior_edges", "coordinates"
+        ].unsqueeze(-3)
+        return (
+            mesh["jacobian_fracture_map"].unsqueeze(-3).unsqueeze(-3)
+            @ mapped_integration_points_2d.mT
+            + mesh["translation_vector"].unsqueeze(-3).unsqueeze(-3)
+        ).mT
 
     def _compute_jacobian_map(self, mesh, element):
         return mesh["interior_edges"]["coordinates"].mT @ element.barycentric_grad
