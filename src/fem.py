@@ -810,18 +810,48 @@ class AbstractBasis(abc.ABC):
 
         elif basis.__class__ == InteriorEdgesBasis:
 
-            # elements_mask = basis.mesh.edges_parameters["elements4inner_edges"]
+            cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
 
-            cells_4_interior_edges = basis.mesh["interior_edges"]["cells"]
-
-            # dofs_idx = basis.mesh.nodes4elements[elements_mask].unsqueeze(-2)
-
-            indices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
-                basis.mesh["cells"]["vertices"], cells_4_interior_edges
+            vertices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
+                basis.mesh["cells", "vertices"], cells_4_interior_edges
             ).unsqueeze(-2)
 
             coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
-                self.mesh["cells"]["coordinates"][..., [0], :], cells_4_interior_edges
+                self.mesh["cells", "coordinates"][..., [0], :], cells_4_interior_edges
+            ).unsqueeze(-3)
+
+            inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
+                self.inv_map_jacobian, cells_4_interior_edges
+            )
+
+            integration_points = basis.integration_points.unsqueeze(-3)
+
+            # For computing the inverse mapping of the integrations points of the interior edges,
+            # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
+
+            new_integrations_points = self.element.compute_inverse_map(
+                coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
+            )
+
+            bar_coords = self.element.compute_barycentric_coordinates(
+                new_integrations_points.squeeze(-3)
+            )
+
+            v, v_grad = self.element.compute_shape_functions(
+                bar_coords, inv_map_jacobian
+            )
+
+        elif basis.__class__ == InteriorEdgesFractureBasis:
+
+            cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
+
+            vertices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
+                basis.mesh["cells", "vertices"], cells_4_interior_edges
+            ).unsqueeze(-2)
+
+            coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
+                self.mesh["cells", "coordinates_3d"][..., [0], :],
+                cells_4_interior_edges,
             ).unsqueeze(-3)
 
             inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
