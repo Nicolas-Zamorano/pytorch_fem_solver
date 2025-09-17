@@ -1,0 +1,19 @@
+[project]
+name = "pytorch_fem_solver"
+version = "1.0.0"
+authors = [
+  { name="Nicolas Zamorano", email="nicolas.zamo12@gmail.com" },
+]
+description = "A finite element solver for Pytorch."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.urls]
+Homepage = "https://github.com/Nicolas-Zamorano/pytorch_fem_solver"
+Issues = "https://github.com/Nicolas-Zamorano/pytorch_fem_solver/issues"
