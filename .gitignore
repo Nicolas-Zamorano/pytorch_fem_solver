@@ -1,5 +1,4 @@
 *.pyc
-src/mesh.msh
-/src/figures
 .vscode/settings.json
 torch_fem/pytorch_fem_solver.egg-info
+pytorch_fem_solver.egg-info
