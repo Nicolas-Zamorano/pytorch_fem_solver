@@ -7,7 +7,7 @@ import pyvista as pv
 import tensordict as td
 import torch
 import triangle as tr
-from fracture_fem import Fractures
+from torch_fem import FracturesTri
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
@@ -48,7 +48,7 @@ fractures_data = torch.tensor(
     ]
 )
 
-mesh = Fractures(
+mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3D_data=fractures_data
 )
 

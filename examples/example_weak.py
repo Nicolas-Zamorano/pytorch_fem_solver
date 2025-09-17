@@ -6,8 +6,13 @@ import matplotlib.pyplot as plt
 import torch
 import triangle as tr
 
-from fem import Basis, ElementTri, MeshTri
-from model import FeedForwardNeuralNetwork as NeuralNetwork, Model
+from torch_fem import (
+    MeshTri,
+    ElementTri,
+    Basis,
+    Model,
+    FeedForwardNeuralNetwork,
+)
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()
@@ -26,7 +31,7 @@ class BoundaryConstrain(torch.nn.Module):
         return x * (x - 1) * y * (y - 1)
 
 
-NN = NeuralNetwork(
+NN = FeedForwardNeuralNetwork(
     input_dimension=2,
     output_dimension=1,
     nb_hidden_layers=4,

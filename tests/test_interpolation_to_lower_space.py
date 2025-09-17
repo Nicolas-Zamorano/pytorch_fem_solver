@@ -7,7 +7,7 @@ import torch
 import triangle as tr
 from skfem.helpers import dot, grad
 
-from fem import Basis, ElementTri, MeshTri
+from torch_fem import Basis, ElementTri, MeshTri
 
 vertices = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
 

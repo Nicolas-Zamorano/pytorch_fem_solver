@@ -11,7 +11,7 @@ from skfem.helpers import dot, grad
 
 from tensordict import TensorDict
 
-from fem import Basis, ElementTri, MeshTri
+from torch_fem import Basis, ElementTri, MeshTri
 
 
 def test_assembly():

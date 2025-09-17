@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import tensordict as td
 import triangle as tr
 
-from fem import FracturesTri, ElementTri, FractureBasis
+from torch_fem import FracturesTri, ElementTri, FractureBasis
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()

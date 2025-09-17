@@ -9,9 +9,12 @@ import numpy as np
 import tensordict as td
 import torch
 import triangle as tr
-from fem import ElementTri, FractureBasis, FracturesTri
-
-from neural_network import NeuralNetwork3D
+from torch_fem import (
+    ElementTri,
+    FractureBasis,
+    FracturesTri,
+    FeedForwardNeuralNetwork as NeuralNetwork3D,
+)
 
 torch.set_default_dtype(torch.float64)
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")

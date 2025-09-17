@@ -12,15 +12,15 @@ import triangle as tr
 
 # from matplotlib.collections import PolyCollection
 
-from fem import (
+from torch_fem import (
     ElementLine,
     ElementTri,
     FractureBasis,
     FracturesTri,
     InteriorEdgesFractureBasis,
+    Model,
+    FeedForwardNeuralNetwork,
 )
-
-from model import FeedForwardNeuralNetwork as NeuralNetwork, Model
 
 torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
@@ -36,7 +36,7 @@ class BoundaryConstrain(torch.nn.Module):
         return (x + 1) * (x - 1) * y * (y - 1) * (z + 1) * (z - 1)
 
 
-NN = NeuralNetwork(
+NN = FeedForwardNeuralNetwork(
     input_dimension=3,
     output_dimension=1,
     nb_hidden_layers=4,
@@ -283,7 +283,7 @@ def training_step(neural_network):
 model = Model(
     neural_network=NN,
     training_step=training_step,
-    epochs=5000,
+    epochs=1,
     optimizer=torch.optim.Adam,
     optimizer_kwargs={"lr": 0.2e-3},
     learning_rate_scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
@@ -311,10 +311,9 @@ triangles_fracture_1, triangles_fracture_2 = torch.unbind(
     mesh["cells", "vertices"], dim=0
 )
 
-u_NN_local = NN(*torch.split(local_vertices_3D, 1, -1))
+u_NN_local = NN(local_vertices_3D)
 
 u_NN_fracture_1, u_NN_fracture_2 = torch.unbind(u_NN_local, dim=0)
-
 
 ### --- TRACE PARAMETERS --- ###
 
@@ -326,7 +325,7 @@ local_vertices_3D = discrete_basis.global_triangulation["vertices_3D"][
     discrete_basis.global_triangulation["global2local_idx"].reshape(2, -1)
 ]
 
-exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1))
+exact_value_local = exact(local_vertices_3D)
 
 exact_value_global = exact_value_local.reshape(-1, 1)[
     discrete_basis.global_triangulation["local2global_idx"]
@@ -469,37 +468,45 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 # ------------------ neural_network SOLUTION ------------------
 
-# # Fracture 1
-# fig = plt.figure(dpi=200)
-# ax = fig.add_subplot(111, projection='3d')
-# ax.plot_trisurf(vertices_fracture_1.numpy(force=True)[:, 0],
-#                 vertices_fracture_1.numpy(force=True)[:, 1],
-#                 u_NN_fracture_1.reshape(-1).numpy(force=True),
-#                 triangles=triangles_fracture_1.numpy(force=True),
-#                 cmap='viridis', edgecolor='black', linewidth=0.1)
-# # ax.set_title("Fracture 1")
-# ax.set_xlabel(r"$x$")
-# ax.set_ylabel(r"$y$")
-# ax.set_zlabel(r"$u_h(x,y)$")
-# ax.tick_params(labelsize=8)
-# plt.tight_layout()
+# Fracture 1
+fig = plt.figure(dpi=200)
+ax = fig.add_subplot(111, projection="3d")
+ax.plot_trisurf(
+    vertices_fracture_1.numpy(force=True)[:, 0],
+    vertices_fracture_1.numpy(force=True)[:, 1],
+    u_NN_fracture_1.reshape(-1).numpy(force=True),
+    triangles=triangles_fracture_1.numpy(force=True),
+    cmap="viridis",
+    edgecolor="black",
+    linewidth=0.1,
+)
+# ax.set_title("Fracture 1")
+ax.set_xlabel(r"$x$")
+ax.set_ylabel(r"$y$")
+ax.set_zlabel(r"$u_h(x,y)$")
+ax.tick_params(labelsize=8)
+plt.tight_layout()
 # plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_nn_solution_fracture_1.png"))
 #
 
-# # Fracture 2
-# fig = plt.figure(dpi=200)
-# ax = fig.add_subplot(111, projection='3d')
-# ax.plot_trisurf(vertices_fracture_2.numpy(force=True)[:, 0],
-#                 vertices_fracture_2.numpy(force=True)[:, 1],
-#                 u_NN_fracture_2.reshape(-1).numpy(force=True),
-#                 triangles=triangles_fracture_2.numpy(force=True),
-#                 cmap='viridis', edgecolor='black', linewidth=0.1)
-# # ax.set_title("Fracture 2")
-# ax.set_xlabel(r"$x$")
-# ax.set_ylabel(r"$y$")
-# ax.set_zlabel(r"$u_h(x,y)$")
-# ax.tick_params(labelsize=8)
-# plt.tight_layout()
+# Fracture 2
+fig = plt.figure(dpi=200)
+ax = fig.add_subplot(111, projection="3d")
+ax.plot_trisurf(
+    vertices_fracture_2.numpy(force=True)[:, 0],
+    vertices_fracture_2.numpy(force=True)[:, 1],
+    u_NN_fracture_2.reshape(-1).numpy(force=True),
+    triangles=triangles_fracture_2.numpy(force=True),
+    cmap="viridis",
+    edgecolor="black",
+    linewidth=0.1,
+)
+# ax.set_title("Fracture 2")
+ax.set_xlabel(r"$x$")
+ax.set_ylabel(r"$y$")
+ax.set_zlabel(r"$u_h(x,y)$")
+ax.tick_params(labelsize=8)
+plt.tight_layout()
 # plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_nn_solution_fracture_2.png"))
 #
 
@@ -570,7 +577,7 @@ plt.scatter(
 )
 plt.xlabel("trace length")
 plt.ylabel("jump value")
-# plt.title("Fracture 1")
+plt.title("Fracture 1")
 plt.legend()
 plt.tight_layout()
 plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_1.png"))
@@ -591,7 +598,7 @@ plt.scatter(
 )
 plt.xlabel("trace length")
 plt.ylabel("jump value")
-# plt.title("Fracture 2")
+plt.title("Fracture 2")
 plt.legend()
 plt.tight_layout()
 plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_2.png"))

@@ -3,7 +3,7 @@
 import torch
 import triangle as tr
 
-from fem import (
+from torch_fem import (
     Basis,
     ElementLine,
     ElementTri,
