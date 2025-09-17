@@ -1,8 +1,9 @@
 """Class for standard basis representation"""
 
 import torch
-from mesh.abstract_mesh import AbstractMesh
-from element.abstract_element import AbstractElement
+from ..mesh.abstract_mesh import AbstractMesh
+from ..element.abstract_element import AbstractElement
+from .interior_edges_basis import InteriorEdgesBasis
 from .abstract_basis import AbstractBasis
 
 

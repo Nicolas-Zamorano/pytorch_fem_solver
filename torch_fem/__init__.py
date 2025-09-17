@@ -4,3 +4,17 @@ from .basis import Basis, FractureBasis, InteriorEdgesBasis, InteriorEdgesFractu
 from .element import ElementLine, ElementTri
 from .mesh import FracturesTri, MeshTri
 from .model import Model, FeedForwardNeuralNetwork
+
+
+__all__ = [
+    "Basis",
+    "FractureBasis",
+    "InteriorEdgesBasis",
+    "InteriorEdgesFractureBasis",
+    "ElementLine",
+    "ElementTri",
+    "FracturesTri",
+    "MeshTri",
+    "Model",
+    "FeedForwardNeuralNetwork",
+]

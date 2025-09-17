@@ -1,8 +1,8 @@
 """Class for basis representation on interior edges"""
 
 import torch
-from mesh.abstract_mesh import AbstractMesh
-from element.abstract_element import AbstractElement
+from ..mesh.abstract_mesh import AbstractMesh
+from ..element.abstract_element import AbstractElement
 from .abstract_basis import AbstractBasis
 
 
