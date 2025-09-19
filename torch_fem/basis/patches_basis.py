@@ -1,6 +1,7 @@
 """Basis class for Patches"""
 
 import torch
+import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 from .abstract_basis import AbstractBasis
@@ -58,21 +59,23 @@ class PatchesBasis(AbstractBasis):
 
         form_idx = global_dofs4elements.reshape(self.nb_patches, -1)
 
-        return {
-            "bilinear_form_shape": (
-                self.nb_patches,
-                nb_global_dofs,
-                nb_global_dofs,
-            ),
-            "bilinear_form_idx": (self.patches_idx, rows_idx, cols_idx),
-            "linear_form_shape": (self.nb_patches, nb_global_dofs, 1),
-            "linear_form_idx": (
-                self.patches_idx,
-                form_idx,
-            ),
-            "inner_dofs": inner_dofs,
-            "nb_dofs": nb_global_dofs,
-        }
+        return tensordict.TensorDict(
+            {
+                "bilinear_form_shape": (
+                    self.nb_patches,
+                    nb_global_dofs,
+                    nb_global_dofs,
+                ),
+                "bilinear_form_idx": (self.patches_idx, rows_idx, cols_idx),
+                "linear_form_shape": (self.nb_patches, nb_global_dofs, 1),
+                "linear_form_idx": (
+                    self.patches_idx,
+                    form_idx,
+                ),
+                "inner_dofs": inner_dofs,
+                "nb_dofs": nb_global_dofs,
+            }
+        )
 
     def reshape_for_assembly(self, local_matrices: torch.Tensor, form: str):
         """reshape local matrices tensor to be compute for assembly"""

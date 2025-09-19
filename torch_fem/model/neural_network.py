@@ -95,17 +95,17 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
             grad_outputs=grad_outputs,  # type: ignore
             retain_graph=True,
             create_graph=True,
-        )
+        )[0]
 
-        return gradients[0]
+        return gradients
 
     # @torch.jit.export
     # def laplacian(self, inputs: torch.Tensor) -> torch.Tensor:
+    #     """Compute the laplacian of the neural network with respect to its inputs."""
     #     inputs.requires_grad_(True)
     #     output = self.forward(inputs)
 
-    #     grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [])
-    #     grad_outputs.append(torch.ones_like(output))
+    #     grad_outputs: List[Optional[torch.Tensor]] = [torch.ones_like(output)]
 
     #     gradients = torch.autograd.grad(
     #         outputs=[output],
@@ -116,21 +116,17 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
     #     )[0]
 
     #     laplacian = torch.zeros_like(output)
+
     #     for i in range(inputs.size(-1)):
-    #         grad_outputs2 = torch.jit.annotate(List[Optional[torch.Tensor]], [])
-    #         col_i = torch.index_select(gradients, 1, torch.tensor([i]))
-
-    #         grad_outputs2.append(torch.ones_like(col_i))
-
+    #         gradient = gradients.index_select(-1, torch.tensor([i]))
+    #         grad_outputs: List[Optional[torch.Tensor]] = [torch.ones_like(gradient)]
     #         grad2 = torch.autograd.grad(
-    #             outputs=[col_i],
-    #             inputs=[inputs],
-    #             grad_outputs=grad_outputs2,
+    #             [gradient],
+    #             [inputs],
+    #             grad_outputs=grad_outputs,
     #             create_graph=True,
     #             retain_graph=True,
-    #         )[0]
-
-    #         grad2_i = torch.index_select(grad2, 1, torch.tensor([i]))
-    #         laplacian += grad2_i
+    #         )[0][..., i : i + 1]
+    #         laplacian += grad2
 
     #     return laplacian

@@ -177,14 +177,16 @@ class FractureBasis(AbstractBasis):
 
         form_idx = self.global_triangulation["triangles"].reshape(-1)
 
-        basis_parameters = {
-            "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
-            "bilinear_form_idx": (rows_idx, cols_idx),
-            "linear_form_shape": (nb_global_dofs, 1),
-            "linear_form_idx": (form_idx,),
-            "inner_dofs": inner_dofs,
-            "nb_dofs": nb_global_dofs,
-        }
+        basis_parameters = tensordict.TensorDict(
+            {
+                "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
+                "bilinear_form_idx": (rows_idx, cols_idx),
+                "linear_form_shape": (nb_global_dofs, 1),
+                "linear_form_idx": (form_idx,),
+                "inner_dofs": inner_dofs,
+                "nb_dofs": nb_global_dofs,
+            }
+        )
 
         return basis_parameters
 
