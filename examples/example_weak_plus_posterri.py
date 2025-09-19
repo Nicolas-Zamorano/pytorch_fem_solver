@@ -24,9 +24,13 @@ torch.set_default_dtype(torch.float64)
 # ---------------------- Neural Network Parameters ----------------------#
 
 
-def boundary_constraint(x):
-    """Boundary condition modifier function."""
-    return x[..., [0]] * (x[..., [0]] - 1) * x[..., [1]] * (x[..., [1]] - 1)
+class BoundaryConstrain(torch.nn.Module):
+    """Class to strongly apply bc"""
+
+    def forward(self, inputs):
+        """Boundary condition modifier function."""
+        x, y = torch.split(inputs, 1, dim=-1)
+        return x * (x - 1) * y * (y - 1)
 
 
 NN = NeuralNetwork(
@@ -34,7 +38,7 @@ NN = NeuralNetwork(
     output_dimension=1,
     nb_hidden_layers=4,
     neurons_per_layers=25,
-    boundary_condition_modifier=boundary_constraint,
+    boundary_condition_modifier=BoundaryConstrain(),
 )
 
 # ---------------------- FEM Parameters ----------------------#
@@ -56,9 +60,9 @@ V_edges = InteriorEdgesBasis(mesh, elements_1D)
 
 _, interpolator_to_edges_grad = discrete_basis.interpolate(V_edges)
 
-h_T = discrete_basis.mesh["cells"]["length"]
-h_E = discrete_basis.mesh["interior_edges"]["length"].unsqueeze(-2)
-n_E = discrete_basis.mesh["interior_edges"]["normals"].unsqueeze(-2)
+h_T = discrete_basis.mesh["cells", "length"]
+h_E = discrete_basis.mesh["interior_edges", "length"].unsqueeze(-2)
+n_E = discrete_basis.mesh["interior_edges", "normals"].unsqueeze(-2)
 
 # ---------------------- Residual Parameters ----------------------#
 

@@ -3,7 +3,6 @@
 import abc
 from typing import Callable, Tuple, Optional, Any
 import torch
-import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 
@@ -128,7 +127,7 @@ class AbstractBasis(abc.ABC):
         coords4global_dofs: torch.Tensor,
         global_dofs4elements: torch.Tensor,
         nodes4boundary_dofs: torch.Tensor,
-    ) -> tensordict.TensorDict:
+    ):
         """Compute parameters related to the basis functions"""
         raise NotImplementedError
 
