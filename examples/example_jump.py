@@ -6,8 +6,15 @@ import triangle as tr
 import matplotlib.pyplot as plt
 import torch
 
-from fem import Basis, ElementLine, ElementTri, InteriorEdgesBasis, MeshTri
-from model import Model, FeedForwardNeuralNetwork as NeuralNetwork
+from torch_fem import (
+    Basis,
+    ElementLine,
+    ElementTri,
+    InteriorEdgesBasis,
+    MeshTri,
+    Model,
+    FeedForwardNeuralNetwork as NeuralNetwork,
+)
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()

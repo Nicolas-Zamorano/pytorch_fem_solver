@@ -2,8 +2,8 @@
 
 import abc
 import torch
-from mesh.abstract_mesh import AbstractMesh
-from element.abstract_element import AbstractElement
+from ..mesh.abstract_mesh import AbstractMesh
+from ..element.abstract_element import AbstractElement
 
 
 class AbstractBasis(abc.ABC):

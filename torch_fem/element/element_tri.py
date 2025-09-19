@@ -1,3 +1,5 @@
+"""Class for 2D triangular element representation"""
+
 import torch
 from .abstract_element import AbstractElement
 

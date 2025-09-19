@@ -1,8 +1,10 @@
 """Class for basis representation on fractures"""
 
 import torch
-from mesh.abstract_mesh import AbstractMesh
-from element.abstract_element import AbstractElement
+import tensordict
+from ..mesh.abstract_mesh import AbstractMesh
+from ..element.abstract_element import AbstractElement
+from .interior_edges_fracture_basis import InteriorEdgesFractureBasis
 from .abstract_basis import AbstractBasis
 
 

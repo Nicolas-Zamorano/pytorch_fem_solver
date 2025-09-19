@@ -6,7 +6,7 @@ import triangle as tr
 from skfem.helpers import dot, grad
 import meshio
 
-from fem import Basis, ElementLine, ElementTri, InteriorEdgesBasis, MeshTri
+from torch_fem import Basis, ElementLine, ElementTri, InteriorEdgesBasis, MeshTri
 
 torch.set_default_dtype(torch.float64)
 
@@ -52,9 +52,7 @@ u_sk = skfem.solve(*skfem.condense(A_sk, b_sk, I=mesh_sk.interior_nodes()))
 
 i_range = [0, 1]
 
-fbasis = [
-    skfem.InteriorFacetBasis(mesh_sk, elem_sk, side=i, use_torch=True) for i in i_range
-]
+fbasis = [skfem.InteriorFacetBasis(mesh_sk, elem_sk, side=i) for i in i_range]
 u_facet = {"u" + str(i + 1): fbasis[i].interpolate(u_sk) for i in i_range}
 
 I_u_sk = torch.stack([torch.tensor(u_facet["u1"]), torch.tensor(u_facet["u2"])], dim=-1)

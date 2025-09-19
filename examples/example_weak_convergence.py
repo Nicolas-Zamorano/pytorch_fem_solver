@@ -7,7 +7,7 @@ import tensordict as td
 import triangle as tr
 import numpy as np
 
-from fem import MeshTri, ElementTri, Basis
+from torch_fem import MeshTri, ElementTri, Basis
 
 MESH_SIZE = 0.5
 

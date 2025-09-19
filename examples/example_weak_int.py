@@ -7,8 +7,12 @@ import matplotlib.pyplot as plt
 import skfem
 import torch
 
-from fem import Basis, ElementTri, MeshTri
-from neural_network import NeuralNetwork
+from torch_fem import (
+    Basis,
+    ElementTri,
+    MeshTri,
+    FeedForwardNeuralNetwork as NeuralNetwork,
+)
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()

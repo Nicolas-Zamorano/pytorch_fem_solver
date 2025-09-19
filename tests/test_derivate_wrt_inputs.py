@@ -4,8 +4,12 @@ import torch
 import triangle as tr
 from tensordict import TensorDict
 
-from fem import Basis, ElementTri, MeshTri
-from model import FeedForwardNeuralNetwork as NeuralNetwork
+from torch_fem import (
+    Basis,
+    ElementTri,
+    MeshTri,
+    FeedForwardNeuralNetwork as NeuralNetwork,
+)
 
 
 # def test_derivate_wrt_inputs():

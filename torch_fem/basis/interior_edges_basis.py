@@ -1,15 +1,13 @@
-"""Class for basis representation on interior edges of fractures"""
+"""Class for basis representation on interior edges"""
 
 import torch
-from mesh.abstract_mesh import AbstractMesh
-from element.abstract_element import AbstractElement
+from ..mesh.abstract_mesh import AbstractMesh
+from ..element.abstract_element import AbstractElement
 from .abstract_basis import AbstractBasis
 
 
-class InteriorEdgesFractureBasis(
-    AbstractBasis,
-):
-    """Class for basis representation on interior edges of fractures"""
+class InteriorEdgesBasis(AbstractBasis):
+    """Class for basis representation on interior edges"""
 
     def _compute_dofs(
         self,
@@ -59,25 +57,13 @@ class InteriorEdgesFractureBasis(
             "nb_dofs": nb_global_dofs,
         }
 
-    def _compute_integral_weights(
-        self, element: AbstractElement, det_map_jacobian: torch.Tensor
-    ):
-        return (
-            element.reference_element_area
-            * element.gaussian_weights
-            * det_map_jacobian
-            * self.mesh["det_jacobian_fracture_map"]
-        )
-
-    def _compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
-        mapped_integration_points_2d = bar_coords.mT @ mesh[
-            "interior_edges", "coordinates"
-        ].unsqueeze(-3)
-        return (
-            mesh["jacobian_fracture_map"].unsqueeze(-3).unsqueeze(-3)
-            @ mapped_integration_points_2d.mT
-            + mesh["translation_vector"].unsqueeze(-3).unsqueeze(-3)
-        ).mT
-
     def _compute_jacobian_map(self, mesh, element):
-        return mesh["interior_edges"]["coordinates"].mT @ element.barycentric_grad
+        return mesh["interior_edges", "coordinates"].mT @ element.barycentric_grad
+
+    def _compute_integration_points(self, mesh, bar_coords):
+        return bar_coords.mT @ mesh["interior_edges", "coordinates"].unsqueeze(-3)
+
+    def _compute_integral_weights(self, element, det_map_jacobian):
+        return (
+            element.reference_element_area * element.gaussian_weights * det_map_jacobian
+        )

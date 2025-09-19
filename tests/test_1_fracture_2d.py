@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import tensordict as td
 import triangle as tr
 
-from fem import MeshTri, ElementTri, Basis
+from torch_fem import MeshTri, ElementTri, Basis
 
 torch.set_default_dtype(torch.float64)
 

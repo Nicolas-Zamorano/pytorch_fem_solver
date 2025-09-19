@@ -11,7 +11,7 @@ import triangle as tr
 
 # from matplotlib.collections import PolyCollection
 
-from fem import (
+from torch_fem import (
     ElementLine,
     ElementTri,
     FractureBasis,

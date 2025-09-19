@@ -2,11 +2,10 @@
 
 import torch
 
-import tensordict as td
 import triangle as tr
 import pyvista as pv
 
-from fem import FracturesTri, FractureBasis, ElementTri
+from torch_fem import FracturesTri, FractureBasis, ElementTri
 
 torch.set_default_dtype(torch.float64)
 
