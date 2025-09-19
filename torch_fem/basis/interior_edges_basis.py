@@ -1,6 +1,7 @@
 """Class for basis representation on interior edges"""
 
 import torch
+import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 from .abstract_basis import AbstractBasis
@@ -48,14 +49,16 @@ class InteriorEdgesBasis(AbstractBasis):
 
         form_idx = global_dofs4elements.reshape(-1)
 
-        return {
-            "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
-            "bilinear_form_idx": (rows_idx, cols_idx),
-            "linear_form_shape": (nb_global_dofs, 1),
-            "linear_form_idx": (form_idx,),
-            "inner_dofs": inner_dofs,
-            "nb_dofs": nb_global_dofs,
-        }
+        return tensordict.TensorDict(
+            {
+                "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
+                "bilinear_form_idx": (rows_idx, cols_idx),
+                "linear_form_shape": (nb_global_dofs, 1),
+                "linear_form_idx": (form_idx,),
+                "inner_dofs": inner_dofs,
+                "nb_dofs": nb_global_dofs,
+            }
+        )
 
     def _compute_jacobian_map(self, mesh, element):
         return mesh["interior_edges", "coordinates"].mT @ element.barycentric_grad

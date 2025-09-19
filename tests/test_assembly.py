@@ -53,7 +53,7 @@ def test_assembly():
 
     stiff_matrix_scikit = torch.tensor(bilinear_scikit.assemble(basis_scikit).todense())
     rhs_vector_scikit = torch.tensor(load_scikit.assemble(basis_scikit)).unsqueeze(-1)
-    rhs_functional_scikit = torch.tensor(
+    rhs_functional_scikit_val = torch.tensor(
         rhs_functional_scikit.elemental(basis_scikit)
     ).unsqueeze(-1)
 
@@ -81,7 +81,7 @@ def test_assembly():
 
         return rhs(x, y) * v
 
-    def rhs_functional(basis):
+    def rhs_functional_form(basis):
         """Integral of the squared rhs."""
         x, y = torch.split(basis.integration_points, 1, dim=-1)
 
@@ -91,7 +91,7 @@ def test_assembly():
 
     rhs_vector = basis_h.integrate_linear_form(residual)
 
-    rhs_functional_scikit = basis_h.integrate_functional(rhs_functional)
+    rhs_functional = basis_h.integrate_functional(rhs_functional_form)
 
     zero = torch.zeros((1))
 
@@ -100,8 +100,8 @@ def test_assembly():
     )
     rhs_error_norm = torch.norm(rhs_vector - rhs_vector_scikit) / torch.norm(rhs_vector)
     functional_error_norm = torch.norm(
-        rhs_functional_scikit - rhs_functional_scikit
-    ) / torch.norm(rhs_functional_scikit)
+        rhs_functional_scikit_val - rhs_functional
+    ) / torch.norm(rhs_functional_scikit_val)
 
     assert torch.isclose(matrix_error_norm, zero)
     assert torch.isclose(rhs_error_norm, zero)

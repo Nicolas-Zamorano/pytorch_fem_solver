@@ -1,5 +1,6 @@
 """Abstract class for element representation"""
 
+from typing import Tuple
 import abc
 import torch
 
@@ -27,33 +28,35 @@ class AbstractElement(abc.ABC):
     @abc.abstractmethod
     def compute_shape_functions(
         self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute the shape functions and their gradients at given barycentric coordinates"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _compute_gauss_values(self):
+    def _compute_gauss_values(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute the Gaussian integration points and weights"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_barycentric_coordinates(self, x: torch.Tensor):
+    def compute_barycentric_coordinates(self, x: torch.Tensor) -> torch.Tensor:
         """Compute the barycentric coordinates of given points x"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
+    def compute_det_and_inv_map(
+        self, map_jacobian: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute the determinant and inverse of the mapping Jacobian"""
         raise NotImplementedError
 
     @property
     @abc.abstractmethod
-    def reference_element_area(self):
+    def reference_element_area(self) -> float:
         """Return the area (or length) of the reference element"""
         raise NotImplementedError
 
     @property
     @abc.abstractmethod
-    def barycentric_grad(self):
+    def barycentric_grad(self) -> torch.Tensor:
         """Return the gradients of the barycentric coordinates in the reference element"""
         raise NotImplementedError

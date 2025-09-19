@@ -1,5 +1,6 @@
 """Model base class for training"""
 
+from typing import Callable, Optional
 import matplotlib.pyplot as plt
 import torch
 import tqdm
@@ -11,12 +12,14 @@ class Model:
     def __init__(
         self,
         neural_network: torch.nn.Module,
-        training_step: callable,
+        training_step: Callable,
         epochs: int = 5000,
         optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
-        optimizer_kwargs: dict = None,
-        learning_rate_scheduler: type[torch.optim.lr_scheduler.LRScheduler] = None,
-        scheduler_kwargs: dict = None,
+        optimizer_kwargs: Optional[dict] = None,
+        learning_rate_scheduler: Optional[
+            type[torch.optim.lr_scheduler.LRScheduler]
+        ] = None,
+        scheduler_kwargs: Optional[dict] = None,
         use_early_stopping: bool = False,
         early_stopping_patience: int = 10,
         min_delta: float = 1e-12,
@@ -105,7 +108,7 @@ class Model:
 
     def plot_training_history(
         self,
-        plot_names: dict = None,
+        plot_names: Optional[dict] = None,
     ):
         """Plot the training history."""
         if plot_names is None:
@@ -117,11 +120,15 @@ class Model:
             }
 
         _, axis_loss = plt.subplots()
-        axis_loss.semilogy(self._loss_history, label=plot_names["loss"])
+        axis_loss.semilogy(self._loss_history, linestyle="-", label=plot_names["loss"])
         axis_loss.semilogy(
-            self._validation_loss_history, label=plot_names["validation"]
+            self._validation_loss_history,
+            linestyle="--",
+            label=plot_names["validation"],
         )
-        axis_loss.semilogy(self._accuracy_history, label=plot_names["accuracy"])
+        axis_loss.semilogy(
+            self._accuracy_history, linestyle=":", label=plot_names["accuracy"]
+        )
         axis_loss.set_xlabel("# Epochs")
         axis_loss.set_ylabel("Loss")
         axis_loss.set_title(plot_names["title"])

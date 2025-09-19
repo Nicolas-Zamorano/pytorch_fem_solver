@@ -1,7 +1,7 @@
 """Module for neural networks"""
 
-import torch
 from typing import List, Optional
+import torch
 
 
 class IdentityBC(torch.nn.Module):
@@ -23,7 +23,7 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
         neurons_per_layers: int,
         activation_function: torch.nn.Module = torch.nn.Tanh(),
         use_xavier_initialization: bool = False,
-        boundary_condition_modifier: torch.nn.Module = None,
+        boundary_condition_modifier: Optional[torch.nn.Module] = None,
     ):
         super().__init__()
         self._input_dimension = input_dimension
@@ -92,7 +92,7 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
         gradients = torch.autograd.grad(
             outputs=[output],
             inputs=[inputs],
-            grad_outputs=grad_outputs,
+            grad_outputs=grad_outputs,  # type: ignore
             retain_graph=True,
             create_graph=True,
         )[0]
