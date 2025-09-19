@@ -2,15 +2,15 @@
 
 import os
 
-# import matplotlib.cm as cm
-# import matplotlib.colors as colors
+import matplotlib.cm as cm
+import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
 import torch
 import triangle as tr
 
-# from matplotlib.collections import PolyCollection
+from matplotlib.collections import PolyCollection
 
 from torch_fem import (
     ElementLine,
@@ -60,7 +60,7 @@ fracture_2d_data = {
     "segments": [[0, 2], [0, 4], [1, 3], [1, 4], [2, 5], [3, 5], [4, 5]],
 }
 
-fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsena" + str(0.5**10))
+fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsena" + str(0.5**2))
 
 fractures_triangulation = [fracture_triangulation, fracture_triangulation]
 
@@ -260,7 +260,8 @@ exact_norm = torch.sqrt(torch.sum(discrete_basis.integrate_functional(h1_exact))
 def training_step(neural_network):
     """Training step for the neural network."""
     residual_vector = discrete_basis.reduce(
-        discrete_basis.integrate_linear_form(residual, neural_network.gradient)
+        # discrete_basis.integrate_linear_form(residual, neural_network.gradient)
+        discrete_basis.integrate_linear_form(residual, grad_interpolation_nn)
     )
 
     loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
@@ -272,7 +273,10 @@ def training_step(neural_network):
     h1_error = torch.sqrt(
         torch.sum(
             discrete_basis.integrate_functional(
-                h1_norm, neural_network, neural_network.gradient
+                # h1_norm, neural_network, neural_network.gradient
+                h1_norm,
+                interpolation_nn,
+                grad_interpolation_nn,
             )
         )
     )
@@ -294,6 +298,8 @@ model = Model(
 )
 
 model.train()
+
+model.plot_training_history()
 
 # ---------------------- Plot Values ----------------------#
 
@@ -351,17 +357,15 @@ V_inner_edges = InteriorEdgesFractureBasis(
 
 traces_local_edges_idx = discrete_basis.global_triangulation["traces_local_edges_idx"]
 
-n_E = discrete_basis.mesh.local_triangulations["normal4inner_edges_3D"]
+n_E = discrete_basis.mesh["interior_edges", "normals_3d"]
 
 n4e_u = discrete_basis.mesh["edges", "vertices"]
 
 nodes4trace = n4e_u[torch.arange(n4e_u.shape[0])[:, None], traces_local_edges_idx]
 
-c4n = discrete_basis.mesh.local_triangulations["vertices"]
+c4n = discrete_basis.mesh["vertices", "coordinates"]
 
 coords4trace = c4n[torch.arange(c4n.shape[0]), nodes4trace]
-
-# points_trace_fracture_1, points_trace_fracture_2 = torch.unbind(, dim = 0)
 
 sort_points_trace, sort_idx = torch.sort(coords4trace.mean(-2)[..., 1])
 
@@ -407,7 +411,7 @@ I_E_u, I_E_u_grad = discrete_basis.interpolate(V_inner_edges, exact_value_global
 
 I_E_u_grad_K_plus, I_E_u_grad_minus = torch.unbind(I_E_u_grad, dim=-4)
 
-n_E = discrete_basis.mesh.local_triangulations["normal4inner_edges_3D"]
+n_E = discrete_basis.mesh["interior_edges", "normals_3d"]
 
 jump_u = (I_E_u_grad_K_plus * n_E).sum(-1) + (I_E_u_grad_minus * -n_E).sum(-1)
 
@@ -516,7 +520,7 @@ triangles = torch.unbind(mesh["cells", "vertices"], dim=0)
 
 u_h = torch.unbind(u_NN_local, dim=0)
 
-plotter = pv.Plotter(off_screen=True)
+plotter = pv.Plotter()
 
 for i in range(2):
     vertices_numpy = vertices[i].numpy(force=True)  # (N_v, 3)
@@ -557,7 +561,7 @@ plt.ylabel("value")
 plt.grid(True)
 
 plt.tight_layout()
-plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_value_nn.png"))
+# plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_value_nn.png"))
 
 # ------------------ TRACES (JUMPS) ------------------
 
@@ -580,7 +584,7 @@ plt.ylabel("jump value")
 plt.title("Fracture 1")
 plt.legend()
 plt.tight_layout()
-plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_1.png"))
+# plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_1.png"))
 
 # Fracture 2
 fig = plt.figure(dpi=200)
@@ -601,4 +605,55 @@ plt.ylabel("jump value")
 plt.title("Fracture 2")
 plt.legend()
 plt.tight_layout()
-plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_2.png"))
+# plt.savefig(os.path.join(SAVE_DIR, f"{NAME}_trace_jump_fracture_2.png"))
+
+### --- PLOT ERROR --- ###
+
+H1_error_fracture_1 = H1_error_fracture_1.numpy(force=True)
+c4e_fracture_1 = c4e_fracture_1.numpy(force=True)
+
+H1_error_fracture_2 = H1_error_fracture_2.numpy(force=True)
+c4e_fracture_2 = c4e_fracture_2.numpy(force=True)
+
+all_errors = np.concatenate([H1_error_fracture_1, H1_error_fracture_2])
+norm = colors.Normalize(vmin=all_errors.min(), vmax=all_errors.max())
+cmap = cm.get_cmap("viridis")
+
+fig_error, axes = plt.subplots(1, 2, figsize=(12, 3), dpi=200)
+
+fig_error.suptitle("Relative error for FEM solution", fontsize=14)
+
+
+# Fracture 1
+face_colors_1 = cmap(norm(H1_error_fracture_1))
+collection1 = PolyCollection(
+    c4e_fracture_1, facecolors=face_colors_1, edgecolors="black", linewidths=0.2
+)
+ax1 = axes[0]
+ax1.add_collection(collection1)
+ax1.autoscale()
+ax1.set_aspect("equal")
+ax1.set_title("Fracture 1")
+ax1.set_xlim([-1, 1])
+ax1.set_ylim([0, 1])
+
+# Fracture 2
+face_colors_2 = cmap(norm(H1_error_fracture_2))
+collection2 = PolyCollection(
+    c4e_fracture_2, facecolors=face_colors_2, edgecolors="black", linewidths=0.2
+)
+ax2 = axes[1]
+ax2.add_collection(collection2)
+ax2.autoscale()
+ax2.set_aspect("equal")
+ax2.set_title("Fracture 2")
+ax2.set_xlim([-1, 1])
+ax2.set_ylim([0, 1])
+
+sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+sm.set_array(all_errors)
+color_bar = fig_error.colorbar(
+    sm, ax=axes.ravel().tolist(), orientation="vertical", label="error"
+)
+
+plt.show()

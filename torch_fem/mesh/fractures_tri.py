@@ -15,38 +15,22 @@ class FracturesTri(MeshesTri):
 
         self._compute_fracture_map(fractures_3d_data)
 
-        self["vertices", "coordinates_3d"] = (
+        self._triangulation["vertices", "coordinates_3d"] = (
             self["jacobian_fracture_map"] @ self["vertices", "coordinates"].mT
             + self["translation_vector"]
         ).mT
 
-        self["cells", "coordinates_3d"] = self.compute_coordinates_4_cells(
-            self["vertices", "coordinates_3d"], self["cells", "vertices"]
+        self._triangulation["cells", "coordinates_3d"] = (
+            self.compute_coordinates_4_cells(
+                self["vertices", "coordinates_3d"], self["cells", "vertices"]
+            )
         )
 
-        self["interior_edges", "normals_3d"] = (
+        self._triangulation["interior_edges", "normals_3d"] = (
             self["jacobian_fracture_map"].unsqueeze(-3)
             @ self["interior_edges", "normals"].mT
             + self["translation_vector"].unsqueeze(-3)
         ).mT
-
-    @property
-    def _edges_permutations(self):
-        return torch.tensor([[0, 1], [1, 2], [0, 2]])
-
-    def _stack_triangulations(self, fracture_triangulations: list):
-        """Stack multiple fracture triangulations into a single TensorDict"""
-
-        fracture_triangulations_tensordict = [
-            tensordict.TensorDict(fracture_triangulation)
-            for fracture_triangulation in fracture_triangulations
-        ]
-
-        stacked_fractured_triangulations = torch.stack(
-            fracture_triangulations_tensordict, dim=0
-        )
-
-        return stacked_fractured_triangulations
 
     def _compute_fracture_map(self, fractures_3d_data: torch.Tensor):
         """compute mapping for each fracture from the 2D space to 3D."""
@@ -63,10 +47,13 @@ class FracturesTri(MeshesTri):
         jacobian_fracture_map = linear_equation[..., :2]
         translation_vector = linear_equation[..., [-1]]
 
-        det_jacobian_fracture_map = torch.norm(
-            torch.cross(*torch.split(jacobian_fracture_map, 1, dim=-1), dim=-2),
+        det_jacobian_fracture_map: torch.Tensor = torch.norm(
+            input=torch.cross(*torch.split(jacobian_fracture_map, 1, dim=-1), dim=-2),
+            p=2,
             dim=-2,
             keepdim=True,
+            out=None,
+            dtype=jacobian_fracture_map.dtype,
         )
 
         inv_jacobian_fracture_map = (

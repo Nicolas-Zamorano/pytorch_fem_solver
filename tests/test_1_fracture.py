@@ -12,6 +12,8 @@ from torch_fem import FracturesTri, ElementTri, FractureBasis
 # torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
+# pylint: disable=not-callable
+
 # ---------------------- FEM Parameters ----------------------#
 
 MESH_SIZE = 0.5 ** (9)
@@ -188,8 +190,8 @@ exact_value_global = exact_value_local.reshape(-1, 1)[
 ].numpy()
 
 u_h_local = u_h[V.global_triangulation["global2local_idx"]].reshape(-1)
-vertices = mesh["vertices"]["coordinates"].squeeze(0)
-triangles = mesh["cells"]["vertices"]
+vertices = mesh["vertices", "coordinates"].squeeze(0)
+triangles = mesh["cells", "vertices"]
 
 # ---------------------- Plot ----------------------#
 

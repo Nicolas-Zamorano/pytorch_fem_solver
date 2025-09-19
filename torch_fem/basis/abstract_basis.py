@@ -1,7 +1,9 @@
 """Abstract class for basis representation"""
 
 import abc
+from typing import Callable, Tuple, Optional, Any
 import torch
+import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 
@@ -59,11 +61,21 @@ class AbstractBasis(abc.ABC):
 
         return v, v_grad, integration_points, dx, inv_map_jacobian
 
-    def integrate_functional(self, function, *args, **kwargs):
+    def integrate_functional(
+        self,
+        function: Callable[["AbstractBasis", Any], torch.Tensor],
+        *args: Optional[Any],
+        **kwargs: Optional[Any],
+    ) -> torch.Tensor:
         """Integrate a given functional over the mesh elements"""
         return (function(self, *args, **kwargs) * self.dx).sum(-3).sum(-2)
 
-    def integrate_bilinear_form(self, function, *args, **kwargs):
+    def integrate_bilinear_form(
+        self,
+        function: Callable[["AbstractBasis", Any], torch.Tensor],
+        *args: Optional[Any],
+        **kwargs: Optional[Any],
+    ) -> torch.Tensor:
         """Integrate a given bilinear form over the mesh elements"""
         global_matrix = torch.zeros(self.basis_parameters["bilinear_form_shape"])
 
@@ -71,13 +83,18 @@ class AbstractBasis(abc.ABC):
 
         global_matrix.index_put_(
             self.basis_parameters["bilinear_form_idx"],
-            local_matrix.reshape(-1),
+            self.reshape_for_assembly(local_matrix, "bilinear"),
             accumulate=True,
         )
 
         return global_matrix
 
-    def integrate_linear_form(self, function, *args, **kwargs):
+    def integrate_linear_form(
+        self,
+        function: Callable[["AbstractBasis", Any], torch.Tensor],
+        *args: Optional[Any],
+        **kwargs: Optional[Any],
+    ) -> torch.Tensor:
         """Integrate a given linear form over the mesh elements"""
         integral_value = torch.zeros(self.basis_parameters["linear_form_shape"])
 
@@ -85,7 +102,7 @@ class AbstractBasis(abc.ABC):
 
         integral_value.index_put_(
             self.basis_parameters["linear_form_idx"],
-            integrand_value.reshape(-1, 1),
+            self.reshape_for_assembly(integrand_value, "linear"),
             accumulate=True,
         )
 
@@ -101,33 +118,51 @@ class AbstractBasis(abc.ABC):
         self,
         mesh: AbstractMesh,
         element: AbstractElement,
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute the degrees of freedom for the basis functions"""
         raise NotImplementedError
 
     @abc.abstractmethod
     def _compute_basis_parameters(
-        self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
-    ):
+        self,
+        coords4global_dofs: torch.Tensor,
+        global_dofs4elements: torch.Tensor,
+        nodes4boundary_dofs: torch.Tensor,
+    ) -> tensordict.TensorDict:
         """Compute parameters related to the basis functions"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _compute_jacobian_map(self, mesh: AbstractMesh, element: AbstractElement):
+    def _compute_jacobian_map(
+        self, mesh: AbstractMesh, element: AbstractElement
+    ) -> torch.Tensor:
         """Compute the jacobian of the map that maps the local element to the physical one."""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _compute_integration_points(self, mesh: AbstractMesh, bar_coords: torch.Tensor):
+    def _compute_integration_points(
+        self, mesh: AbstractMesh, bar_coords: torch.Tensor
+    ) -> torch.Tensor:
         """Compute the integration points, applying to map to the local quadrature points
         to obtain the physical integration points for each element"""
         raise NotImplementedError
 
     @abc.abstractmethod
     def _compute_integral_weights(
-        self, element: AbstractMesh, det_map_jacobian: torch.Tensor
-    ):
+        self, element: AbstractElement, det_map_jacobian: torch.Tensor
+    ) -> torch.Tensor:
         """Compute the integration weight, composing of the quadrature weights, area of the
         reference element, the determent of the jacobian of the map, as well other quantities
         """
         raise NotImplementedError
+
+    def reshape_for_assembly(
+        self, local_matrices: torch.Tensor, form: str
+    ) -> torch.Tensor:
+        """reshape local matrices tensor to be compute for assembly"""
+        if form == "bilinear":
+            return local_matrices.reshape(-1)
+        elif form == "linear":
+            return local_matrices.reshape(-1, 1)
+        else:
+            raise NotImplementedError(f"Unknown form type: {format(form)}")

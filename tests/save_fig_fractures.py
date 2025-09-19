@@ -38,7 +38,7 @@ fracture_triangulation = tr.triangulate(
 
 fracture_triangulation_torch = td.TensorDict(fracture_triangulation)
 
-fractures_triangulation = (fracture_triangulation_torch, fracture_triangulation_torch)
+fractures_triangulation = [fracture_triangulation_torch, fracture_triangulation_torch]
 
 
 fractures_data = torch.tensor(
@@ -49,13 +49,13 @@ fractures_data = torch.tensor(
 )
 
 mesh = FracturesTri(
-    triangulations=fractures_triangulation, fractures_3D_data=fractures_data
+    triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
 
-vertices = mesh.local_triangulations["vertices_3D"]
-triangles = mesh.local_triangulations["triangles"]
-vertices_2D = mesh.local_triangulations["vertices"]
+vertices = mesh["vertices", "coordinates_3d"]
+triangles = mesh["cells", "vertices"]
+vertices_2D = mesh["vertices", "coordinates"]
 
 vertices_fracture_1, vertices_fracture_2 = torch.unbind(vertices_2D, dim=0)
 triangles_fracture_1, triangles_fracture_2 = torch.unbind(triangles, dim=0)
@@ -98,9 +98,9 @@ plotter = pv.Plotter(off_screen=True)
 colors = ["red", "blue"]
 
 for i in range(2):
-    verts = vertices[i].cpu().numpy()  # (N_v, 3)
-    tris = triangles[i].cpu().numpy()  # (N_T, 3)
-    sol = exact_eval[i].cpu().numpy()
+    verts = torch.Tensor.numpy(vertices[i], force=True)
+    tris = torch.Tensor.numpy(triangles[i], force=True)
+    sol = torch.Tensor.numpy(exact_eval[i], force=True)
 
     faces = np.hstack([np.full((tris.shape[0], 1), 3), tris]).flatten()
     mesh = pv.PolyData(verts, faces)
@@ -125,6 +125,6 @@ for i in range(2):
         always_visible=True,
     )
 
-plotter.show_grid()
+plotter.show_grid(plotter)
 plotter.show()
 plotter.screenshot(os.path.join(SAVE_DIR, "domain_simple.png"))

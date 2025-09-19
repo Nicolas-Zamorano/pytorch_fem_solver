@@ -1,5 +1,6 @@
 """Class for basis representation on fractures"""
 
+from typing import Optional
 import torch
 import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
@@ -26,9 +27,9 @@ class FractureBasis(AbstractBasis):
 
     def _build_global_triangulation(self, mesh: AbstractMesh):
         """Build a global triangulation from local triangulations of multiple fractures."""
-        nb_fractures, nb_vertices, _ = mesh["vertices", "coordinates"].size()
+        nb_fractures, nb_vertices, _ = mesh["vertices", "coordinates"].shape
 
-        nb_edges = mesh["edges", "vertices"].size(-2)
+        nb_edges = mesh["edges", "vertices"].shape[-2]
 
         local_triangulation_3d_coords = mesh["vertices", "coordinates_3d"].reshape(
             -1, 3
@@ -156,8 +157,8 @@ class FractureBasis(AbstractBasis):
         nodes4boundary_dofs: torch.Tensor,
     ):
 
-        nb_global_dofs = self.global_triangulation["vertices_2D"].size(-2)
-        nb_local_dofs = self.global_triangulation["triangles"].size(-1)
+        nb_global_dofs = self.global_triangulation["vertices_2D"].shape[-2]
+        nb_local_dofs = self.global_triangulation["triangles"].shape[-1]
 
         inner_dofs = torch.arange(nb_global_dofs)[
             ~torch.isin(torch.arange(nb_global_dofs), nodes4boundary_dofs)
@@ -165,7 +166,7 @@ class FractureBasis(AbstractBasis):
 
         rows_idx = (
             self.global_triangulation["triangles"]
-            .repeat(1, 1, nb_local_dofs)
+            .repeat_interleave(nb_local_dofs, dim=-1)
             .reshape(-1)
         )
         cols_idx = (
@@ -176,14 +177,16 @@ class FractureBasis(AbstractBasis):
 
         form_idx = self.global_triangulation["triangles"].reshape(-1)
 
-        basis_parameters = {
-            "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
-            "bilinear_form_idx": (rows_idx, cols_idx),
-            "linear_form_shape": (nb_global_dofs, 1),
-            "linear_form_idx": (form_idx,),
-            "inner_dofs": inner_dofs,
-            "nb_dofs": nb_global_dofs,
-        }
+        basis_parameters = tensordict.TensorDict(
+            {
+                "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
+                "bilinear_form_idx": (rows_idx, cols_idx),
+                "linear_form_shape": (nb_global_dofs, 1),
+                "linear_form_idx": (form_idx,),
+                "inner_dofs": inner_dofs,
+                "nb_dofs": nb_global_dofs,
+            }
+        )
 
         return basis_parameters
 
@@ -210,11 +213,11 @@ class FractureBasis(AbstractBasis):
     def _compute_jacobian_map(self, mesh, element):
         return mesh["cells", "coordinates"].mT @ element.barycentric_grad
 
-    def interpolate(self, basis: AbstractBasis, tensor: torch.Tensor = None):
+    def interpolate(self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
             nb_fractures = self.mesh.batch_size()[0]
-            nb_vertices_4_cells = self.mesh["cells"].batch_size[-1]
+            nb_vertices_4_cells = self.mesh["cells", "vertices"].shape[-2]
             # vertices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
             vertices_4_cells_4_interior_edges = self.global_dofs4elements.reshape(
                 nb_fractures, -1, 1, nb_vertices_4_cells
@@ -276,7 +279,7 @@ class FractureBasis(AbstractBasis):
 
         else:
 
-            nodes = self.coords4global_dofs
+            nodes = self.mesh["vertices", "coordinates_3d"]
 
             def interpolator(function):
                 return (function(nodes)[vertices_4_cells_4_interior_edges] * v).sum(

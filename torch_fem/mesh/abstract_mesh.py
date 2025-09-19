@@ -1,6 +1,7 @@
 """Abstract class for mesh representation"""
 
 import abc
+from typing import Tuple, Any
 import torch
 import tensordict
 
@@ -10,24 +11,25 @@ torch.set_default_dtype(torch.float64)
 class AbstractMesh(abc.ABC):
     """Abstract class for mesh representation"""
 
-    def __init__(self, triangulation: dict):
+    def __init__(self, triangulation: dict[str, Any]):
 
         triangulation_tensordict = self._triangle_to_tensordict(triangulation)
 
         self._triangulation = self._build_optional_parameters(triangulation_tensordict)
 
-    def __getitem__(self, key: str):
+    def __getitem__(
+        self, key: str | Tuple[str, str]
+    ) -> tensordict.TensorDict | torch.Tensor:
         return self._triangulation[key]
 
-    def __setitem__(self, key: str, value):
+    def __setitem__(self, key: str, value: tensordict.TensorDict | torch.Tensor):
         self._triangulation[key] = value
 
     def batch_size(self):
         """return batch_size of triangulation tensordict"""
         return self._triangulation.batch_size
 
-    @staticmethod
-    def _triangle_to_tensordict(mesh_dict: dict):
+    def _triangle_to_tensordict(self, mesh_dict: dict[str, Any]):
         """Convert a mesh dictionary from 'triangle' library to a TensorDict"""
         key_map = {
             "vertices": ("vertices", "coordinates"),
@@ -65,11 +67,13 @@ class AbstractMesh(abc.ABC):
 
         return mesh_tensordict.auto_batch_size_()
 
-    def _build_optional_parameters(self, triangulation: tensordict.TensorDict):
+    def _build_optional_parameters(
+        self, triangulation: tensordict.TensorDict
+    ) -> tensordict.TensorDict:
         """Compute parameters that are not in mesh dict."""
 
         triangulation["cells", "coordinates"] = self.compute_coordinates_4_cells(
-            triangulation["vertices", "coordinates"], triangulation["cells"]["vertices"]
+            triangulation["vertices", "coordinates"], triangulation["cells", "vertices"]
         )
 
         if "vertices" not in triangulation["edges"]:
@@ -93,7 +97,7 @@ class AbstractMesh(abc.ABC):
 
     def _compute_interior_and_boundary_edges(
         self, triangulation: tensordict.TensorDict
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute interior and boundary edges."""
 
         vertices_4_boundary_edges, vertices_4_interior_edges = (
@@ -170,7 +174,9 @@ class AbstractMesh(abc.ABC):
 
         return interior_edges, boundary_edges
 
-    def _compute_vertices_4_edges(self, triangulation: tensordict.TensorDict):
+    def _compute_vertices_4_edges(
+        self, triangulation: tensordict.TensorDict
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute vertices for interior and boundary edges. boundary edges are identify for having
         a one in the marker for edges. every other marker is threat as interior."""
 
@@ -188,17 +194,17 @@ class AbstractMesh(abc.ABC):
         triangulation: tensordict.TensorDict,
         vertices_4_boundary_edges: torch.Tensor,
         vertices_4_interior_edges: torch.Tensor,
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute the cells for each edge. In the case of edges in the boundary of the domain,
         only 1 cells contain them, while 2 cells contains an edges for interior ones."""
 
         if "neighbors" in triangulation["cells"]:
             neighbors = triangulation["cells", "neighbors"]
 
-            number_neighbors = neighbors.size(-2)
+            number_neighbors = neighbors.shape[-2]
 
             cells_idx = torch.arange(number_neighbors).repeat_interleave(
-                triangulation["cells"]["vertices"].size(-1)
+                triangulation["cells", "vertices"].shape[-1]
             )
 
             neigh_flat = neighbors.reshape(-1)
@@ -218,7 +224,7 @@ class AbstractMesh(abc.ABC):
             cells_4_boundary_edges = cells_idx[mask_boundary]
 
         else:
-            vertices_4_cells = triangulation["cells"]["vertices"]
+            vertices_4_cells = triangulation["cells", "vertices"]
 
             cells_4_boundary_edges = (
                 (
@@ -238,7 +244,7 @@ class AbstractMesh(abc.ABC):
                 .any(dim=-2)
                 .all(dim=-1),
                 as_tuple=True,
-            )[1].reshape(-1, triangulation["vertices"]["coordinates"].size(-1))
+            )[1].reshape(-1, triangulation["vertices", "coordinates"].shape[-1])
 
         return cells_4_boundary_edges, cells_4_interior_edges
 
@@ -249,10 +255,14 @@ class AbstractMesh(abc.ABC):
         """Compute the coordinates of the cells in the mesh."""
         return coordinates_4_vertices[vertices_4_cells]
 
-    def _compute_edges_vertices(self, triangulation: tensordict.TensorDict):
+    def _compute_edges_vertices(
+        self, triangulation: tensordict.TensorDict
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute vertices for unique edges."""
 
-        vertices_4_edges = triangulation["cells", "vertices"][self._edges_permutations]
+        vertices_4_edges = triangulation["cells", "vertices"][
+            ..., self._edges_permutations
+        ]
 
         vertices_4_unique_edges, _, boundary_mask = torch.unique(
             vertices_4_edges.reshape(-1, 2).mT,
@@ -264,7 +274,9 @@ class AbstractMesh(abc.ABC):
 
         return vertices_4_unique_edges, boundary_mask
 
-    def _compute_cells_min_length(self, triangulation: tensordict.TensorDict):
+    def _compute_cells_min_length(
+        self, triangulation: tensordict.TensorDict
+    ) -> torch.Tensor:
         """For each cells, compute the smaller length of the edges."""
         vertices_4_edges, _ = torch.sort(
             triangulation["cells", "vertices"][..., self._edges_permutations], dim=-1
@@ -292,7 +304,7 @@ class AbstractMesh(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def _edges_permutations(self):
+    def _edges_permutations(self) -> torch.Tensor:
         """Return the local node vertices defining each edge of the element.
         the convection is the i-th node share numbering with the edge opposite to it."""
         raise NotImplementedError
