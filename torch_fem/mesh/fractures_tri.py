@@ -1,11 +1,10 @@
 """Class for handling multiple fractures represented as triangular meshes"""
 
 import torch
-import tensordict
-from .mesh_tri import MeshTri
+from .meshes_tri import MeshesTri
 
 
-class FracturesTri(MeshTri):
+class FracturesTri(MeshesTri):
     """Class for handling multiple fractures represented as triangular meshes"""
 
     def __init__(self, triangulations: list, fractures_3d_data: torch.Tensor):
