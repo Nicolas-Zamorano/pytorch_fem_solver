@@ -3,6 +3,7 @@
 import math
 
 import matplotlib.pyplot as plt
+from matplotlib.collections import PolyCollection
 import torch
 import triangle as tr
 
@@ -37,36 +38,39 @@ NN = FeedForwardNeuralNetwork(
     input_dimension=2,
     output_dimension=1,
     nb_hidden_layers=4,
-    neurons_per_layers=25,
+    neurons_per_layers=15,
     boundary_condition_modifier=BoundaryConstrain(),
     use_xavier_initialization=True,
 )
 
 # ---------------------- FEM Parameters ----------------------#
 
-centers = torch.tensor(
-    [
-        [0.125, 0.125],
-        [0.125, 0.375],
-        [0.125, 0.625],
-        [0.125, 0.875],
-        [0.375, 0.125],
-        [0.375, 0.375],
-        [0.375, 0.625],
-        [0.375, 0.875],
-        [0.625, 0.125],
-        [0.625, 0.375],
-        [0.625, 0.625],
-        [0.625, 0.875],
-        [0.875, 0.125],
-        [0.875, 0.375],
-        [0.875, 0.625],
-        [0.875, 0.875],
-    ],
-    requires_grad=False,
-)
 
-radius = torch.tensor([[0.125]] * 16, requires_grad=False)
+def generate_patches_info(n):
+    """generates a set of centers and radius"""
+    initial_centers = [(0.5, 0.5)]
+    initial_radius = [0.5]
+
+    for _ in range(n):
+        new_centers = []
+        new_radius = []
+        for (cx, cy), r in zip(initial_centers, initial_radius):
+            new_r = r / 2
+            new_centers.extend(
+                [
+                    (cx - new_r, cy - new_r),
+                    (cx - new_r, cy + new_r),
+                    (cx + new_r, cy - new_r),
+                    (cx + new_r, cy + new_r),
+                ]
+            )
+            new_radius.extend([new_r] * 4)
+        initial_centers, initial_radius = new_centers, new_radius
+
+    return torch.Tensor(initial_centers), torch.Tensor(initial_radius).unsqueeze(-1)
+
+
+centers, radius = generate_patches_info(3)
 
 patches = Patches(centers, radius)
 
@@ -195,7 +199,7 @@ def training_step(neural_network):
         dim=0,
     )
 
-    # relative_loss = torch.sqrt(loss_value) / exact_norm**2
+    validation_loss_value = torch.sqrt(validation_loss_value) / exact_norm**2
 
     h1_error = torch.sqrt(
         torch.sum(
@@ -206,7 +210,6 @@ def training_step(neural_network):
     )
 
     return loss_value, validation_loss_value, h1_error / exact_norm
-    # return loss_value, relative_loss, h1_error / exact_norm
 
 
 model = Model(
@@ -219,7 +222,7 @@ model = Model(
     # scheduler_kwargs={"gamma": 0.99**100},
     use_early_stopping=True,
     early_stopping_patience=10,
-    min_delta=1e-16,
+    min_delta=1e-15,
 )
 
 
@@ -229,43 +232,42 @@ model.train()
 
 model.load_optimal_parameters()
 
-linspace = torch.linspace(0, 1, 100)
-
-X, Y = torch.stack(
-    torch.meshgrid(
-        linspace,
-        linspace,
-        indexing="ij",
+h1_error = torch.sqrt(
+    error_basis.integrate_functional(
+        h1_norm, model._neural_network, model._neural_network.gradient
     )
-)
-
-plot_points = torch.stack([X, Y], dim=-1)
-
-with torch.no_grad():
-    Z = abs(exact(X, Y) - NN(plot_points).squeeze(-1))
+).squeeze(-1)
 
 figure_solution, axis_solution = plt.subplots()
-contour_solution = axis_solution.contourf(
-    X.numpy(force=True),
-    Y.numpy(force=True),
-    Z.numpy(force=True),
-    levels=100,
+
+c4e = error_basis.mesh["cells", "coordinates"].numpy(force=True)
+
+collection = PolyCollection(
+    c4e,
+    array=h1_error.numpy(force=True),
     cmap="viridis",
+    edgecolors="black",
+    linewidths=0.2,
 )
-figure_solution.colorbar(contour_solution, ax=axis_solution, orientation="vertical")
+
+axis_solution.add_collection(collection)
+axis_solution.autoscale_view()
 
 axis_solution.set_xlabel("x")
 axis_solution.set_ylabel("y")
-axis_solution.set_title(r"$|u-u_\theta|$")
-plt.tight_layout()
+color_bar = plt.colorbar(collection, ax=axis_solution)
+color_bar.set_label(r"$H^1$ error")
+
+figure_solution.tight_layout()
 
 model.plot_training_history(
     plot_names={
         "loss": r"$\mathcal{L}(u_{\theta})$",
         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-        "title": "RVPINNs",
+        "title": "MF-RVPINNs",
     }
 )
+
 
 plt.show()

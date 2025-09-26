@@ -3,37 +3,32 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import PolyCollection
 from torch_fem import Patches, ElementTri, PatchesBasis
 
-centers = torch.tensor([[0.5, 0.5]])
 
-radius = torch.tensor([[0.5]])
+def generate_patches_info(n):
+    """generates a set of centers and radius"""
+    initial_centers = [(0.5, 0.5)]
+    initial_radius = [0.5]
 
-# centers = torch.tensor([[0.25, 0.25], [0.25, 0.75], [0.75, 0.75], [0.75, 0.25]])
+    for _ in range(n):
+        new_centers = []
+        new_radius = []
+        for (cx, cy), r in zip(initial_centers, initial_radius):
+            new_r = r / 2
+            new_centers.extend(
+                [
+                    (cx - new_r, cy - new_r),
+                    (cx - new_r, cy + new_r),
+                    (cx + new_r, cy - new_r),
+                    (cx + new_r, cy + new_r),
+                ]
+            )
+            new_radius.extend([new_r] * 4)
+        initial_centers, initial_radius = new_centers, new_radius
 
-# radius = torch.tensor([[0.25], [0.25], [0.25], [0.25]])
+    return torch.Tensor(initial_centers), torch.Tensor(initial_radius).unsqueeze(-1)
 
-centers = torch.tensor(
-    [
-        [0.125, 0.125],
-        [0.125, 0.375],
-        [0.125, 0.625],
-        [0.125, 0.875],
-        [0.375, 0.125],
-        [0.375, 0.375],
-        [0.375, 0.625],
-        [0.375, 0.875],
-        [0.625, 0.125],
-        [0.625, 0.375],
-        [0.625, 0.625],
-        [0.625, 0.875],
-        [0.875, 0.125],
-        [0.875, 0.375],
-        [0.875, 0.625],
-        [0.875, 0.875],
-    ],
-    requires_grad=False,
-)
 
-radius = torch.tensor([[0.125]] * 16, requires_grad=False)
+centers, radius = generate_patches_info(3)
 
 
 patches = Patches(centers, radius)
