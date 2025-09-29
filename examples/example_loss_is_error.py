@@ -23,9 +23,13 @@ torch.set_default_dtype(torch.float64)
 # ---------------------- Neural Network Parameters ----------------------#
 
 
-def boundary_constraint(x):
-    """Boundary condition modifier function."""
-    return x[..., [0]] * (x[..., [0]] - 1) * x[..., [1]] * (x[..., [1]] - 1)
+class BoundaryConstrain(torch.nn.Module):
+    """Class to strongly apply bc"""
+
+    def forward(self, inputs):
+        """Boundary condition modifier function."""
+        x, y = torch.split(inputs, 1, dim=-1)
+        return x * (x - 1) * y * (y - 1)
 
 
 NN = NeuralNetwork(
@@ -33,7 +37,7 @@ NN = NeuralNetwork(
     output_dimension=1,
     nb_hidden_layers=4,
     neurons_per_layers=25,
-    boundary_condition_modifier=boundary_constraint,
+    boundary_condition_modifier=BoundaryConstrain(),
 )
 
 # ---------------------- FEM Parameters ----------------------#
@@ -119,13 +123,13 @@ def training_step(neural_network):
 model = Model(
     neural_network=NN,
     training_step=training_step,
-    epochs=5000,
-    learning_rate=0.1e-1,
-    use_decay_learning_rate=True,
-    decay_rate=0.99,
-    decay_steps=100,
+    epochs=8000,
+    optimizer=torch.optim.Adam,
+    optimizer_kwargs={"lr": 0.001},
+    # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
+    # scheduler_kwargs={"gamma": 0.99**100},
     use_early_stopping=True,
-    early_stopping_patience=100,
+    early_stopping_patience=50,
     min_delta=1e-12,
 )
 

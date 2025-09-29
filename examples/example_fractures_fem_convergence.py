@@ -4,7 +4,6 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tensordict as td
 import torch
 import triangle as tr
 from torch_fem import FracturesTri, ElementTri, FractureBasis
@@ -199,12 +198,10 @@ for i in range(11):
         fracture_triangulation, "prsea" + str(ELEMENT_SIZE ** (EXPONENT + i))
     )
 
-    fracture_triangulation_torch = td.TensorDict((fracture_triangulation))
-
-    fractures_triangulation = (
-        fracture_triangulation_torch,
-        fracture_triangulation_torch,
-    )
+    fractures_triangulation = [
+        fracture_triangulation,
+        fracture_triangulation,
+    ]
 
     mesh = FracturesTri(
         triangulations=fractures_triangulation, fractures_3d_data=fractures_data
@@ -220,13 +217,9 @@ for i in range(11):
 
     b = V.integrate_linear_form(l)
 
-    A_reduced = V.reduce(A)
+    u_h = V.solution_tensor()
 
-    b_reduced = V.reduce(b)
-
-    u_h = torch.zeros(V.basis_parameters["linear_form_shape"])
-
-    u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
+    u_h = V.solve(A, u_h, b)
 
     I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 
@@ -237,7 +230,7 @@ for i in range(11):
 
     H1_norm_list.append((H1_norm_value).item())
 
-    nb_dofs_list.append(V.basis_parameters["nb_dofs"])
+    nb_dofs_list.append(u_h.shape[-2])
 
 nb_dofs_np = np.array(nb_dofs_list)
 H1_norm_np = np.array(H1_norm_list)

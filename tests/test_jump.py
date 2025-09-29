@@ -1,5 +1,6 @@
 """Test jump functional implementation against skfem."""
 
+from typing import Tuple, cast
 import skfem
 import torch
 import triangle as tr
@@ -34,7 +35,7 @@ def f(_):
 
 
 @skfem.BilinearForm
-def a_sk(u, v, _):
+def a_sk(u: skfem.DiscreteField, v: skfem.DiscreteField, _):
     """Bilinear form."""
     return dot(grad(u), grad(v))
 
@@ -94,20 +95,24 @@ def l(basis):
     return f(basis.integration_points) * basis.v
 
 
-A = V.reduce(V.integrate_bilinear_form(a))
-b = V.reduce(V.integrate_linear_form(l))
+A = V.integrate_bilinear_form(a)
+b = V.integrate_linear_form(l)
 
-sol = torch.zeros(V.basis_parameters["linear_form_shape"])
-sol[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
+
+sol = V.solution_tensor()
+
+sol = V.solve(A, sol, b)
 
 element_inner_edges = ElementLine(polynomial_order=1, integration_order=2)
 
 V_inner_edges = InteriorEdgesBasis(mesh, element_inner_edges)
 
-I_u, I_u_grad = V.interpolate(V_inner_edges, sol)
+I_u, I_u_grad = cast(
+    Tuple[torch.Tensor, torch.Tensor], V.interpolate(V_inner_edges, sol)
+)
 
-h_E = V.mesh["interior_edges"]["length"].unsqueeze(-2)
-n_E = V.mesh["interior_edges"]["normals"].unsqueeze(-2)
+h_E = V.mesh["interior_edges", "length"].unsqueeze(-2)
+n_E = V.mesh["interior_edges", "normals"].unsqueeze(-2)
 
 I_u_values, I_u_count = torch.unique(
     torch.round(I_u.reshape(-1), decimals=16), return_counts=True

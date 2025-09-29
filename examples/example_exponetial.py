@@ -1,7 +1,5 @@
 "# Example of solving a Poisson equation using a neural network and FEM basis functions."
 
-import math
-
 import matplotlib.pyplot as plt
 import torch
 import triangle as tr
@@ -95,7 +93,7 @@ def rhs(coordinates):
     return u_xx + u_yy
 
 
-def residual(basis, neural_network):
+def residual(basis: Basis, neural_network):
     """Residual of the PDE."""
     integration_points = basis.integration_points
 
@@ -115,7 +113,7 @@ def gram_matrix(basis):
     return v_grad @ v_grad.mT
 
 
-def jump(_, normal_elements, edge_size, neural_network):
+def jump(_, normal_elements, edge_size, neural_network: NeuralNetwork):
     """Jump term for discontinuous solutions"""
     interpolator_u_grad_plus, interpolator_u_grad_minus = torch.unbind(
         interpolator_to_edges_grad(neural_network), dim=-4

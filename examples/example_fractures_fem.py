@@ -78,9 +78,8 @@ fracture_triangulation = tr.triangulate(
     fracture_2d_data, "pqsena" + str(MESH_SIZE**EXPONENT)
 )
 
-fracture_triangulation_torch = td.TensorDict(fracture_triangulation)
 
-fractures_triangulation = (fracture_triangulation_torch, fracture_triangulation_torch)
+fractures_triangulation = [fracture_triangulation, fracture_triangulation]
 
 fractures_data = torch.tensor(
     [
@@ -274,13 +273,9 @@ A = V.integrate_bilinear_form(a)
 
 b = V.integrate_linear_form(l)
 
-A_reduced = V.reduce(A)
+u_h = V.solution_tensor()
 
-b_reduced = V.reduce(b)
-
-u_h = torch.zeros(V.basis_parameters["linear_form_shape"])
-
-u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
+u_h = V.solve(A, u_h, b)
 
 I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 
@@ -289,11 +284,11 @@ I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 ### --- FEM SOLUTION PARAMETERS --- ###
 
 vertices_fracture_1, vertices_fracture_2 = torch.unbind(
-    mesh["vertices"]["coordinates"], dim=0
+    mesh["vertices", "coordinates"], dim=0
 )
 
 triangles_fracture_1, triangles_fracture_2 = torch.unbind(
-    mesh["cells"]["vertices"], dim=0
+    mesh["cells", "vertices"], dim=0
 )
 
 u_h_fracture_1, u_h_fracture_2 = torch.unbind(
@@ -382,7 +377,7 @@ H1_error_fracture_1, H1_error_fracture_2 = torch.unbind(
     dim=0,
 )
 
-c4e_fracture_1, c4e_fracture_2 = torch.unbind(mesh["cells"]["vertices"], dim=0)
+c4e_fracture_1, c4e_fracture_2 = torch.unbind(mesh["cells", "vertices"], dim=0)
 
 # ---------------------- Plot ----------------------#
 

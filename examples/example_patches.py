@@ -233,14 +233,12 @@ model.train()
 model.load_optimal_parameters()
 
 h1_error = torch.sqrt(
-    error_basis.integrate_functional(
-        h1_norm, model._neural_network, model._neural_network.gradient
-    )
+    error_basis.integrate_functional(h1_norm, NN, NN.gradient)
 ).squeeze(-1)
 
 figure_solution, axis_solution = plt.subplots()
 
-c4e = error_basis.mesh["cells", "coordinates"].numpy(force=True)
+c4e = torch.Tensor.numpy(error_basis.mesh["cells", "coordinates"], force=True)
 
 collection = PolyCollection(
     c4e,

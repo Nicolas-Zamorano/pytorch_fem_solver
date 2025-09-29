@@ -5,7 +5,6 @@ import torch
 import matplotlib.pyplot as plt
 import tensordict as td
 import triangle as tr
-from ..torch_fem.basis import AbstractBasis
 from torch_fem import MeshTri, ElementTri, Basis
 
 torch.set_default_dtype(torch.float64)
@@ -50,7 +49,7 @@ def exact_dy(x, y):
     return -(1 - 2 * y) * x * (x**2 - 1)
 
 
-def h1_exact(basis: AbstractBasis) -> torch.Tensor:
+def h1_exact(basis: Basis) -> torch.Tensor:
     """H1 norm of the exact solution."""
     integration_points = basis.integration_points
     x, y = torch.split(integration_points, 1, dim=-1)
@@ -101,13 +100,9 @@ A = V.integrate_bilinear_form(a)
 
 b = V.integrate_linear_form(l)
 
-A_reduced = V.reduce(A)
+u_h = V.solution_tensor()
 
-b_reduced = V.reduce(b)
-
-u_h = torch.zeros(V.basis_parameters["linear_form_shape"])
-
-u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
+u_h = V.solve(A, u_h, b)
 
 exact_value = exact(*torch.unbind(mesh["vertices", "coordinates"], -1))
 

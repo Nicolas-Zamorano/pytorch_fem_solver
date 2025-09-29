@@ -89,7 +89,7 @@ local_vertices_3D = global_triangulations["vertices_3D"][
     global_triangulations["global2local_idx"].reshape(2, -1)
 ]
 
-vertices = global_triangulations["vertices_3D"].numpy()
+vertices = torch.Tensor.numpy(global_triangulations["vertices_3D"], force=True)
 
 exact_value_local = exact(*torch.split(local_vertices_3D, 1, -1))
 

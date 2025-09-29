@@ -13,59 +13,35 @@ from torch_fem import (
     ElementTri,
     FractureBasis,
     FracturesTri,
-    FeedForwardNeuralNetwork as NeuralNetwork3D,
+    FeedForwardNeuralNetwork,
+    Model,
 )
 
 torch.set_default_dtype(torch.float64)
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()
 
-# ---------------------- Neural Network Functions ----------------------#
-
-
-def nn_gradient(neural_net, x, y, z):
-    """Compute gradient of a Neural Network w.r.t inputs."""
-    x.requires_grad_(True)
-    y.requires_grad_(True)
-    z.requires_grad_(True)
-
-    output = neural_net.forward(x, y, z)
-
-    gradients = torch.autograd.grad(
-        outputs=output,
-        inputs=(x, y, z),
-        grad_outputs=torch.ones_like(output),
-        retain_graph=True,
-        create_graph=True,
-    )
-
-    return torch.concat(gradients, dim=-1)
-
-
-def optimizer_step(opt, loss):
-    """Perform one step of the optimizer."""
-    opt.zero_grad()
-    loss.backward(retain_graph=True)
-    opt.step()
-    scheduler.step()
-
-
 # ---------------------- Neural Network Parameters ----------------------#
 
-EPOCHS = 5000
-LEARNING_RATE = 0.2e-3
-DECAY_RATE = 0.98
-DECAY_STEPS = 200
 
-NN = torch.jit.script(
-    NeuralNetwork3D(
-        input_dimension=3,
-        output_dimension=1,
-        deep_layers=4,
-        hidden_layers_dimension=15,
-        activation_function=torch.nn.ReLU(),
-    )
+class BoundaryConstrain(torch.nn.Module):
+    """Class to strongly apply bc"""
+
+    def forward(self, inputs):
+        """Boundary condition modifier function."""
+        x, y, z = torch.split(inputs, 1, dim=-1)
+        return (x + 1) * (x - 1) * y * (y - 1) * (z + 1) * (z - 1)
+
+
+NN = FeedForwardNeuralNetwork(
+    input_dimension=3,
+    output_dimension=1,
+    nb_hidden_layers=4,
+    neurons_per_layers=15,
+    activation_function=torch.nn.ReLU(),
+    boundary_condition_modifier=BoundaryConstrain(),
 )
+
 
 # ---------------------- FEM Parameters ----------------------#
 
@@ -261,16 +237,52 @@ def grad_interpolation_nn(_):
     return Ih_grad(NN)
 
 
+def training_step(neural_network: FeedForwardNeuralNetwork):
+    """Training step for the neural network."""
+    residual_vector = V.reduce(
+        # discrete_basis.integrate_linear_form(residual, neural_network.gradient)
+        V.integrate_linear_form(residual, grad_interpolation_nn)
+    )
+
+    loss_value = residual_vector.T @ (A @ residual_vector)
+
+    # loss_value = torch.sum(residual_vector**2, dim=0)
+
+    relative_loss = torch.sqrt(loss_value) / exact_norm**2
+
+    h1_error = torch.sqrt(
+        torch.sum(
+            V.integrate_functional(
+                # h1_norm, neural_network, neural_network.gradient
+                h1_norm,
+                interpolation_nn,
+                grad_interpolation_nn,
+            )
+        )
+    )
+
+    return loss_value, relative_loss, h1_error / exact_norm
+
+
+model = Model(
+    neural_network=NN,
+    training_step=training_step,
+    epochs=1,
+    optimizer=torch.optim.Adam,
+    optimizer_kwargs={"lr": 0.2e-3},
+    # learning_rate_scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
+    # scheduler_kwargs={"gamma": 0.99**100},
+    use_early_stopping=True,
+    early_stopping_patience=50,
+    min_delta=1e-12,
+)
+
+model.train()
+
 for i in range(11):
 
     # torch.cuda.empty_cache()
     NN.load_state_dict(NN_initial_parameters)
-
-    optimizer = torch.optim.Adam(NN.parameters(), lr=LEARNING_RATE)
-
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(
-        optimizer, DECAY_RATE ** (1 / DECAY_STEPS)
-    )
 
     fracture_triangulation = tr.triangulate(
         fracture_triangulation, "prsea" + str(MESH_SIZE ** (EXPONENT + i))
@@ -278,10 +290,10 @@ for i in range(11):
 
     fracture_triangulation_torch = td.TensorDict((fracture_triangulation))
 
-    fractures_triangulation = (
-        fracture_triangulation_torch,
-        fracture_triangulation_torch,
-    )
+    fractures_triangulation = [
+        fracture_triangulation,
+        fracture_triangulation,
+    ]
 
     mesh = FracturesTri(
         triangulations=fractures_triangulation, fractures_3d_data=fractures_data
@@ -295,35 +307,15 @@ for i in range(11):
 
     A = V.reduce(V.integrate_bilinear_form(a))
 
-    A_inv = torch.linalg.inv(A)
+    A_inv = torch.linalg.inv(A)  # pylint: disable=not-callable
 
     Ih, Ih_grad = V.interpolate(V)
 
     exact_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_exact)))
 
-    LOSS_OPT = 10e4
-    params_opt = NN.state_dict()
+    model.train()
 
-    for epoch in range(EPOCHS):
-        current_time = datetime.now().strftime("%H:%M:%S")
-        print(f"{'='*15} [{current_time}] Iter:{i} Epoch:{epoch + 1}/{EPOCHS} {'='*15}")
-        residual_value = V.reduce(
-            V.integrate_linear_form(residual, grad_interpolation_nn)
-        )
-
-        # loss_value = residual_value.T @ (A_inv @ residual_value)
-
-        loss_value = (residual_value**2).sum()
-
-        print(f"Loss: {loss_value.item():.8f}")
-
-        optimizer_step(optimizer, loss_value)
-
-        if loss_value < LOSS_OPT:
-            LOSS_OPT = loss_value
-            params_opt = NN.state_dict()
-
-    NN.load_state_dict(params_opt)
+    model.load_optimal_parameters()
 
     H1_norm_value = (
         torch.sqrt(
@@ -336,7 +328,7 @@ for i in range(11):
 
     H1_norm_list.append((H1_norm_value).item())
 
-    nb_dofs_list.append(V.basis_parameters["nb_dofs"])
+    nb_dofs_list.append(A.shape[-1])
 
 # ------------------ CONFIG ------------------
 

@@ -1,5 +1,6 @@
 """Test fracture jump implementation by comparison with 2D implementation."""
 
+from typing import Tuple, cast
 import torch
 import triangle as tr
 
@@ -52,17 +53,21 @@ def l(basis, right_hand_side):
     return right_hand_side(basis.integration_points) * basis.v
 
 
-A = V.reduce(V.integrate_bilinear_form(a))
-b = V.reduce(V.integrate_linear_form(l, rhs))
+A = V.integrate_bilinear_form(a)
 
-u = torch.zeros(V.basis_parameters["linear_form_shape"])
-u[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A, b)
+b = V.integrate_linear_form(l, rhs)
+
+u_h = V.solution_tensor()
+
+u_h = V.solve(A, u_h, b)
 
 V_inner_edges = InteriorEdgesBasis(
     mesh, ElementLine(polynomial_order=1, integration_order=2)
 )
 
-I_u, I_u_grad = V.interpolate(V_inner_edges, u)
+I_u, I_u_grad = cast(
+    Tuple[torch.Tensor, torch.Tensor], V.interpolate(V_inner_edges, u_h)
+)
 
 h_E = V.mesh["interior_edges", "length"].unsqueeze(-2)
 n_E = V.mesh["interior_edges", "normals"].unsqueeze(-2)
@@ -100,14 +105,17 @@ V_f = FractureBasis(mesh_f, elements_f)
 A_f = V_f.reduce(V_f.integrate_bilinear_form(a))
 b_f = V_f.reduce(V_f.integrate_linear_form(l, rhs_3d))
 
-u_f = torch.zeros(V_f.basis_parameters["linear_form_shape"])
-u_f[V_f.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_f, b_f)
+u_f = V.solution_tensor()
+
+u_f = V.solve(A_f, u_f, b_f)
 
 V_f_inner_edges = InteriorEdgesFractureBasis(
     mesh_f, ElementLine(polynomial_order=1, integration_order=2)
 )
 
-I_u_f, I_u_f_grad = V_f.interpolate(V_f_inner_edges, u_f)
+I_u_f, I_u_f_grad = cast(
+    Tuple[torch.Tensor, torch.Tensor], V_f.interpolate(V_f_inner_edges, u_f)
+)
 
 h_E_f = V_f.mesh["interior_edges", "length"].unsqueeze(-2)
 n_E_f = V_f.mesh["interior_edges", "normals_3d"]

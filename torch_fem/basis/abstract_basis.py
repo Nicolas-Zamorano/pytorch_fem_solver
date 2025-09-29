@@ -1,9 +1,8 @@
 """Abstract class for basis representation"""
 
 import abc
-from typing import Callable, Tuple, Optional, Any
+from typing import Callable, Tuple, Any, Optional
 import torch
-import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 
@@ -13,29 +12,31 @@ class AbstractBasis(abc.ABC):
 
     def __init__(self, mesh: AbstractMesh, element: AbstractElement):
 
-        self.element = element
+        self._element = element
         self.mesh = mesh
 
         (
             self.v,
             self.v_grad,
             self.integration_points,
-            self.dx,
-            self.inv_map_jacobian,
+            self._dx,
+            self._inv_map_jacobian,
         ) = self._compute_integral_values(mesh, element)
 
         (
-            self.coords4global_dofs,
-            self.global_dofs4elements,
-            self.nodes4boundary_dofs,
-            self.coords4elements,
+            self._coords4global_dofs,
+            self._global_dofs4elements,
+            self._nodes4boundary_dofs,
+            self._coords4elements,
         ) = self._compute_dofs(
             mesh,
             element,
         )
 
-        self.basis_parameters = self._compute_basis_parameters(
-            self.coords4global_dofs, self.global_dofs4elements, self.nodes4boundary_dofs
+        self._basis_parameters = self._compute_basis_parameters(
+            self._coords4global_dofs,
+            self._global_dofs4elements,
+            self._nodes4boundary_dofs,
         )
 
     def _compute_integral_values(
@@ -57,32 +58,32 @@ class AbstractBasis(abc.ABC):
 
         integration_points = self._compute_integration_points(mesh, bar_coords)
 
-        dx = self._compute_integral_weights(element, det_map_jacobian)
+        _dx = self._compute_integral_weights(element, det_map_jacobian)
 
-        return v, v_grad, integration_points, dx, inv_map_jacobian
+        return v, v_grad, integration_points, _dx, inv_map_jacobian
 
     def integrate_functional(
         self,
-        function: Callable[["AbstractBasis", Any], torch.Tensor],
+        function: Callable[..., torch.Tensor],
         *args: Optional[Any],
         **kwargs: Optional[Any],
     ) -> torch.Tensor:
         """Integrate a given functional over the mesh elements"""
-        return (function(self, *args, **kwargs) * self.dx).sum(-3).sum(-2)
+        return (function(self, *args, **kwargs) * self._dx).sum(-3).sum(-2)
 
     def integrate_bilinear_form(
         self,
-        function: Callable[["AbstractBasis", Any], torch.Tensor],
+        function: Callable[..., torch.Tensor],
         *args: Optional[Any],
         **kwargs: Optional[Any],
     ) -> torch.Tensor:
         """Integrate a given bilinear form over the mesh elements"""
-        global_matrix = torch.zeros(self.basis_parameters["bilinear_form_shape"])
+        global_matrix = torch.zeros(self._basis_parameters["bilinear_form_shape"])
 
-        local_matrix = (function(self, *args, **kwargs) * self.dx).sum(-3)
+        local_matrix = (function(self, *args, **kwargs) * self._dx).sum(-3)
 
         global_matrix.index_put_(
-            self.basis_parameters["bilinear_form_idx"],
+            self._basis_parameters["bilinear_form_idx"],
             self.reshape_for_assembly(local_matrix, "bilinear"),
             accumulate=True,
         )
@@ -91,17 +92,17 @@ class AbstractBasis(abc.ABC):
 
     def integrate_linear_form(
         self,
-        function: Callable[["AbstractBasis", Any], torch.Tensor],
+        function: Callable[..., torch.Tensor],
         *args: Optional[Any],
         **kwargs: Optional[Any],
     ) -> torch.Tensor:
         """Integrate a given linear form over the mesh elements"""
-        integral_value = torch.zeros(self.basis_parameters["linear_form_shape"])
+        integral_value = torch.zeros(self._basis_parameters["linear_form_shape"])
 
-        integrand_value = (function(self, *args, **kwargs) * self.dx).sum(-3)
+        integrand_value = (function(self, *args, **kwargs) * self._dx).sum(-3)
 
         integral_value.index_put_(
-            self.basis_parameters["linear_form_idx"],
+            self._basis_parameters["linear_form_idx"],
             self.reshape_for_assembly(integrand_value, "linear"),
             accumulate=True,
         )
@@ -110,7 +111,7 @@ class AbstractBasis(abc.ABC):
 
     def reduce(self, tensor: torch.Tensor):
         """Reduce a tensor to only include inner degrees of freedom"""
-        idx = self.basis_parameters["inner_dofs"]
+        idx = self._basis_parameters["inner_dofs"]
         return tensor[idx, :][:, idx] if tensor.size(-1) != 1 else tensor[idx]
 
     @abc.abstractmethod
@@ -128,7 +129,7 @@ class AbstractBasis(abc.ABC):
         coords4global_dofs: torch.Tensor,
         global_dofs4elements: torch.Tensor,
         nodes4boundary_dofs: torch.Tensor,
-    ) -> tensordict.TensorDict:
+    ) -> dict:
         """Compute parameters related to the basis functions"""
         raise NotImplementedError
 
@@ -143,7 +144,7 @@ class AbstractBasis(abc.ABC):
     def _compute_integration_points(
         self, mesh: AbstractMesh, bar_coords: torch.Tensor
     ) -> torch.Tensor:
-        """Compute the integration points, applying to map to the local quadrature points
+        """Compute the integration points, applying the map to the local quadrature points
         to obtain the physical integration points for each element"""
         raise NotImplementedError
 
@@ -166,3 +167,27 @@ class AbstractBasis(abc.ABC):
             return local_matrices.reshape(-1, 1)
         else:
             raise NotImplementedError(f"Unknown form type: {format(form)}")
+
+    def solution_tensor(self) -> torch.Tensor:
+        """return a empty vector with size (nb_dofs, 1)."""
+        return torch.zeros(self._basis_parameters["linear_form_shape"])
+
+    def solve(
+        self,
+        matrix: torch.Tensor,
+        solution: torch.Tensor,
+        vector: torch.Tensor,
+        only_inner_dofs: bool = True,
+    ) -> torch.Tensor:
+        """Solve A*x=b, if only_inner_dofs used, solve reduced system."""
+        if only_inner_dofs is True:
+            matrix = self.reduce(matrix)
+            vector = self.reduce(vector)
+
+        solution[
+            self._basis_parameters["inner_dofs"]
+        ] += torch.linalg.solve(  # pylint: disable=not-callable
+            matrix, vector
+        )
+
+        return solution

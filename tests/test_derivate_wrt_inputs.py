@@ -1,5 +1,6 @@
 "Test derivate of NN w.r.t inputs." ""
 
+from typing import cast
 import torch
 import triangle as tr
 from tensordict import TensorDict
@@ -16,12 +17,22 @@ from torch_fem import (
 #     """Test the derivative of the neural network with respect to its inputs."""
 torch.set_default_dtype(torch.float64)
 
+
+class BoundaryConstrain(torch.nn.Module):
+    """Class to strongly apply bc"""
+
+    def forward(self, inputs):
+        """Boundary condition modifier function."""
+        inputs_x, inputs_y = torch.split(inputs, 1, dim=-1)
+        return inputs_x * (inputs_x - 1) * inputs_y * (inputs_y - 1)
+
+
 neural_network = NeuralNetwork(
     input_dimension=2,
     output_dimension=1,
     nb_hidden_layers=4,
     neurons_per_layers=25,
-    boundary_condition_modifier=lambda x: 1,
+    boundary_condition_modifier=BoundaryConstrain(),
 )
 
 mesh_data = tr.triangulate(
@@ -39,7 +50,7 @@ integration_points = basis.integration_points
 
 x, y = torch.split(integration_points, 1, dim=-1)
 
-gradients = neural_network.gradient(integration_points)
+gradients = cast(torch.Tensor, neural_network.gradient(integration_points))
 
 STEP_SIZE = 2**-9
 

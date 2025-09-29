@@ -44,7 +44,7 @@ N_E = c4e4p.size(0)
 cmp = plt.get_cmap("hsv", N_E)
 
 for i, c4e in enumerate(c4e4p):
-    triangle = c4e.numpy(force=True)
+    triangle = torch.Tensor.numpy(c4e, force=True)
     poly = PolyCollection(triangle, facecolors="none", edgecolors=cmp(i), linewidths=1)
     ax.add_collection(poly)
 

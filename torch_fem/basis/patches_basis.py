@@ -1,7 +1,6 @@
 """Basis class for Patches"""
 
 import torch
-import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 from .abstract_basis import AbstractBasis
@@ -98,7 +97,7 @@ class PatchesBasis(AbstractBasis):
         return mesh["cells", "coordinates"].mT @ element.barycentric_grad
 
     def reduce(self, tensor: torch.Tensor):
-        idx = self.basis_parameters["inner_dofs"]
+        idx = self._basis_parameters["inner_dofs"]
         return (
             tensor[self.patches_idx.squeeze(), idx, idx]
             if tensor.size(-1) != 1

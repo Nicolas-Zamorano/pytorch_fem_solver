@@ -157,13 +157,9 @@ A = V.integrate_bilinear_form(a)
 
 b = V.integrate_linear_form(l)
 
-A_reduced = V.reduce(A)
+u_h = V.solution_tensor()
 
-b_reduced = V.reduce(b)
-
-u_h = torch.zeros(V.basis_parameters["linear_form_shape"])
-
-u_h[V.basis_parameters["inner_dofs"]] = torch.linalg.solve(A_reduced, b_reduced)
+u_h = V.solve(A, u_h, b)
 
 I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 

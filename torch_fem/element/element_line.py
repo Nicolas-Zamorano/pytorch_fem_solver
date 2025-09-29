@@ -60,10 +60,12 @@ class ElementLine(AbstractElement):
 
     def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
 
-        det_map_jacobian: torch.Tensor = torch.linalg.vector_norm(
-            map_jacobian,
-            dim=-2,
-            keepdim=True,
+        det_map_jacobian: torch.Tensor = (
+            torch.linalg.vector_norm(  # pylint: disable=not-callable
+                map_jacobian,
+                dim=-2,
+                keepdim=True,
+            )
         )
 
         inv_map_jacobian = 1.0 / det_map_jacobian

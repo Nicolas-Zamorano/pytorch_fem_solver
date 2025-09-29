@@ -74,10 +74,9 @@ def residual(basis, gradient):
     return rhs_value * v - (v_grad @ grad.mT)
 
 
-def gram_matrix(basis):
+def gram_matrix(basis: Basis):
     """Gram matrix of the basis functions."""
     v_grad = basis.v_grad
-
     return v_grad @ v_grad.mT
 
 
@@ -103,14 +102,14 @@ def exact_dy(x, y):
     return math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
 
 
-def h1_exact(basis):
+def h1_exact(basis: Basis) -> torch.Tensor:
     """H1 norm of the exact solution."""
     x, y = torch.split(basis.integration_points, 1, dim=-1)
 
     return exact(x, y) ** 2 + exact_dx(x, y) ** 2 + exact_dy(x, y) ** 2
 
 
-def h1_norm(basis, neural_network, gradient):
+def h1_norm(basis, neural_network, gradient) -> torch.Tensor:
     """H1 norm of the neural network solution."""
     integration_points = basis.integration_points
     x, y = torch.split(integration_points, 1, dim=-1)

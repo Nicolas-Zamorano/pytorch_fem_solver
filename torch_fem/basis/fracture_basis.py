@@ -219,7 +219,7 @@ class FractureBasis(AbstractBasis):
             nb_fractures = self.mesh.batch_size()[0]
             nb_vertices_4_cells = self.mesh["cells", "vertices"].shape[-2]
             # vertices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
-            vertices_4_cells_4_interior_edges = self.global_dofs4elements.reshape(
+            vertices_4_cells_4_interior_edges = self._global_dofs4elements.reshape(
                 nb_fractures, -1, 1, nb_vertices_4_cells
             )
 
@@ -248,15 +248,15 @@ class FractureBasis(AbstractBasis):
             # For computing the inverse mapping of the integrations points of the interior edges,
             # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
 
-            new_integrations_points = self.element.compute_inverse_map(
+            new_integrations_points = self._element.compute_inverse_map(
                 coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
             )
 
-            bar_coords = self.element.compute_barycentric_coordinates(
+            bar_coords = self._element.compute_barycentric_coordinates(
                 new_integrations_points.squeeze(-3)
             )
 
-            v, v_grad = self.element.compute_shape_functions(
+            v, v_grad = self._element.compute_shape_functions(
                 bar_coords, inv_map_jacobian
             )
 

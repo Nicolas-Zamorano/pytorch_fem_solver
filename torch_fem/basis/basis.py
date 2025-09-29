@@ -1,8 +1,7 @@
 """Class for standard basis representation"""
 
-from typing import Optional
+from typing import Optional, Callable, Tuple
 import torch
-import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 from .interior_edges_basis import InteriorEdgesBasis
@@ -96,10 +95,18 @@ class Basis(AbstractBasis):
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
         )
 
-    def interpolate(self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None):
+    def interpolate(
+        self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None
+    ) -> (
+        Tuple[torch.Tensor, torch.Tensor]
+        | Tuple[
+            Callable[[Callable[[torch.Tensor], torch.Tensor]], torch.Tensor],
+            Callable[[Callable[[torch.Tensor], torch.Tensor]], torch.Tensor],
+        ]
+    ):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            vertices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
+            vertices_4_cells_4_interior_edges = self._global_dofs4elements.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
@@ -117,7 +124,7 @@ class Basis(AbstractBasis):
             ).unsqueeze(-3)
 
             inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
-                self.inv_map_jacobian, cells_4_interior_edges
+                self._inv_map_jacobian, cells_4_interior_edges
             )
 
             integration_points = basis.integration_points.unsqueeze(-3)
@@ -125,15 +132,15 @@ class Basis(AbstractBasis):
             # For computing the inverse mapping of the integrations points of the interior edges,
             # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
 
-            new_integrations_points = self.element.compute_inverse_map(
+            new_integrations_points = self._element.compute_inverse_map(
                 coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
             )
 
-            bar_coords = self.element.compute_barycentric_coordinates(
+            bar_coords = self._element.compute_barycentric_coordinates(
                 new_integrations_points.squeeze(-3)
             )
 
-            v, v_grad = self.element.compute_shape_functions(
+            v, v_grad = self._element.compute_shape_functions(
                 bar_coords, inv_map_jacobian
             )
         else:
@@ -151,18 +158,20 @@ class Basis(AbstractBasis):
 
             return interpolation, interpolation_grad
 
-        else:
+        nodes = self._coords4global_dofs
 
-            nodes = self.coords4global_dofs
+        def interpolator(
+            function: Callable[[torch.Tensor], torch.Tensor],
+        ) -> torch.Tensor:
+            return (function(nodes)[vertices_4_cells_4_interior_edges] * v).sum(
+                -2, keepdim=True
+            )
 
-            def interpolator(function):
-                return (function(nodes)[vertices_4_cells_4_interior_edges] * v).sum(
-                    -2, keepdim=True
-                )
+        def interpolator_grad(
+            function: Callable[[torch.Tensor], torch.Tensor],
+        ) -> torch.Tensor:
+            return (function(nodes)[vertices_4_cells_4_interior_edges] * v_grad).sum(
+                -2, keepdim=True
+            )
 
-            def interpolator_grad(function):
-                return (
-                    function(nodes)[vertices_4_cells_4_interior_edges] * v_grad
-                ).sum(-2, keepdim=True)
-
-            return interpolator, interpolator_grad
+        return interpolator, interpolator_grad

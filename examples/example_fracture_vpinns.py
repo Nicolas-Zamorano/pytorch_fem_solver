@@ -127,7 +127,7 @@ gram_matrix_inverse = torch.inverse(
 Ih, Ih_grad = discrete_basis.interpolate(discrete_basis)
 
 
-def interpolation_nn(_):
+def interpolation_nn():
     """Interpolation of the Neural Network in the FEM basis."""
     return Ih(NN)
 
@@ -323,9 +323,12 @@ u_NN_fracture_1, u_NN_fracture_2 = torch.unbind(u_NN_local, dim=0)
 
 ### --- TRACE PARAMETERS --- ###
 
-trace_nodes = discrete_basis.global_triangulation["vertices_3D"][
-    discrete_basis.global_triangulation["traces__global_vertices_idx"], 1
-].numpy(force=True)
+trace_nodes = torch.Tensor.numpy(
+    discrete_basis.global_triangulation["vertices_3D"][
+        discrete_basis.global_triangulation["traces__global_vertices_idx"], 1
+    ],
+    force=True,
+)
 
 local_vertices_3D = discrete_basis.global_triangulation["vertices_3D"][
     discrete_basis.global_triangulation["global2local_idx"].reshape(2, -1)
