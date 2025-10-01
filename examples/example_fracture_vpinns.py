@@ -60,7 +60,7 @@ fracture_2d_data = {
     "segments": [[0, 2], [0, 4], [1, 3], [1, 4], [2, 5], [3, 5], [4, 5]],
 }
 
-fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsena" + str(0.5**2))
+fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsena" + str(0.5**8))
 
 fractures_triangulation = [fracture_triangulation, fracture_triangulation]
 

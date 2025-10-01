@@ -21,7 +21,7 @@ class FractureBasis(AbstractBasis):
             -3
         ).unsqueeze(-3)
 
-        self.inv_map_jacobian = self.inv_map_jacobian @ mesh[
+        self._inv_map_jacobian = self._inv_map_jacobian @ mesh[
             "inv_jacobian_fracture_map"
         ].unsqueeze(-3).unsqueeze(-3)
 
@@ -165,9 +165,7 @@ class FractureBasis(AbstractBasis):
         ]
 
         rows_idx = (
-            self.global_triangulation["triangles"]
-            .repeat_interleave(nb_local_dofs, dim=-1)
-            .reshape(-1)
+            self.global_triangulation["triangles"].repeat(1, nb_local_dofs).reshape(-1)
         )
         cols_idx = (
             self.global_triangulation["triangles"]
@@ -177,16 +175,14 @@ class FractureBasis(AbstractBasis):
 
         form_idx = self.global_triangulation["triangles"].reshape(-1)
 
-        basis_parameters = tensordict.TensorDict(
-            {
-                "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
-                "bilinear_form_idx": (rows_idx, cols_idx),
-                "linear_form_shape": (nb_global_dofs, 1),
-                "linear_form_idx": (form_idx,),
-                "inner_dofs": inner_dofs,
-                "nb_dofs": nb_global_dofs,
-            }
-        )
+        basis_parameters = {
+            "bilinear_form_shape": (nb_global_dofs, nb_global_dofs),
+            "bilinear_form_idx": (rows_idx, cols_idx),
+            "linear_form_shape": (nb_global_dofs, 1),
+            "linear_form_idx": (form_idx,),
+            "inner_dofs": inner_dofs,
+            "nb_dofs": nb_global_dofs,
+        }
 
         return basis_parameters
 
@@ -217,7 +213,7 @@ class FractureBasis(AbstractBasis):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
             nb_fractures = self.mesh.batch_size()[0]
-            nb_vertices_4_cells = self.mesh["cells", "vertices"].shape[-2]
+            nb_vertices_4_cells = self.mesh["cells", "vertices"].shape[-1]
             # vertices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
             vertices_4_cells_4_interior_edges = self._global_dofs4elements.reshape(
                 nb_fractures, -1, 1, nb_vertices_4_cells
@@ -240,7 +236,7 @@ class FractureBasis(AbstractBasis):
             ).unsqueeze(-3)
 
             inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
-                self.inv_map_jacobian, cells_4_interior_edges
+                self._inv_map_jacobian, cells_4_interior_edges
             )
 
             integration_points = basis.integration_points.unsqueeze(-3)
@@ -288,7 +284,10 @@ class FractureBasis(AbstractBasis):
 
             def interpolator_grad(function):
                 return (
-                    function(nodes)[vertices_4_cells_4_interior_edges] * v_grad
+                    self.mesh.apply_mask(
+                        function(nodes), [vertices_4_cells_4_interior_edges]
+                    )
+                    * v_grad
                 ).sum(-2, keepdim=True)
 
             return interpolator, interpolator_grad
