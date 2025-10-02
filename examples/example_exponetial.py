@@ -1,6 +1,7 @@
 "# Example of solving a Poisson equation using a neural network and FEM basis functions."
 
 import matplotlib.pyplot as plt
+from matplotlib.collections import PolyCollection
 import torch
 import triangle as tr
 
@@ -45,12 +46,12 @@ NN = NeuralNetwork(
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**9),
+    "Dqena" + str(0.5**8),
 )
 
 mesh = MeshTri(triangulation=mesh_data)
 
-elements = ElementTri(polynomial_order=1, integration_order=2)
+elements = ElementTri(polynomial_order=1, integration_order=4)
 
 discrete_basis = Basis(mesh, elements)
 
@@ -60,7 +61,7 @@ V_edges = InteriorEdgesBasis(mesh, elements_1D)
 
 _, interpolator_to_edges_grad = discrete_basis.interpolate(V_edges)
 
-h_T = discrete_basis.mesh["cells", "length"]
+h_T = discrete_basis.mesh["cells", "length"].reshape(-1, 1, 3, 1)
 h_E = discrete_basis.mesh["interior_edges", "length"].unsqueeze(-2)
 n_E = discrete_basis.mesh["interior_edges", "normals"].unsqueeze(-2)
 
@@ -251,12 +252,12 @@ model = Model(
     training_step=training_step,
     epochs=8000,
     optimizer=torch.optim.Adam,
-    optimizer_kwargs={"lr": 0.005},
+    optimizer_kwargs={"lr": 0.001},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.99**100},
     use_early_stopping=True,
     early_stopping_patience=50,
-    min_delta=1e-12,
+    min_delta=1e-16,
 )
 
 
@@ -266,42 +267,40 @@ model.train()
 
 model.load_optimal_parameters()
 
-linspace = torch.linspace(0, 1, 100)
-
-X, Y = torch.stack(
-    torch.meshgrid(
-        linspace,
-        linspace,
-        indexing="ij",
-    )
+h1_error_plot = (
+    torch.sqrt(discrete_basis.integrate_functional(h1_norm, NN, NN.gradient))
+    .squeeze(-1)
+    .numpy(force=True)
 )
-
-plot_points = torch.stack([X, Y], dim=-1)
-
-with torch.no_grad():
-    Z = abs(exact(plot_points) - NN(plot_points)).squeeze(-1)
 
 figure_solution, axis_solution = plt.subplots()
-contour_solution = axis_solution.contourf(
-    X.numpy(force=True),
-    Y.numpy(force=True),
-    Z.numpy(force=True),
-    levels=100,
+
+c4e = torch.Tensor.numpy(discrete_basis.mesh["cells", "coordinates"], force=True)
+
+collection = PolyCollection(
+    c4e,  # type: ignore
+    array=h1_error_plot,
     cmap="viridis",
+    edgecolors="black",
+    linewidths=0.2,
 )
-figure_solution.colorbar(contour_solution, ax=axis_solution, orientation="vertical")
+
+axis_solution.add_collection(collection)
+axis_solution.autoscale_view()
 
 axis_solution.set_xlabel("x")
 axis_solution.set_ylabel("y")
-axis_solution.set_title(r"$|u-u_\theta|$")
-plt.tight_layout()
+color_bar = plt.colorbar(collection, ax=axis_solution)
+color_bar.set_label(r"$H^1$ error")
+
+figure_solution.tight_layout()
 
 model.plot_training_history(
     plot_names={
         "loss": r"$\mathcal{L}(u_{\theta})$",
         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-        "title": "RVPINNs",
+        "title": "RVPINNs exponential",
     }
 )
 

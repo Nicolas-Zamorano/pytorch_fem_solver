@@ -27,39 +27,7 @@ torch.set_default_dtype(torch.float64)
 
 MESH_SIZE = 0.5
 
-EXPONENT = 10
-
-# fracture_2d_data = {"vertices" : [[-1., 0.],
-#                                   [ 1., 0.],
-#                                   [-1., 1.],
-#                                   [ 1., 1.],
-#                                   [ 0., 0.],
-#                                   [ 0., .5],
-#                                   [ 0., 1.]],
-#                     "segments" : [[0, 2],
-#                                   [0, 4],
-#                                   [1, 3],
-#                                   [1, 4],
-#                                   [2, 6],
-#                                   [3, 6],
-#                                   [4, 5],
-#                                   [5, 6]],
-#                     # "segment_markers" : [[2],
-#                     #                      [3],
-#                     #                      [3],
-#                     #                      [3],
-#                     #                      [3],
-#                     #                      [3],
-#                     #                      [0],
-#                     #                      [0]]
-#                     # "vertex_markers" : [[2],
-#                     #                     [3],
-#                     #                     [2],
-#                     #                     [3],
-#                     #                     [0],
-#                     #                     [0],
-#                     #                     [0]],
-#                     }
+EXPONENT = 8
 
 fracture_2d_data = {
     "vertices": [
@@ -71,7 +39,6 @@ fracture_2d_data = {
         [0.0, 1.0],
     ],
     "segments": [[0, 2], [0, 4], [1, 3], [1, 4], [2, 5], [3, 5], [4, 5]],
-    "segment_markers": [[1], [1], [1], [1], [1], [1], [0]],
 }
 
 fracture_triangulation = tr.triangulate(
@@ -92,7 +59,7 @@ mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
-elements = ElementTri(polynomial_order=1, integration_order=2)
+elements = ElementTri(polynomial_order=1, integration_order=4)
 
 V = FractureBasis(mesh, elements)
 

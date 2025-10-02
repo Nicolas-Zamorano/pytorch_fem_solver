@@ -4,6 +4,7 @@ import math
 
 import triangle as tr
 import matplotlib.pyplot as plt
+from matplotlib.collections import PolyCollection
 import torch
 
 from torch_fem import (
@@ -33,7 +34,7 @@ class BoundaryConstrain(torch.nn.Module):
 NN = NeuralNetwork(
     input_dimension=2,
     output_dimension=1,
-    nb_hidden_layers=4,
+    nb_hidden_layers=5,
     neurons_per_layers=25,
     boundary_condition_modifier=BoundaryConstrain(),
 )
@@ -90,7 +91,7 @@ def rhs_term(basis, triangle_size, nn):
     """Residual term for the right-hand side"""
     x, y = torch.split(basis.integration_points, 1, dim=-1)
 
-    return triangle_size**2 * (rhs(x, y) + interpolators_grad(nn))
+    return triangle_size**2 * (rhs(x, y) + nn.laplacian(basis.integration_points)) ** 2
 
 
 # ---------------------- Error Parameters ----------------------#
@@ -136,12 +137,18 @@ exact_norm = torch.sqrt(torch.sum(V.integrate_functional(h1_exact)))
 
 # ---------------------- Training ----------------------#
 
+jump_history = []
+bulk_history = []
+
 
 def training_step(neural_network):
     """Training step for the neural network."""
-    loss_value = (V.integrate_functional(rhs_term, h_T, neural_network) ** 2).sum() + (
-        V_edges.integrate_functional(jump, n_E, h_E, neural_network) ** 2
-    ).sum()
+
+    jump_term = V_edges.integrate_functional(jump, n_E, h_E, neural_network)
+
+    bulk_term = V.integrate_functional(rhs_term, h_T, neural_network)
+
+    loss_value = torch.sum(bulk_term) + torch.sum(jump_term)
 
     relative_loss = torch.sqrt(loss_value) / exact_norm**2
 
@@ -151,20 +158,23 @@ def training_step(neural_network):
         )
     )
 
+    jump_history.append(torch.sqrt(torch.sum(jump_term)).item())
+    bulk_history.append(torch.sqrt(torch.sum(bulk_term)).item())
+
     return loss_value, relative_loss, h1_error / exact_norm
 
 
 model = Model(
     neural_network=NN,
     training_step=training_step,
-    epochs=15000,
+    epochs=2000,
     optimizer=torch.optim.Adam,
     optimizer_kwargs={"lr": 0.001},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.9},
     use_early_stopping=False,
-    early_stopping_patience=100,
-    min_delta=1e-12,
+    early_stopping_patience=25,
+    min_delta=1e-16,
 )
 
 model.train()
@@ -173,35 +183,33 @@ model.train()
 
 model.load_optimal_parameters()
 
-linspace = torch.linspace(0, 1, 100)
-
-X, Y = torch.stack(
-    torch.meshgrid(
-        linspace,
-        linspace,
-        indexing="ij",
-    )
+h1_error_plot = (
+    torch.sqrt(V.integrate_functional(h1_norm, NN, NN.gradient))
+    .squeeze(-1)
+    .numpy(force=True)
 )
-
-plot_points = torch.stack([X, Y], dim=-1)
-
-with torch.no_grad():
-    Z = abs(exact(X, Y) - NN(plot_points).squeeze(-1))
 
 figure_solution, axis_solution = plt.subplots()
-contour_solution = axis_solution.contourf(
-    X.numpy(force=True),
-    Y.numpy(force=True),
-    Z.numpy(force=True),
-    levels=100,
+
+c4e = torch.Tensor.numpy(V.mesh["cells", "coordinates"], force=True)
+
+collection = PolyCollection(
+    c4e,  # type: ignore
+    array=h1_error_plot,
     cmap="viridis",
+    edgecolors="black",
+    linewidths=0.2,
 )
-figure_solution.colorbar(contour_solution, ax=axis_solution, orientation="vertical")
+
+axis_solution.add_collection(collection)
+axis_solution.autoscale_view()
 
 axis_solution.set_xlabel("x")
 axis_solution.set_ylabel("y")
-axis_solution.set_title(r"$|u-u_\theta|$")
-plt.tight_layout()
+color_bar = plt.colorbar(collection, ax=axis_solution)
+color_bar.set_label(r"$H^1$ error")
+
+figure_solution.tight_layout()
 
 model.plot_training_history(
     plot_names={
@@ -211,5 +219,12 @@ model.plot_training_history(
         "title": "only a posteriori estimator",
     }
 )
+
+fig_errors, ax_errors = plt.subplots()
+ax_errors.semilogy(jump_history, label="Jump term")
+ax_errors.semilogy(bulk_history, label="Bulk term")
+ax_errors.set_xlabel("Epochs")
+ax_errors.set_ylabel("Error terms")
+ax_errors.legend()
 
 plt.show()

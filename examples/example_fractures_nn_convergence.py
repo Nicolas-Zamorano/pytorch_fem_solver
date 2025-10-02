@@ -36,8 +36,8 @@ class BoundaryConstrain(torch.nn.Module):
 NN = FeedForwardNeuralNetwork(
     input_dimension=3,
     output_dimension=1,
-    nb_hidden_layers=4,
-    neurons_per_layers=15,
+    nb_hidden_layers=5,
+    neurons_per_layers=25,
     activation_function=torch.nn.ReLU(),
     boundary_condition_modifier=BoundaryConstrain(),
 )
@@ -269,12 +269,12 @@ model = Model(
     training_step=training_step,
     epochs=1,
     optimizer=torch.optim.Adam,
-    optimizer_kwargs={"lr": 0.2e-3},
+    optimizer_kwargs={"lr": 0.1e-3},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
     # scheduler_kwargs={"gamma": 0.99**100},
     use_early_stopping=True,
-    early_stopping_patience=50,
-    min_delta=1e-12,
+    early_stopping_patience=25,
+    min_delta=1e-16,
 )
 
 model.train()

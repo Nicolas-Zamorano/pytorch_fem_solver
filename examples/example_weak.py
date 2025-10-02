@@ -5,6 +5,7 @@ import math
 import matplotlib.pyplot as plt
 import torch
 import triangle as tr
+from matplotlib.collections import PolyCollection
 
 from torch_fem import (
     MeshTri,
@@ -16,7 +17,7 @@ from torch_fem import (
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()
-torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float32)
 
 
 # ---------------------- Neural Network Parameters ----------------------#
@@ -35,7 +36,7 @@ NN = FeedForwardNeuralNetwork(
     input_dimension=2,
     output_dimension=1,
     nb_hidden_layers=4,
-    neurons_per_layers=25,
+    neurons_per_layers=15,
     boundary_condition_modifier=BoundaryConstrain(),
 )
 
@@ -43,12 +44,12 @@ NN = FeedForwardNeuralNetwork(
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**1),
+    "Dqena" + str(0.5**8),
 )
 
 mesh = MeshTri(triangulation=mesh_data)
 
-elements = ElementTri(polynomial_order=1, integration_order=2)
+elements = ElementTri(polynomial_order=1, integration_order=4)
 
 discrete_basis = Basis(mesh, elements)
 
@@ -159,9 +160,9 @@ model = Model(
     optimizer_kwargs={"lr": 0.001},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.99**100},
-    use_early_stopping=True,
-    early_stopping_patience=50,
-    min_delta=1e-12,
+    use_early_stopping=False,
+    early_stopping_patience=5,
+    min_delta=1e-6,
 )
 
 
@@ -171,42 +172,40 @@ model.train()
 
 model.load_optimal_parameters()
 
-linspace = torch.linspace(0, 1, 100)
-
-X, Y = torch.stack(
-    torch.meshgrid(
-        linspace,
-        linspace,
-        indexing="ij",
-    )
+h1_error_plot = (
+    torch.sqrt(discrete_basis.integrate_functional(h1_norm, NN, NN.gradient))
+    .squeeze(-1)
+    .numpy(force=True)
 )
-
-plot_points = torch.stack([X, Y], dim=-1)
-
-with torch.no_grad():
-    Z = abs(exact(X, Y) - NN(plot_points).squeeze(-1))
 
 figure_solution, axis_solution = plt.subplots()
-contour_solution = axis_solution.contourf(
-    X.numpy(force=True),
-    Y.numpy(force=True),
-    Z.numpy(force=True),
-    levels=100,
+
+c4e = torch.Tensor.numpy(discrete_basis.mesh["cells", "coordinates"], force=True)
+
+collection = PolyCollection(
+    c4e,  # type: ignore
+    array=h1_error_plot,
     cmap="viridis",
+    edgecolors="black",
+    linewidths=0.2,
 )
-figure_solution.colorbar(contour_solution, ax=axis_solution, orientation="vertical")
+
+axis_solution.add_collection(collection)
+axis_solution.autoscale_view()
 
 axis_solution.set_xlabel("x")
 axis_solution.set_ylabel("y")
-axis_solution.set_title(r"$|u-u_\theta|$")
-plt.tight_layout()
+color_bar = plt.colorbar(collection, ax=axis_solution)
+color_bar.set_label(r"$H^1$ error")
+
+figure_solution.tight_layout()
 
 model.plot_training_history(
     plot_names={
         "loss": r"$\mathcal{L}(u_{\theta})$",
         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-        "title": "RVPINNs",
+        "title": "MF-RVPINNs",
     }
 )
 

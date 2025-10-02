@@ -267,5 +267,4 @@ model.plot_training_history(
     }
 )
 
-
 plt.show()
