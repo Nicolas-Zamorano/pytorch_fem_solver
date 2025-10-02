@@ -99,34 +99,40 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
 
         return gradients
 
-    # @torch.jit.export
-    # def laplacian(self, inputs: torch.Tensor) -> torch.Tensor:
-    #     """Compute the laplacian of the neural network with respect to its inputs."""
-    #     inputs.requires_grad_(True)
-    #     output = self.forward(inputs)
+    @torch.jit.export
+    def laplacian(self, inputs: torch.Tensor) -> torch.Tensor:
+        """Compute the laplacian of the neural network with respect to its inputs."""
+        inputs.requires_grad_(True)
+        output = self.forward(inputs)
 
-    #     grad_outputs: List[Optional[torch.Tensor]] = [torch.ones_like(output)]
+        grad_outputs: List[Optional[torch.Tensor]] = [torch.ones_like(output)]
 
-    #     gradients = torch.autograd.grad(
-    #         outputs=[output],
-    #         inputs=[inputs],
-    #         grad_outputs=grad_outputs,
-    #         retain_graph=True,
-    #         create_graph=True,
-    #     )[0]
+        gradients: Optional[torch.Tensor] = torch.autograd.grad(
+            outputs=[output],
+            inputs=[inputs],
+            grad_outputs=grad_outputs,  # type: ignore
+            retain_graph=True,
+            create_graph=True,
+        )[0]
 
-    #     laplacian = torch.zeros_like(output)
+        assert gradients is not None
 
-    #     for i in range(inputs.size(-1)):
-    #         gradient = gradients.index_select(-1, torch.tensor([i]))
-    #         grad_outputs: List[Optional[torch.Tensor]] = [torch.ones_like(gradient)]
-    #         grad2 = torch.autograd.grad(
-    #             [gradient],
-    #             [inputs],
-    #             grad_outputs=grad_outputs,
-    #             create_graph=True,
-    #             retain_graph=True,
-    #         )[0][..., i : i + 1]
-    #         laplacian += grad2
+        laplacian = torch.zeros_like(output)
 
-    #     return laplacian
+        for i in range(inputs.shape[-1]):
+
+            gradient: torch.Tensor = gradients[..., i]
+            gradient_outputs: List[Optional[torch.Tensor]] = [
+                torch.ones_like(output).squeeze(-1)
+            ]
+            grad2 = torch.autograd.grad(
+                [gradient],
+                [inputs],
+                grad_outputs=gradient_outputs,  # type: ignore
+                create_graph=True,
+                retain_graph=True,
+            )[0]
+            assert grad2 is not None
+            laplacian += grad2[..., i : i + 1]
+
+        return laplacian
