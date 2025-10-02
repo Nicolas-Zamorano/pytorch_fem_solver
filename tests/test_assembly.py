@@ -13,6 +13,8 @@ from tensordict import TensorDict
 
 from torch_fem import Basis, ElementTri, MeshTri
 
+# pyright: reportArgumentType=false
+
 
 def test_assembly():
     """Test the assembly of matrices and vectors against scikit-fem."""
@@ -106,3 +108,7 @@ def test_assembly():
     assert torch.isclose(matrix_error_norm, zero)
     assert torch.isclose(rhs_error_norm, zero)
     assert torch.isclose(functional_error_norm, zero)
+
+
+if __name__ == "__main__":
+    test_assembly()

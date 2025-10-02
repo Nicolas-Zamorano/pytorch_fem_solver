@@ -207,7 +207,7 @@ for i in range(11):
         triangulations=fractures_triangulation, fractures_3d_data=fractures_data
     )
 
-    elements = ElementTri(polynomial_order=1, integration_order=2)
+    elements = ElementTri(polynomial_order=1, integration_order=4)
 
     V = FractureBasis(mesh, elements)
 

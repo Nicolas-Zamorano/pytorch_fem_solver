@@ -18,7 +18,7 @@ pts = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
 segments = tr.convex_hull(pts)
 
 fracture_triangulation = tr.triangulate(
-    dict(vertices=pts, segments=segments), "pqsea" + str(MESH_SIZE ** (EXPONENT))
+    dict(vertices=pts, segments=segments), "pqsnea" + str(MESH_SIZE ** (EXPONENT))
 )
 
 

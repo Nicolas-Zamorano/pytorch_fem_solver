@@ -82,6 +82,8 @@ class AbstractBasis(abc.ABC):
 
         local_matrix = (function(self, *args, **kwargs) * self._dx).sum(-3)
 
+        xd = self._basis_parameters["bilinear_form_idx"]
+
         global_matrix.index_put_(
             self._basis_parameters["bilinear_form_idx"],
             self.reshape_for_assembly(local_matrix, "bilinear"),

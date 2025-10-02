@@ -9,6 +9,10 @@ import meshio
 
 from torch_fem import Basis, ElementLine, ElementTri, InteriorEdgesBasis, MeshTri
 
+# pyright: reportArgumentType=false
+# pyright: reportOptionalSubscript=false
+
+
 torch.set_default_dtype(torch.float64)
 
 mesh_data = tr.triangulate(

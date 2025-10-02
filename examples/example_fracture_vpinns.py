@@ -39,8 +39,8 @@ class BoundaryConstrain(torch.nn.Module):
 NN = FeedForwardNeuralNetwork(
     input_dimension=3,
     output_dimension=1,
-    nb_hidden_layers=4,
-    neurons_per_layers=15,
+    nb_hidden_layers=5,
+    neurons_per_layers=25,
     activation_function=torch.nn.ReLU(),
     boundary_condition_modifier=BoundaryConstrain(),
 )
@@ -60,7 +60,7 @@ fracture_2d_data = {
     "segments": [[0, 2], [0, 4], [1, 3], [1, 4], [2, 5], [3, 5], [4, 5]],
 }
 
-fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsena" + str(0.5**2))
+fracture_triangulation = tr.triangulate(fracture_2d_data, "pqsena" + str(0.5**8))
 
 fractures_triangulation = [fracture_triangulation, fracture_triangulation]
 
@@ -75,7 +75,7 @@ mesh = FracturesTri(
     triangulations=fractures_triangulation, fractures_3d_data=fractures_data
 )
 
-elements = ElementTri(polynomial_order=1, integration_order=2)
+elements = ElementTri(polynomial_order=1, integration_order=4)
 
 discrete_basis = FractureBasis(mesh, elements)
 
@@ -222,8 +222,6 @@ def h1_exact(basis):
 
     return exact_value**2 + exact_dx_value**2 + exact_dy_value**2 + exact_dz_value**2
 
-    # return exact_value**2
-
 
 def h1_norm(basis, solution, solution_grad):
     """H1 norm of the Neural Network solution for fracture problem."""
@@ -248,8 +246,6 @@ def h1_norm(basis, solution, solution_grad):
     )
 
     return h1_0_error + l2_error
-
-    # return L2_error
 
 
 exact_norm = torch.sqrt(torch.sum(discrete_basis.integrate_functional(h1_exact)))
@@ -289,12 +285,12 @@ model = Model(
     training_step=training_step,
     epochs=1,
     optimizer=torch.optim.Adam,
-    optimizer_kwargs={"lr": 0.2e-3},
-    learning_rate_scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
+    optimizer_kwargs={"lr": 0.1e-3},
+    # learning_rate_scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
     # scheduler_kwargs={"gamma": 0.99**100},
     use_early_stopping=True,
     early_stopping_patience=50,
-    min_delta=1e-12,
+    min_delta=1e-16,
 )
 
 model.train()
@@ -630,7 +626,7 @@ fig_error.suptitle("Relative error for FEM solution", fontsize=14)
 # Fracture 1
 face_colors_1 = cmap(norm(H1_error_fracture_1))
 collection1 = PolyCollection(
-    c4e_fracture_1, facecolors=face_colors_1, edgecolors="black", linewidths=0.2
+    c4e_fracture_1, facecolors=face_colors_1, edgecolors="black", linewidths=0.2  # type: ignore
 )
 ax1 = axes[0]
 ax1.add_collection(collection1)
@@ -643,7 +639,7 @@ ax1.set_ylim([0, 1])
 # Fracture 2
 face_colors_2 = cmap(norm(H1_error_fracture_2))
 collection2 = PolyCollection(
-    c4e_fracture_2, facecolors=face_colors_2, edgecolors="black", linewidths=0.2
+    c4e_fracture_2, facecolors=face_colors_2, edgecolors="black", linewidths=0.2  # type: ignore
 )
 ax2 = axes[1]
 ax2.add_collection(collection2)
