@@ -4,8 +4,7 @@ import abc
 from typing import Tuple, Any
 import torch
 import tensordict
-
-torch.set_default_dtype(torch.float64)
+from numpy import int32
 
 
 class AbstractMesh(abc.ABC):
@@ -49,7 +48,14 @@ class AbstractMesh(abc.ABC):
         for key, value in mesh_dict.items():
             if key in key_map:
                 subname, new_key = key_map[key]
-                sub_dictionaries[subname][new_key] = value
+                if value.dtype == int32:
+                    sub_dictionaries[subname][new_key] = torch.tensor(
+                        value, dtype=torch.int
+                    )
+                elif value.dtype == float:
+                    sub_dictionaries[subname][new_key] = torch.tensor(
+                        value, dtype=torch.get_default_dtype()
+                    )
 
         mesh_tensordict = tensordict.TensorDict(
             {
