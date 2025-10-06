@@ -1,7 +1,7 @@
 """Class for basis representation on interior edges"""
 
+from typing import Callable, Any, Optional
 import torch
-import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 from .abstract_basis import AbstractBasis

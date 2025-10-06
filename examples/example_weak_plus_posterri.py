@@ -171,11 +171,15 @@ def training_step(neural_network):
         discrete_basis.integrate_linear_form(residual, neural_network)
     )
 
-    loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
-
     posteriori = (
-        discrete_basis.integrate_functional(rhs_term, h_T, neural_network) ** 2
-    ).sum() + (V_edges.integrate_functional(jump, n_E, h_E, neural_network) ** 2).sum()
+        discrete_basis.integrate_linear_form(rhs_term, h_T, neural_network) ** 2
+    ).sum() + (
+        V_edges.integrate_over_interior_edges(jump, n_E, h_E, neural_network) ** 2
+    ).sum()
+
+    residual_vector += posteriori
+
+    loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
 
     # loss_value = torch.sum(residual_vector**2) + posteriori
 
