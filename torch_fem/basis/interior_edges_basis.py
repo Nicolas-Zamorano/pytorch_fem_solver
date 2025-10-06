@@ -17,7 +17,6 @@ class InteriorEdgesBasis(AbstractBasis):
     ):
 
         if element.polynomial_order == 1:
-            ## WARNING !!!! THIS IS NOT CORRECT, NEED TO FIX
             coords_4_global_dofs = mesh["vertices", "coordinates"]
             global_dofs_4_elements = mesh["cells", "vertices"]
             nodes4boundary_dofs = mesh["vertices", "markers"]
@@ -68,3 +67,22 @@ class InteriorEdgesBasis(AbstractBasis):
         return (
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
         )
+
+    def integrate_over_interior_edges(
+        self,
+        function: Callable[..., torch.Tensor],
+        *args: Optional[Any],
+        **kwargs: Optional[Any],
+    ) -> torch.Tensor:
+        """Integrate over the interior_edges"""
+        integral_value = torch.zeros(self._basis_parameters["linear_form_shape"])
+
+        integrand_value = (function(self, *args, **kwargs) * self._dx).sum(-3)
+
+        integral_value.index_put_(
+            self.mesh["interior_edges", "vertices"],
+            self.reshape_for_assembly(integrand_value, "linear"),
+            accumulate=True,
+        )
+
+        return integral_value
