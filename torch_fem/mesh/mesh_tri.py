@@ -8,5 +8,5 @@ class MeshTri(AbstractMesh):
     """Class for triangular mesh representation"""
 
     @property
-    def _edges_permutations(self):
+    def edges_permutations(self):
         return torch.tensor([[0, 1], [1, 2], [0, 2]])

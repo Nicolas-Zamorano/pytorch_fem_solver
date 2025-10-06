@@ -126,7 +126,7 @@ class MeshesTri(MeshTri):
         """Compute vertices for unique edges."""
 
         vertices_4_edges_4_mesh = triangulation["cells", "vertices"][
-            ..., self._edges_permutations
+            ..., self.edges_permutations
         ]
 
         vertices_4_unique_edges_list = []
@@ -167,7 +167,7 @@ class MeshesTri(MeshTri):
     def _compute_cells_min_length(self, triangulation: tensordict.TensorDict):
         """For each cells, compute the smaller length of the edges."""
         vertices_4_edges, _ = torch.sort(
-            triangulation["cells", "vertices"][..., self._edges_permutations], dim=-1
+            triangulation["cells", "vertices"][..., self.edges_permutations], dim=-1
         )
 
         coordinates_4_edges = self.apply_mask(

@@ -187,7 +187,7 @@ class AbstractMesh(abc.ABC):
         self, triangulation: tensordict.TensorDict
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute vertices for interior and boundary edges. boundary edges are identify for having
-        a one in the marker for edges. every other marker is threat as interior."""
+        a one in the marker for edges. every other marker is treated as interior."""
 
         vertices_4_edges = triangulation["edges", "vertices"]
         markers_4_edges = triangulation["edges", "markers"].squeeze(-1)
@@ -288,7 +288,7 @@ class AbstractMesh(abc.ABC):
     ) -> torch.Tensor:
         """For each cells, compute the smaller length of the edges."""
         vertices_4_edges, _ = torch.sort(
-            triangulation["cells", "vertices"][..., self._edges_permutations], dim=-1
+            triangulation["cells", "vertices"][..., self.edges_permutations], dim=-1
         )
 
         coordinates_4_edges = self.compute_coordinates_4_cells(
@@ -313,7 +313,7 @@ class AbstractMesh(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def _edges_permutations(self) -> torch.Tensor:
+    def edges_permutations(self) -> torch.Tensor:
         """Return the local node vertices defining each edge of the element.
         the convection is the i-th node share numbering with the edge opposite to it."""
         raise NotImplementedError
