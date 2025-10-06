@@ -98,6 +98,9 @@ class AbstractMesh(abc.ABC):
         triangulation["interior_edges"] = interior_edges
         triangulation["boundary_edges"] = boundary_edges
         triangulation["cells", "length"] = cells_length
+        triangulation["edges", "coordinates"] = self.compute_coordinates_4_cells(
+            triangulation["vertices", "coordinates"], triangulation["edges", "vertices"]
+        )
 
         return triangulation
 
