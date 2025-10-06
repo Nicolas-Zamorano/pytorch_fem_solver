@@ -269,19 +269,29 @@ class AbstractMesh(abc.ABC):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute vertices for unique edges."""
 
+        raise NotImplementedError("current implementation does not work as expected")
+
         vertices_4_edges = triangulation["cells", "vertices"][
-            ..., self._edges_permutations
+            ..., self.edges_permutations
         ]
 
-        vertices_4_unique_edges, _, boundary_mask = torch.unique(
-            vertices_4_edges.reshape(-1, 2).mT,
-            return_inverse=True,
-            sorted=False,
-            return_counts=True,
-            dim=-1,
-        )
+        edges_flat = vertices_4_edges.reshape(-1, 2)
 
-        return vertices_4_unique_edges, boundary_mask
+        seen = set()
+        unique_edges = []
+        mask = torch.ones(edges_flat.shape[0])
+
+        for i, e in enumerate(edges_flat):
+            a, b = e.tolist()
+            key = tuple(sorted((a, b)))
+            if key not in seen:
+                seen.add(key)
+                unique_edges.append([a, b])
+                mask[i] = 1
+
+        unique_edges = torch.tensor(unique_edges)
+
+        return unique_edges, mask
 
     def _compute_cells_min_length(
         self, triangulation: tensordict.TensorDict
