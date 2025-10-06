@@ -21,7 +21,7 @@ def test_assembly():
     torch.set_default_dtype(torch.float64)
 
     mesh_data = tr.triangulate(
-        {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]}, "qea0.005"
+        {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]}, "qea0.5"
     )
 
     mesh_data_meshio = meshio.Mesh(
@@ -33,7 +33,7 @@ def test_assembly():
         t=mesh_data_meshio.cells_dict["triangle"].T,
     )
 
-    basis_scikit = skfem.Basis(mesh_scikit, skfem.ElementTriP1(), intorder=3)
+    basis_scikit = skfem.Basis(mesh_scikit, skfem.ElementTriP2(), intorder=4)
 
     @skfem.BilinearForm
     def bilinear_scikit(u, v, _):
@@ -59,9 +59,9 @@ def test_assembly():
         rhs_functional_scikit.elemental(basis_scikit)
     ).unsqueeze(-1)
 
-    mesh = MeshTri(triangulation=TensorDict(mesh_data))
+    mesh = MeshTri(mesh_data)
 
-    elements = ElementTri(polynomial_order=1, integration_order=3)
+    elements = ElementTri(polynomial_order=2, integration_order=4)
 
     basis_h = Basis(mesh, elements)
 
@@ -100,6 +100,7 @@ def test_assembly():
     matrix_error_norm = torch.norm(stiff_matrix - stiff_matrix_scikit) / torch.norm(
         stiff_matrix
     )
+
     rhs_error_norm = torch.norm(rhs_vector - rhs_vector_scikit) / torch.norm(rhs_vector)
     functional_error_norm = torch.norm(
         rhs_functional_scikit_val - rhs_functional

@@ -3,7 +3,6 @@
 import torch
 
 import matplotlib.pyplot as plt
-import tensordict as td
 import triangle as tr
 import numpy as np
 
@@ -13,12 +12,9 @@ MESH_SIZE = 0.5
 
 EXPONENT = 3
 
-pts = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
-
-segments = tr.convex_hull(pts)
-
-fracture_triangulation = tr.triangulate(
-    dict(vertices=pts, segments=segments), "pqsnea" + str(MESH_SIZE ** (EXPONENT))
+triangulation = tr.triangulate(
+    {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
+    "qa" + str(MESH_SIZE ** (EXPONENT)),
 )
 
 
@@ -46,6 +42,8 @@ def a(basis):
 
     return v_grad @ v_grad.mT
 
+
+elements = ElementTri(polynomial_order=2, integration_order=4)
 
 # ---------------------- Error Parameters ----------------------#
 
@@ -94,15 +92,11 @@ nb_dofs_list = []
 
 for i in range(11):
 
-    fracture_triangulation = tr.triangulate(
-        fracture_triangulation, "pqrsea" + str(MESH_SIZE ** (EXPONENT + i))
+    triangulation = tr.triangulate(
+        triangulation, "qra" + str(MESH_SIZE ** (EXPONENT + i))
     )
 
-    fracture_triangulation_torch = td.TensorDict((fracture_triangulation))
-
-    mesh = MeshTri(fracture_triangulation_torch)
-
-    elements = ElementTri(polynomial_order=1, integration_order=4)
+    mesh = MeshTri(triangulation)
 
     V = Basis(mesh, elements)
 
