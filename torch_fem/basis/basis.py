@@ -23,30 +23,59 @@ class Basis(AbstractBasis):
             global_dofs_4_elements = mesh["cells", "vertices"]
             nodes_4_boundary_dofs = mesh["vertices", "markers"]
 
-        # need to be refactored to account for deprecation of get_edges_idx function
-        # elif element.polynomial_order == 2:
+        elif element.polynomial_order == 2:
 
-        #     new_coords4dofs = (
-        #         mesh.coords4nodes[mesh.edges_parameters["nodes4unique_edges"]]
-        #     ).mean(-2)
-        #     new_nodes4dofs = (
-        #         mesh.edges_parameters["edges_idx"].reshape(
-        #             mesh.mesh_parameters["nb_simplex"], 3
-        #         )
-        #         + mesh.mesh_parameters["nb_nodes"]
-        #     )
-        #     new_nodes4boundary_dofs = (
-        #         mesh.edges_parameters["nodes_idx4boundary_edges"]
-        #         + mesh.mesh_parameters["nb_nodes"]
-        #     )
+            coordinates_4_vertices = mesh["vertices", "coordinates"]
 
-        #     coords4global_dofs = torch.cat([mesh.coords4nodes, new_coords4dofs], dim=-2)
-        #     global_dofs4elements = torch.cat(
-        #         [mesh.nodes4elements, new_nodes4dofs], dim=-1
-        #     )
-        #     nodes4boundary_dofs = torch.cat(
-        #         [mesh.nodes4boundary, new_nodes4boundary_dofs], dim=-1
-        #     )
+            coordinates_4_new_dofs = mesh["edges", "coordinates"].mean(-2)
+
+            vertices_4_cells = mesh["cells", "vertices"]
+            vertices_4_edges = mesh["edges", "vertices"]
+
+            new_dofs_enumeration = (
+                torch.arange(vertices_4_edges.shape[0])
+                + coordinates_4_vertices.shape[-2]
+            )
+
+            vertices_4_non_unique_edges = vertices_4_cells[..., mesh.edges_permutations]
+
+            vertices_4_non_unique_edges_sorted, _ = vertices_4_non_unique_edges.sort(
+                dim=-1
+            )
+            vertices_4_edges_sorted, _ = vertices_4_edges.sort(dim=-1)
+
+            vertices_offset = vertices_4_cells.max() + 1
+            vertices_keys = (
+                vertices_4_non_unique_edges_sorted[..., 0] * vertices_offset
+                + vertices_4_non_unique_edges_sorted[..., 1]
+            )
+            edge_keys = (
+                vertices_4_edges_sorted[:, 0] * vertices_offset
+                + vertices_4_edges_sorted[:, 1]
+            )
+
+            map_dict = -torch.ones(vertices_offset * vertices_offset, dtype=torch.int64)
+
+            map_dict[edge_keys] = torch.arange(
+                vertices_4_edges.shape[0],
+                dtype=torch.int64,
+            )
+
+            global_edge_ids = map_dict[vertices_keys]
+
+            vertices_4_new_dofs = new_dofs_enumeration[global_edge_ids]
+
+            new_markers_4_new_dofs = mesh["edges", "markers"]
+
+            coords_4_global_dofs = torch.cat(
+                [mesh["vertices", "coordinates"], coordinates_4_new_dofs], dim=-2
+            )
+            global_dofs_4_elements = torch.cat(
+                [mesh["cells", "vertices"], vertices_4_new_dofs], dim=-1
+            )
+            nodes_4_boundary_dofs = torch.cat(
+                [mesh["vertices", "markers"], new_markers_4_new_dofs], dim=-2
+            )
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
