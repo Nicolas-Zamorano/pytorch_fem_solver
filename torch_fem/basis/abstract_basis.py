@@ -82,8 +82,6 @@ class AbstractBasis(abc.ABC):
 
         local_matrix = (function(self, *args, **kwargs) * self._dx).sum(-3)
 
-        xd = self._basis_parameters["bilinear_form_idx"]
-
         global_matrix.index_put_(
             self._basis_parameters["bilinear_form_idx"],
             self.reshape_for_assembly(local_matrix, "bilinear"),
@@ -111,9 +109,12 @@ class AbstractBasis(abc.ABC):
 
         return integral_value
 
-    def reduce(self, tensor: torch.Tensor):
+    def reduce(
+        self, tensor: torch.Tensor, idx: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """Reduce a tensor to only include inner degrees of freedom"""
-        idx = self._basis_parameters["inner_dofs"]
+        if idx is None:
+            idx = self._basis_parameters["inner_dofs"]
         return tensor[idx, :][:, idx] if tensor.size(-1) != 1 else tensor[idx]
 
     @abc.abstractmethod
@@ -177,14 +178,17 @@ class AbstractBasis(abc.ABC):
     def solve(
         self,
         matrix: torch.Tensor,
-        solution: torch.Tensor,
         vector: torch.Tensor,
+        solution: Optional[torch.Tensor] = None,
         only_inner_dofs: bool = True,
     ) -> torch.Tensor:
         """Solve A*x=b, if only_inner_dofs used, solve reduced system."""
         if only_inner_dofs is True:
             matrix = self.reduce(matrix)
             vector = self.reduce(vector)
+
+        if solution is None:
+            solution = self.solution_tensor()
 
         solution[
             self._basis_parameters["inner_dofs"]
