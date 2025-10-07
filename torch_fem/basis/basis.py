@@ -124,6 +124,32 @@ class Basis(AbstractBasis):
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
         )
 
+    def compute_jump_integration_points(
+        self, basis: InteriorEdgesBasis
+    ) -> torch.Tensor:
+        """Compute integrations points for comptuing jump term"""
+
+        cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
+
+        coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
+            self.mesh["cells", "coordinates"][..., [0], :], cells_4_interior_edges
+        ).unsqueeze(-3)
+
+        inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
+            self._inv_map_jacobian, cells_4_interior_edges
+        )
+
+        integration_points = basis.integration_points.unsqueeze(-3)
+
+        # For computing the inverse mapping of the integrations points of the interior edges,
+        # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
+
+        new_integrations_points = self._element.compute_inverse_map(
+            coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
+        )
+
+        return new_integrations_points
+
     def interpolate(
         self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None
     ) -> (
