@@ -119,7 +119,7 @@ class Model:
                 "title": "Training history",
             }
 
-        _, axis_loss = plt.subplots()
+        figure_loss, axis_loss = plt.subplots()
         axis_loss.semilogy(self._loss_history, linestyle="-", label=plot_names["loss"])
         axis_loss.semilogy(
             self._validation_loss_history,
@@ -133,3 +133,4 @@ class Model:
         axis_loss.set_ylabel("Loss")
         axis_loss.set_title(plot_names["title"])
         axis_loss.legend()
+        figure_loss.tight_layout()
