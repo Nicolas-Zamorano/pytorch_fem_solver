@@ -16,7 +16,7 @@ class ElementLine(AbstractElement):
         return 2.0
 
     def compute_barycentric_coordinates(self, x: torch.Tensor):
-        return torch.concat([0.5 * (1.0 - x), 0.5 * (1.0 + x)], dim=-1)
+        return torch.stack([0.5 * (1.0 - x), 0.5 * (1.0 + x)], dim=-2)
 
     def _compute_gauss_values(self):
 
