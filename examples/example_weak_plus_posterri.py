@@ -68,22 +68,42 @@ n_E = discrete_basis.mesh["interior_edges", "normals"].unsqueeze(-2)
 # ---------------------- Residual Parameters ----------------------#
 
 
-def rhs(x, y):
+def rhs(x):
     """Right-hand side function."""
-    return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+    return (
+        2.0
+        * math.pi**2
+        * torch.sin(math.pi * x[..., [0]])
+        * torch.sin(math.pi * x[..., [1]])
+    )
 
 
 def residual(basis, neural_network):
     """Residual of the PDE."""
-    x, y = torch.split(basis.integration_points, 1, dim=-1)
-
     grad = neural_network.gradient(basis.integration_points)
 
     v = basis.v
     v_grad = basis.v_grad
-    rhs_value = rhs(x, y)
+    rhs_value = rhs(basis.integration_points)
 
     return rhs_value * v - (v_grad @ grad.mT)
+
+
+def residual_vpinns(
+    basis: Basis, neural_network: NeuralNetwork, triangle_size: torch.Tensor
+):
+    """VPINNs Residual of the PDE."""
+
+    grad = neural_network.gradient(basis.integration_points)
+    lap = neural_network.laplacian(basis.integration_points)
+
+    v = basis.v
+    v_grad = basis.v_grad
+    rhs_value = rhs(basis.integration_points)
+
+    return (
+        rhs_value * v - (v_grad @ grad.mT) + triangle_size**2 * (rhs_value + lap) ** 2
+    )
 
 
 def gram_matrix(basis):
@@ -108,12 +128,11 @@ def jump(_, normal_elements, edge_size, neural_network):
     )
 
 
-def rhs_term(basis, triangle_size, neural_network):
+def bulk(basis, triangle_size, neural_network):
     """Residual term for the right-hand side"""
-    x, y = torch.split(basis.integration_points, 1, dim=-1)
-
     return triangle_size**2 * (
-        rhs(x, y) + neural_network.laplacian(basis.integration_points)
+        rhs(basis.integration_points)
+        + neural_network.laplacian(basis.integration_points)
     )
 
 
@@ -164,26 +183,37 @@ exact_norm = torch.sqrt(torch.sum(discrete_basis.integrate_functional(h1_exact))
 
 # ---------------------- Training ----------------------#
 
+bulk_history = []
+jump_history = []
+residual_history = []
+
 
 def training_step(neural_network):
     """Training step for the neural network."""
-    residual_vector = discrete_basis.reduce(
+
+    bulk_value = (
+        discrete_basis.integrate_functional(bulk, h_T, neural_network) ** 2
+    ).sum()
+
+    jump_value = (
+        V_edges.integrate_functional(jump, n_E, h_E, neural_network) ** 2
+    ).sum()
+
+    residual_value = discrete_basis.reduce(
         discrete_basis.integrate_linear_form(residual, neural_network)
     )
 
-    posteriori = (
-        discrete_basis.integrate_linear_form(rhs_term, h_T, neural_network) ** 2
-    ).sum() + (
-        V_edges.integrate_over_interior_edges(jump, n_E, h_E, neural_network) ** 2
-    ).sum()
+    residual_vector = residual_value
 
-    residual_vector += posteriori
+    residual_matvec = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
 
-    loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
+    loss_value = residual_matvec + bulk_value + jump_value
 
-    # loss_value = torch.sum(residual_vector**2) + posteriori
+    # residual_value = discrete_basis.reduce(
+    #     (discrete_basis.integrate_linear_form(residual_vpinns, neural_network, h_T))
+    # )
 
-    loss_value += posteriori
+    # loss_value = torch.sum(residual_value**2) + jump_value
 
     relative_loss = torch.sqrt(loss_value) / exact_norm**2
 
@@ -195,19 +225,23 @@ def training_step(neural_network):
         )
     )
 
+    bulk_history.append(bulk_value.item())
+    jump_history.append(jump_value.item())
+    residual_history.append(residual_matvec.item())
+
     return loss_value, relative_loss, h1_error / exact_norm
 
 
 model = Model(
     neural_network=NN,
     training_step=training_step,
-    epochs=8000,
+    epochs=10000,
     optimizer=torch.optim.Adam,
-    optimizer_kwargs={"lr": 0.01},
+    optimizer_kwargs={"lr": 0.001},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.99**100},
-    use_early_stopping=False,
-    early_stopping_patience=50,
+    use_early_stopping=True,
+    early_stopping_patience=10,
     min_delta=1e-15,
 )
 
@@ -236,22 +270,35 @@ collection = PolyCollection(
 )
 
 axis_solution.add_collection(collection)
-axis_solution.autoscale_view()
+figure_solution.tight_layout()
 
 axis_solution.set_xlabel("x")
 axis_solution.set_ylabel("y")
+axis_solution.set_xlim((0, 1))
+axis_solution.set_ylim((0, 1))
+axis_solution.set_title(r"$H^1$ error of solution")
 color_bar = plt.colorbar(collection, ax=axis_solution)
 color_bar.set_label(r"$H^1$ error")
-
-figure_solution.tight_layout()
 
 model.plot_training_history(
     plot_names={
         "loss": r"$\mathcal{L}(u_{\theta})$",
         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-        "title": "MF-RVPINNs",
+        "title": "RVPINNs + Posteriori Estimator",
     }
 )
+
+figure_residuals, axis_residuals = plt.subplots()
+
+axis_residuals.semilogy(residual_history, linestyle="-", label="residual")
+axis_residuals.semilogy(bulk_history, linestyle="--", label="bulk")
+axis_residuals.semilogy(jump_history, linestyle=":", label="jump")
+
+axis_residuals.set_xlabel("# Epochs")
+axis_residuals.set_ylabel("Value")
+axis_residuals.set_title("Value of components of Loss over training phase")
+axis_residuals.legend()
+figure_residuals.tight_layout()
 
 plt.show()

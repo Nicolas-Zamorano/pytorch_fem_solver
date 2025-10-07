@@ -1,4 +1,4 @@
-"# Example of solving a Poisson equation using a neural network and FEM basis functions."
+"# Example of only using a posteriori estimator as loss for training, to find solution of Poisson problem."
 
 import math
 
@@ -13,12 +13,13 @@ from torch_fem import (
     Basis,
     Model,
     FeedForwardNeuralNetwork,
+    InteriorEdgesBasis,
+    ElementLine,
 )
 
 # torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
-
 
 # ---------------------- Neural Network Parameters ----------------------#
 
@@ -53,37 +54,51 @@ elements = ElementTri(polynomial_order=1, integration_order=4)
 
 discrete_basis = Basis(mesh, elements)
 
+elements_1D = ElementLine(polynomial_order=1, integration_order=2)
+
+V_edges = InteriorEdgesBasis(mesh, elements_1D)
+
+_, interpolator_to_edges_grad = discrete_basis.interpolate(V_edges)
+
+h_T = discrete_basis.mesh["cells", "length"].reshape(-1, 1, 3, 1)
+h_E = discrete_basis.mesh["interior_edges", "length"].unsqueeze(-2)
+n_E = discrete_basis.mesh["interior_edges", "normals"].unsqueeze(-2)
+
 # ---------------------- Residual Parameters ----------------------#
 
 
-def rhs(x, y):
+def rhs(x):
     """Right-hand side function."""
-    return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+    return (
+        2.0
+        * math.pi**2
+        * torch.sin(math.pi * x[..., [0]])
+        * torch.sin(math.pi * x[..., [1]])
+    )
 
 
-def residual(basis, gradient):
-    """Residual of the PDE."""
-    integration_points = basis.integration_points
-    x, y = torch.split(integration_points, 1, dim=-1)
-
-    grad = gradient(integration_points)
-
-    v = basis.v
-    v_grad = basis.v_grad
-    rhs_value = rhs(x, y)
-
-    return rhs_value * v - (v_grad @ grad.mT)
+def bulk(basis, triangle_size, neural_network):
+    """Residual term for the right-hand side"""
+    return triangle_size**2 * (
+        rhs(basis.integration_points)
+        + neural_network.laplacian(basis.integration_points)
+    )
 
 
-# def gram_matrix(basis: Basis):
-#     """Gram matrix of the basis functions."""
-#     v_grad = basis.v_grad
-#     return v_grad @ v_grad.mT
+def jump(_, normal_elements, edge_size, neural_network):
+    """Jump term for discontinuous solutions"""
+    interpolator_u_grad_plus, interpolator_u_grad_minus = torch.unbind(
+        interpolator_to_edges_grad(neural_network), dim=-4
+    )
+    return (
+        edge_size
+        * (
+            (interpolator_u_grad_plus * normal_elements).sum(-1, keepdim=True)
+            + (interpolator_u_grad_minus * -normal_elements).sum(-1, keepdim=True)
+        )
+        ** 2
+    )
 
-
-# gram_matrix_inverse = torch.inverse(
-#     discrete_basis.reduce(discrete_basis.integrate_bilinear_form(gram_matrix))
-# )
 
 # ---------------------- Error Parameters ----------------------#
 
@@ -128,16 +143,20 @@ exact_norm = torch.sqrt(torch.sum(discrete_basis.integrate_functional(h1_exact))
 
 # ---------------------- Training ----------------------#
 
+bulk_history = []
+jump_history = []
+residual_history = []
+
 
 def training_step(neural_network):
     """Training step for the neural network."""
-    residual_vector = discrete_basis.reduce(
-        discrete_basis.integrate_linear_form(residual, neural_network.gradient)
-    )
+    bulk_value = (discrete_basis.integrate_functional(bulk, h_T, neural_network)).sum()
 
-    # loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
+    jump_value = (
+        V_edges.integrate_functional(jump, n_E, h_E, neural_network) ** 2
+    ).sum()
 
-    loss_value = torch.sum(residual_vector**2, dim=0)
+    loss_value = bulk_value + jump_value
 
     relative_loss = torch.sqrt(loss_value) / exact_norm**2
 
@@ -149,19 +168,23 @@ def training_step(neural_network):
         )
     )
 
+    bulk_history.append(bulk_value.item())
+    jump_history.append(jump_value.item())
+    residual_history.append(loss_value.item())
+
     return loss_value, relative_loss, h1_error / exact_norm
 
 
 model = Model(
     neural_network=NN,
     training_step=training_step,
-    epochs=10000,
+    epochs=8000,
     optimizer=torch.optim.Adam,
     optimizer_kwargs={"lr": 0.001},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.99**100},
     use_early_stopping=True,
-    early_stopping_patience=10,
+    early_stopping_patience=5,
     min_delta=1e-15,
 )
 
@@ -205,8 +228,23 @@ model.plot_training_history(
         "loss": r"$\mathcal{L}(u_{\theta})$",
         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-        "title": "VPINNs",
+        "title": "A posteriori estimator",
     }
 )
+
+figure_residuals, axis_residuals = plt.subplots()
+
+axis_residuals.semilogy(residual_history, linestyle="-", label="residual")
+axis_residuals.semilogy(bulk_history, linestyle="--", label="bulk")
+axis_residuals.semilogy(jump_history, linestyle=":", label="jump")
+
+axis_residuals.set_xlabel("# Epochs")
+axis_residuals.set_ylabel("Value")
+axis_residuals.set_title("Value of components of Loss over training phase")
+axis_residuals.legend()
+figure_residuals.tight_layout()
+
+plt.show()
+
 
 plt.show()

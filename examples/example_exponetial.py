@@ -27,7 +27,7 @@ torch.set_default_dtype(torch.float64)
 class BoundaryConstrain(torch.nn.Module):
     """Class to strongly apply bc"""
 
-    def forward(self, inputs):
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         """Boundary condition modifier function."""
         x, y = torch.split(inputs, 1, dim=-1)
         return x * (x - 1) * y * (y - 1)
@@ -36,8 +36,8 @@ class BoundaryConstrain(torch.nn.Module):
 NN = NeuralNetwork(
     input_dimension=2,
     output_dimension=1,
-    nb_hidden_layers=5,
-    neurons_per_layers=25,
+    nb_hidden_layers=4,
+    neurons_per_layers=15,
     boundary_condition_modifier=BoundaryConstrain(),
     use_xavier_initialization=True,
 )
@@ -46,7 +46,7 @@ NN = NeuralNetwork(
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**8),
+    "Dqena" + str(0.5**10),
 )
 
 mesh = MeshTri(triangulation=mesh_data)
@@ -67,54 +67,48 @@ n_E = discrete_basis.mesh["interior_edges", "normals"].unsqueeze(-2)
 
 # ---------------------- Residual Parameters ----------------------#
 
-EXPONENTIAL_COEFFICIENT = 1
+EXPONENTIAL_COEFFICIENT = 5
 SCALING_CONSTANT = 1
 
 
-def rhs(coordinates):
+def rhs(coordinates: torch.Tensor) -> torch.Tensor:
     """Right-hand side function."""
     x, y = torch.split(coordinates, 1, -1)
 
-    u_xx = (
-        SCALING_CONSTANT
-        * (y - 1)
-        * y
-        * (
-            torch.exp(EXPONENTIAL_COEFFICIENT * x)
-            * (
-                EXPONENTIAL_COEFFICIENT**2 * (x - 1) * x
-                + EXPONENTIAL_COEFFICIENT * (4 * x - 2)
-                - 2
-            )
-        )
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
+
+    gxx = (
+        -2 * (exponential_value - 1)
+        + 2 * EXPONENTIAL_COEFFICIENT * (1 - 2 * x) * exponential_value
+        + EXPONENTIAL_COEFFICIENT**2 * x * (1 - x) * exponential_value
     )
 
-    u_yy = (1 / 50) * (x - 1) * x * (torch.exp(EXPONENTIAL_COEFFICIENT * x) - 1)
+    fxx = SCALING_CONSTANT * y * (1 - y) * gxx
 
-    return u_xx + u_yy
+    fyy = SCALING_CONSTANT * (-2) * x * (1 - x) * (exponential_value - 1)
+
+    lap = fxx + fyy
+    return -lap
 
 
-def residual(basis: Basis, neural_network):
+def residual(
+    basis: Basis, nn_grad: torch.Tensor, value_rhs: torch.Tensor
+) -> torch.Tensor:
     """Residual of the PDE."""
-    integration_points = basis.integration_points
-
-    grad = neural_network.gradient(integration_points)
-
-    v = basis.v
-    v_grad = basis.v_grad
-    rhs_value = rhs(integration_points)
-
-    return rhs_value * v - (v_grad @ grad.mT)
+    return value_rhs * basis.v - (basis.v_grad @ nn_grad.mT)
 
 
-def gram_matrix(basis):
+def gram_matrix(basis: Basis) -> torch.Tensor:
     """Gram matrix of the basis functions."""
-    v_grad = basis.v_grad
-
-    return v_grad @ v_grad.mT
+    return basis.v_grad @ basis.v_grad.mT
 
 
-def jump(_, normal_elements, edge_size, neural_network: NeuralNetwork):
+def jump(
+    _,
+    normal_elements: torch.Tensor,
+    edge_size: torch.Tensor,
+    neural_network: NeuralNetwork,
+) -> torch.Tensor:
     """Jump term for discontinuous solutions"""
     interpolator_u_grad_plus, interpolator_u_grad_minus = torch.unbind(
         interpolator_to_edges_grad(neural_network), dim=-4
@@ -129,13 +123,14 @@ def jump(_, normal_elements, edge_size, neural_network: NeuralNetwork):
     )
 
 
-def rhs_term(basis, triangle_size, neural_network):
+def bulk(
+    _,
+    triangle_size: torch.Tensor,
+    laplacian: torch.Tensor,
+    value_rhs: torch.Tensor,
+) -> torch.Tensor:
     """Residual term for the right-hand side"""
-    integration_points = basis.integration_points
-
-    return triangle_size**2 * (
-        rhs(integration_points) + neural_network.laplacian(integration_points)
-    )
+    return triangle_size**2 * (value_rhs + laplacian) ** 2
 
 
 gram_matrix_inverse = torch.inverse(
@@ -146,7 +141,7 @@ gram_matrix_inverse = torch.inverse(
 # ---------------------- Error Parameters ----------------------#
 
 
-def exact(coordinates):
+def exact(coordinates: torch.Tensor) -> torch.Tensor:
     """Exact solution of the PDE."""
     x, y = torch.split(coordinates, 1, -1)
     return (
@@ -159,104 +154,161 @@ def exact(coordinates):
     )
 
 
-def exact_dx(coordinates):
+def exact_dx(coordinates: torch.Tensor) -> torch.Tensor:
     """Exact solution derivative with respect to x."""
+
     x, y = torch.split(coordinates, 1, -1)
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
 
     return (
         SCALING_CONSTANT
-        * (y - 1)
         * y
+        * (1 - y)
         * (
-            torch.exp(EXPONENTIAL_COEFFICIENT * x)
-            * (EXPONENTIAL_COEFFICIENT * x**2 - (EXPONENTIAL_COEFFICIENT - 2) * x - 1)
-            - 2 * x
-            + 1
+            (1 - 2 * x) * (exponential_value - 1)
+            + EXPONENTIAL_COEFFICIENT * x * (1 - x) * exponential_value
         )
     )
 
 
-def exact_dy(coordinates):
+def exact_dy(coordinates: torch.Tensor) -> torch.Tensor:
     """Exact solution derivative with respect to y."""
     x, y = torch.split(coordinates, 1, -1)
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
 
-    return (
-        SCALING_CONSTANT
-        * (x - 1)
-        * x
-        * (2 * y - 1)
-        * (torch.exp(EXPONENTIAL_COEFFICIENT * x) - 1)
-    )
+    return SCALING_CONSTANT * (1 - 2 * y) * x * (1 - x) * (exponential_value - 1)
 
 
-def h1_exact(basis):
+def h1_exact(
+    _,
+    value: torch.Tensor,
+    value_dx: torch.Tensor,
+    value_dy: torch.Tensor,
+) -> torch.Tensor:
     """H1 norm of the exact solution."""
-    integration_points = basis.integration_points
-
-    return (
-        exact(integration_points) ** 2
-        + exact_dx(integration_points) ** 2
-        + exact_dy(integration_points) ** 2
-    )
+    return value**2 + value_dx**2 + value_dy**2
 
 
-def h1_norm(basis, neural_network, gradient):
+def h1_norm(
+    _,
+    solution_value: torch.Tensor,
+    solution_grad: torch.Tensor,
+    value: torch.Tensor,
+    dx: torch.Tensor,
+    dy: torch.Tensor,
+) -> torch.Tensor:
     """H1 norm of the neural network solution."""
-    integration_points = basis.integration_points
+    nn_dx, nn_dy = torch.split(solution_grad, 1, dim=-1)
 
-    nn_dx, nn_dy = torch.split(gradient(integration_points), 1, dim=-1)
+    return (value - solution_value) ** 2 + (dx - nn_dx) ** 2 + (dy - nn_dy) ** 2
 
-    return (
-        (exact(integration_points) - neural_network(integration_points)) ** 2
-        + (exact_dx(integration_points) - nn_dx) ** 2
-        + (exact_dy(integration_points) - nn_dy) ** 2
-    )
-
-
-exact_norm = torch.sqrt(torch.sum(discrete_basis.integrate_functional(h1_exact)))
 
 # ---------------------- Training ----------------------#
 
+integration_points = discrete_basis.integration_points
 
-def training_step(neural_network):
+# Precompute values
+
+rhs_value = rhs(integration_points)
+exact_value = exact(integration_points)
+exact_dx_value = exact_dx(integration_points)
+exact_dy_value = exact_dy(integration_points)
+exact_norm = torch.sqrt(
+    torch.sum(
+        discrete_basis.integrate_functional(
+            h1_exact, exact_value, exact_dx_value, exact_dy_value
+        )
+    )
+)
+
+values = [
+    rhs_value,
+    exact_value,
+    exact_dx_value,
+    exact_dy_value,
+    exact_norm,
+    gram_matrix_inverse,
+    h_T,
+    h_E,
+    n_E,
+]
+
+# bulk_history = []
+# jump_history = []
+# residual_history = []
+
+
+def training_step(
+    neural_network: NeuralNetwork,
+    basis: Basis,
+    precomputed_values: list,
+):
     """Training step for the neural network."""
-    residual_vector = discrete_basis.reduce(
-        discrete_basis.integrate_linear_form(residual, neural_network)
+
+    (
+        value_rhs,
+        value_exact,
+        value_exact_dx,
+        value_exact_dy,
+        norm_exact,
+        matrix,
+        triangle_size,
+        edge_size,
+        normals_edges,
+    ) = precomputed_values
+
+    nn_value, nn_grad = neural_network.value_and_gradient(basis.integration_points)
+
+    # nn_value, nn_grad, nn_laplacian = neural_network.value_and_laplacian(
+    #     basis.integration_points
+    # )
+
+    residual_vector = basis.reduce(
+        basis.integrate_linear_form(residual, nn_grad, value_rhs)
     )
 
-    loss_value = residual_vector.T @ (gram_matrix_inverse @ residual_vector)
+    # loss_value = torch.sum(residual_vector**2)
 
-    posteriori = (
-        discrete_basis.integrate_functional(rhs_term, h_T, neural_network) ** 2
-    ).sum() + (V_edges.integrate_functional(jump, n_E, h_E, neural_network) ** 2).sum()
+    loss_value = residual_vector.T @ (matrix @ residual_vector)
 
-    loss_value = torch.sum(residual_vector**2) + posteriori
+    # bulk_value = (
+    #     basis.integrate_functional(bulk, triangle_size, nn_laplacian, value_rhs) ** 2
+    # ).sum()
 
-    # loss_value += posteriori
+    # jump_value = (
+    #     V_edges.integrate_functional(jump, normals_edges, edge_size, neural_network)
+    #     ** 2
+    # ).sum()
 
-    relative_loss = torch.sqrt(loss_value) / exact_norm**2
+    # residual_history.append(loss_value.item())
+    # bulk_history.append(bulk_value.item())
+    # jump_history.append(jump_value.item())
+
+    # loss_value += bulk_value + jump_value
+
+    relative_loss = torch.sqrt(loss_value) / norm_exact
 
     h1_error = torch.sqrt(
         torch.sum(
-            discrete_basis.integrate_functional(
-                h1_norm, neural_network, neural_network.gradient
+            basis.integrate_functional(
+                h1_norm, nn_value, nn_grad, value_exact, value_exact_dx, value_exact_dy
             )
         )
     )
 
-    return loss_value, relative_loss, h1_error / exact_norm
+    return loss_value, relative_loss, h1_error / norm_exact
 
 
 model = Model(
     neural_network=NN,
-    training_step=training_step,
-    epochs=8000,
+    training_step=lambda nn: training_step(nn, discrete_basis, values),
+    epochs=20000,
     optimizer=torch.optim.Adam,
     optimizer_kwargs={"lr": 0.001},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.99**100},
     use_early_stopping=True,
-    early_stopping_patience=50,
+    early_stopping_patience=100,
     min_delta=1e-16,
 )
 
@@ -267,8 +319,19 @@ model.train()
 
 model.load_optimal_parameters()
 
+opt_nn_value, opt_nn_grad = NN.value_and_gradient(discrete_basis.integration_points)
+
 h1_error_plot = (
-    torch.sqrt(discrete_basis.integrate_functional(h1_norm, NN, NN.gradient))
+    torch.sqrt(
+        discrete_basis.integrate_functional(
+            h1_norm,
+            opt_nn_value,
+            opt_nn_grad,
+            exact_value,
+            exact_dx_value,
+            exact_dy_value,
+        )
+    )
     .squeeze(-1)
     .numpy(force=True)
 )
@@ -277,7 +340,7 @@ figure_solution, axis_solution = plt.subplots()
 
 c4e = torch.Tensor.numpy(discrete_basis.mesh["cells", "coordinates"], force=True)
 
-collection = PolyCollection(
+triangles_plot = PolyCollection(
     c4e,  # type: ignore
     array=h1_error_plot,
     cmap="viridis",
@@ -285,12 +348,14 @@ collection = PolyCollection(
     linewidths=0.2,
 )
 
-axis_solution.add_collection(collection)
+axis_solution.add_collection(triangles_plot)
 axis_solution.autoscale_view()
 
 axis_solution.set_xlabel("x")
 axis_solution.set_ylabel("y")
-color_bar = plt.colorbar(collection, ax=axis_solution)
+axis_solution.set_xlim((0, 1))
+axis_solution.set_ylim((0, 1))
+color_bar = plt.colorbar(triangles_plot, ax=axis_solution)
 color_bar.set_label(r"$H^1$ error")
 
 figure_solution.tight_layout()
@@ -303,5 +368,18 @@ model.plot_training_history(
         "title": "RVPINNs exponential",
     }
 )
+
+# figure_residuals, axis_residuals = plt.subplots()
+
+# axis_residuals.semilogy(residual_history, linestyle="-", label="residual")
+# axis_residuals.semilogy(bulk_history, linestyle="--", label="bulk")
+# axis_residuals.semilogy(jump_history, linestyle=":", label="jump")
+
+# axis_residuals.set_xlabel("# Epochs")
+# axis_residuals.set_ylabel("Value")
+# axis_residuals.set_ylim((1e-4, 1e3))
+# axis_residuals.set_title("Value of components of Loss over training phase")
+# axis_residuals.legend()
+# figure_residuals.tight_layout()
 
 plt.show()
