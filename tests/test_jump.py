@@ -103,9 +103,7 @@ A = V.integrate_bilinear_form(a)
 b = V.integrate_linear_form(l)
 
 
-sol = V.solution_tensor()
-
-sol = V.solve(A, sol, b)
+sol = V.solve(A, b)
 
 element_inner_edges = ElementLine(polynomial_order=1, integration_order=2)
 
