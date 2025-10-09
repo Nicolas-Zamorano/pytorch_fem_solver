@@ -15,6 +15,8 @@ class AbstractElement(abc.ABC):
 
         self.gaussian_nodes, self.gaussian_weights = self._compute_gauss_values()
 
+        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes)
+
     def compute_inverse_map(
         self,
         first_node: torch.Tensor,

@@ -52,11 +52,11 @@ class AbstractBasis(abc.ABC):
             map_jacobian
         )
 
-        bar_coords = element.compute_barycentric_coordinates(element.gaussian_nodes)
+        v, v_grad = element.compute_shape_functions(
+            element.bar_coords, inv_map_jacobian
+        )
 
-        v, v_grad = element.compute_shape_functions(bar_coords, inv_map_jacobian)
-
-        integration_points = self._compute_integration_points(mesh, bar_coords)
+        integration_points = self._compute_integration_points(mesh, element.bar_coords)
 
         _dx = self._compute_integral_weights(element, det_map_jacobian)
 
