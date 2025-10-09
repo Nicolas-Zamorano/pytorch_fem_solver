@@ -127,25 +127,29 @@ class Basis(AbstractBasis):
     def compute_jump_integration_points(
         self, basis: InteriorEdgesBasis
     ) -> torch.Tensor:
-        """Compute integrations points for comptuing jump term"""
+        """Compute integrations points for computing jump term"""
 
         cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
 
         coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
-            self.mesh["cells", "coordinates"][..., [0], :], cells_4_interior_edges
+            self.mesh["cells", "coordinates"][..., [0], :],
+            cells_4_interior_edges,
         ).unsqueeze(-3)
 
         inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
             self._inv_map_jacobian, cells_4_interior_edges
         )
 
-        integration_points = basis.integration_points.unsqueeze(-3)
+        integrations_points = basis.integration_points.unsqueeze(-3)
 
         # For computing the inverse mapping of the integrations points of the interior edges,
-        # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
+        # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
+        # (2 meaning the triangle that share and edge).
 
         new_integrations_points = self._element.compute_inverse_map(
-            coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
+            coordinates_4_cells_first_vertex,
+            integrations_points,
+            inv_map_jacobian,
         )
 
         return new_integrations_points
