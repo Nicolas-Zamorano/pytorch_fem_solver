@@ -1,6 +1,7 @@
 """Class for 1D line element representation"""
 
 import torch
+from numpy.polynomial.legendre import leggauss
 from .abstract_element import AbstractElement
 
 
@@ -20,27 +21,14 @@ class ElementLine(AbstractElement):
 
     def _compute_gauss_values(self):
 
-        if self.integration_order == 2:
+        gaussian_nodes_np, gaussian_weights_np = leggauss(self.integration_order)
 
-            nodes = 1.0 / torch.sqrt(torch.tensor(3.0))
+        gaussian_nodes = torch.Tensor(gaussian_nodes_np).reshape(-1, 1)
 
-            gaussian_nodes = torch.tensor([[-nodes], [nodes]])
+        # We use the convection of weights should sum to 1.
+        gaussian_weights = torch.Tensor(0.5 * gaussian_weights_np).reshape(-1, 1, 1)
 
-            gaussian_weights = torch.tensor([[[0.5]], [[0.5]]])
-
-        elif self.integration_order == 3:
-
-            nodes = torch.sqrt(torch.tensor(3 / 5))
-
-            gaussian_nodes = torch.tensor([[0], [-nodes], [nodes]])
-
-            gaussian_weights = torch.tensor([[[8 / 18]], [[5 / 18]], [[5 / 18]]])
-
-        else:
-
-            raise NotImplementedError("Integration order not implemented")
-
-        return gaussian_nodes, gaussian_weights.unsqueeze(0)
+        return gaussian_nodes, gaussian_weights
 
     def compute_shape_functions(
         self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor
