@@ -155,8 +155,8 @@ class Basis(AbstractBasis):
     ) -> (
         Tuple[torch.Tensor, torch.Tensor]
         | Tuple[
-            Callable[[Callable[[torch.Tensor], torch.Tensor]], torch.Tensor],
-            Callable[[Callable[[torch.Tensor], torch.Tensor]], torch.Tensor],
+            Callable[..., torch.Tensor],
+            Callable[..., torch.Tensor],
         ]
     ):
         """Interpolate a tensor from the current basis to another basis."""
@@ -170,34 +170,42 @@ class Basis(AbstractBasis):
 
             cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
 
-            vertices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
-                basis.mesh["cells", "vertices"], cells_4_interior_edges
-            ).unsqueeze(-2)
-
             coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
-                self.mesh["cells", "coordinates"][..., [0], :], cells_4_interior_edges
+                self.mesh["cells", "coordinates"][..., [0], :],
+                cells_4_interior_edges,
             ).unsqueeze(-3)
 
             inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
                 self._inv_map_jacobian, cells_4_interior_edges
             )
 
-            integration_points = basis.integration_points.unsqueeze(-3)
+            integrations_points = basis.integration_points.unsqueeze(-3)
 
             # For computing the inverse mapping of the integrations points of the interior edges,
-            # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
+            # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
+            # (2 meaning the triangle that share and edge).
 
             new_integrations_points = self._element.compute_inverse_map(
-                coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
+                coordinates_4_cells_first_vertex,
+                integrations_points,
+                inv_map_jacobian,
             )
 
-            bar_coords = self._element.compute_barycentric_coordinates(
-                new_integrations_points.squeeze(-3)
+            new_bar_coords = self._element.compute_barycentric_coordinates(
+                new_integrations_points
+            ).squeeze(-3)
+
+            new_v, new_v_grad = self._element.compute_shape_functions(
+                new_bar_coords, inv_map_jacobian
             )
 
-            v, v_grad = self._element.compute_shape_functions(
-                bar_coords, inv_map_jacobian
-            )
+            v = new_v
+            v_grad = new_v_grad
+
+            vertices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
+                basis.mesh["cells", "vertices"], cells_4_interior_edges
+            ).unsqueeze(-2)
+
         else:
             raise NotImplementedError("Interpolation for this basis not implemented")
 
