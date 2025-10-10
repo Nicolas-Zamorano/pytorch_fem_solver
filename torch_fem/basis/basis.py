@@ -140,7 +140,7 @@ class Basis(AbstractBasis):
             self._inv_map_jacobian, cells_4_interior_edges
         )
 
-        integrations_points = basis.integration_points.unsqueeze(-3)
+        integrations_points = basis.integration_points.unsqueeze(-4)
 
         # For computing the inverse mapping of the integrations points of the interior edges,
         # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
@@ -183,7 +183,7 @@ class Basis(AbstractBasis):
                 self._inv_map_jacobian, cells_4_interior_edges
             )
 
-            integrations_points = basis.integration_points.unsqueeze(-3)
+            integrations_points = basis.integration_points.unsqueeze(-4)
 
             # For computing the inverse mapping of the integrations points of the interior edges,
             # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
