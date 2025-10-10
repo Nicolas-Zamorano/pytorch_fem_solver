@@ -66,7 +66,7 @@ class Model:
             loss.backward()
             self._optimizer.step()
             if self._learning_rate_scheduler is not None:
-                self._learning_rate_scheduler.step(loss.detach())
+                self._learning_rate_scheduler.step()
 
             loss_value_float = loss.item()
             relative_loss_float = validation_loss.item()
@@ -88,9 +88,9 @@ class Model:
 
             self._progress_bar.set_postfix(
                 {
-                    "Loss": f"{loss_value_float:.8f}",
-                    "Validation loss": f"{relative_loss_float:.8f}",
-                    "Accuracy": f"{accuracy_float:.8f}",
+                    "Loss": f"{loss_value_float:.8e}",
+                    "Validation loss": f"{relative_loss_float:.8e}",
+                    "Accuracy": f"{accuracy_float:.8e}",
                 }
             )
 
