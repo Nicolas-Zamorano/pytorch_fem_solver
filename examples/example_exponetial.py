@@ -46,7 +46,7 @@ NN = NeuralNetwork(
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**10),
+    "Dqena" + str(0.5**8),
 )
 
 mesh = MeshTri(triangulation=mesh_data)
@@ -55,14 +55,14 @@ elements = ElementTri(polynomial_order=1, integration_order=4)
 
 discrete_basis = Basis(mesh, elements)
 
-elements_1D = ElementLine(polynomial_order=1, integration_order=2)
+elements_1D = ElementLine(polynomial_order=1, integration_order=4)
 
 V_edges = InteriorEdgesBasis(mesh, elements_1D)
 
-_, interpolator_to_edges_grad = discrete_basis.interpolate(V_edges)
+jump_integration_points = discrete_basis.compute_jump_integration_points(V_edges)
 
 h_T = discrete_basis.mesh["cells", "length"].reshape(-1, 1, 3, 1)
-h_E = discrete_basis.mesh["interior_edges", "length"].unsqueeze(-2)
+h_E = discrete_basis.mesh["interior_edges", "length"].squeeze(-1)
 n_E = discrete_basis.mesh["interior_edges", "normals"].unsqueeze(-2)
 
 # ---------------------- Residual Parameters ----------------------#
@@ -106,21 +106,11 @@ def gram_matrix(basis: Basis) -> torch.Tensor:
 def jump(
     _,
     normal_elements: torch.Tensor,
-    edge_size: torch.Tensor,
-    neural_network: NeuralNetwork,
+    nn_grad_jump: torch.Tensor,
 ) -> torch.Tensor:
     """Jump term for discontinuous solutions"""
-    interpolator_u_grad_plus, interpolator_u_grad_minus = torch.unbind(
-        interpolator_to_edges_grad(neural_network), dim=-4
-    )
-    return (
-        edge_size
-        * (
-            (interpolator_u_grad_plus * normal_elements).sum(-1, keepdim=True)
-            + (interpolator_u_grad_minus * -normal_elements).sum(-1, keepdim=True)
-        )
-        ** 2
-    )
+    nn_grad_plus, nn_grad_minus = torch.unbind(nn_grad_jump, dim=-4)
+    return ((nn_grad_plus - nn_grad_minus) * normal_elements).sum(-1, keepdim=True) ** 2
 
 
 def bulk(
@@ -233,9 +223,9 @@ values = [
     n_E,
 ]
 
-# bulk_history = []
-# jump_history = []
-# residual_history = []
+bulk_history = []
+jump_history = []
+residual_history = []
 
 
 def training_step(
@@ -257,11 +247,13 @@ def training_step(
         normals_edges,
     ) = precomputed_values
 
-    nn_value, nn_grad = neural_network.value_and_gradient(basis.integration_points)
+    # nn_value, nn_grad = neural_network.value_and_gradient(basis.integration_points)
 
-    # nn_value, nn_grad, nn_laplacian = neural_network.value_and_laplacian(
-    #     basis.integration_points
-    # )
+    nn_value, nn_grad, nn_laplacian = neural_network.value_and_laplacian(
+        basis.integration_points
+    )
+
+    _, nn_jump_grad = neural_network.value_and_gradient(jump_integration_points)
 
     residual_vector = basis.reduce(
         basis.integrate_linear_form(residual, nn_grad, value_rhs)
@@ -271,20 +263,19 @@ def training_step(
 
     loss_value = residual_vector.T @ (matrix @ residual_vector)
 
-    # bulk_value = (
-    #     basis.integrate_functional(bulk, triangle_size, nn_laplacian, value_rhs) ** 2
-    # ).sum()
+    bulk_value = (
+        basis.integrate_functional(bulk, triangle_size, nn_laplacian, value_rhs)
+    ).sum()
 
-    # jump_value = (
-    #     V_edges.integrate_functional(jump, normals_edges, edge_size, neural_network)
-    #     ** 2
-    # ).sum()
+    jump_value = (
+        edge_size * V_edges.integrate_functional(jump, normals_edges, nn_jump_grad)
+    ).sum()
 
-    # residual_history.append(loss_value.item())
-    # bulk_history.append(bulk_value.item())
-    # jump_history.append(jump_value.item())
+    residual_history.append(loss_value.item())
+    bulk_history.append(bulk_value.item())
+    jump_history.append(jump_value.item())
 
-    # loss_value += bulk_value + jump_value
+    loss_value += bulk_value + jump_value
 
     relative_loss = torch.sqrt(loss_value) / norm_exact
 
@@ -304,11 +295,11 @@ model = Model(
     training_step=lambda nn: training_step(nn, discrete_basis, values),
     epochs=20000,
     optimizer=torch.optim.Adam,
-    optimizer_kwargs={"lr": 0.001},
+    optimizer_kwargs={"lr": 1e-3},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
-    # scheduler_kwargs={"gamma": 0.99**100},
-    use_early_stopping=True,
-    early_stopping_patience=100,
+    # scheduler_kwargs={"gamma": 0.9999},
+    use_early_stopping=False,
+    early_stopping_patience=2000,
     min_delta=1e-16,
 )
 
@@ -369,17 +360,18 @@ model.plot_training_history(
     }
 )
 
-# figure_residuals, axis_residuals = plt.subplots()
+figure_residuals, axis_residuals = plt.subplots()
 
-# axis_residuals.semilogy(residual_history, linestyle="-", label="residual")
-# axis_residuals.semilogy(bulk_history, linestyle="--", label="bulk")
-# axis_residuals.semilogy(jump_history, linestyle=":", label="jump")
+axis_residuals.semilogy(residual_history, linestyle="-", label="residual")
+axis_residuals.semilogy(bulk_history, linestyle="--", label="bulk")
+axis_residuals.semilogy(jump_history, linestyle=":", label="jump")
 
-# axis_residuals.set_xlabel("# Epochs")
-# axis_residuals.set_ylabel("Value")
-# axis_residuals.set_ylim((1e-4, 1e3))
-# axis_residuals.set_title("Value of components of Loss over training phase")
-# axis_residuals.legend()
-# figure_residuals.tight_layout()
+axis_residuals.set_xlabel("# Epochs")
+axis_residuals.set_ylabel("Value")
+axis_residuals.set_ylim((1e-4, 1e3))
+axis_residuals.set_title("Value of components of Loss over training phase")
+axis_residuals.legend()
+figure_residuals.tight_layout()
+
 
 plt.show()
