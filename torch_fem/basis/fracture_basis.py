@@ -1,6 +1,6 @@
 """Class for basis representation on fractures"""
 
-from typing import Optional
+from typing import Optional, Callable, Tuple
 import torch
 import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
@@ -165,7 +165,9 @@ class FractureBasis(AbstractBasis):
         ]
 
         rows_idx = (
-            self.global_triangulation["triangles"].repeat(1, nb_local_dofs).reshape(-1)
+            self.global_triangulation["triangles"]
+            .repeat(1, 1, nb_local_dofs)
+            .reshape(-1)
         )
         cols_idx = (
             self.global_triangulation["triangles"]
@@ -209,15 +211,101 @@ class FractureBasis(AbstractBasis):
     def _compute_jacobian_map(self, mesh, element):
         return mesh["cells", "coordinates"].mT @ element.barycentric_grad
 
-    def interpolate(self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None):
+    # def interpolate(self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None):
+    #     """Interpolate a tensor from the current basis to another basis."""
+    #     if basis is self:
+    #         nb_fractures = self.mesh.batch_size()[0]
+    #         nb_vertices_4_cells = self.mesh["cells", "vertices"].shape[-1]
+    #         # vertices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
+    #         vertices_4_cells_4_interior_edges = self._global_dofs4elements.reshape(
+    #             nb_fractures, -1, 1, nb_vertices_4_cells
+    #         )
+
+    #         v = self.v
+    #         v_grad = self.v_grad
+
+    #     elif basis.__class__ == InteriorEdgesFractureBasis:
+
+    #         cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
+
+    #         vertices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
+    #             basis.mesh["cells", "vertices"], cells_4_interior_edges
+    #         ).unsqueeze(-2)
+
+    #         coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
+    #             self.mesh["cells", "coordinates_3d"][..., [0], :],
+    #             cells_4_interior_edges,
+    #         ).unsqueeze(-3)
+
+    #         inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
+    #             self._inv_map_jacobian, cells_4_interior_edges
+    #         )
+
+    #         integration_points = basis.integration_points.unsqueeze(-3)
+
+    #         # For computing the inverse mapping of the integrations points of the interior edges,
+    #         # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
+
+    #         new_integrations_points = self._element.compute_inverse_map(
+    #             coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
+    #         )
+
+    #         bar_coords = self._element.compute_barycentric_coordinates(
+    #             new_integrations_points.squeeze(-3)
+    #         )
+
+    #         v, v_grad = self._element.compute_shape_functions(
+    #             bar_coords, inv_map_jacobian
+    #         )
+
+    #     else:
+    #         raise NotImplementedError(
+    #             "Interpolation to {basis.__class__} not implemented"
+    #         )
+
+    #     if tensor is not None:
+
+    #         interpolation = (tensor[vertices_4_cells_4_interior_edges] * v).sum(
+    #             -2, keepdim=True
+    #         )
+
+    #         interpolation_grad = (
+    #             tensor[vertices_4_cells_4_interior_edges] * v_grad
+    #         ).sum(-2, keepdim=True)
+
+    #         return interpolation, interpolation_grad
+
+    #     else:
+
+    #         nodes = self.mesh["vertices", "coordinates_3d"]
+
+    #         def interpolator(function):
+    #             return (function(nodes)[vertices_4_cells_4_interior_edges] * v).sum(
+    #                 -2, keepdim=True
+    #             )
+
+    #         def interpolator_grad(function):
+    #             return (
+    #                 self.mesh.apply_mask(
+    #                     function(nodes), [vertices_4_cells_4_interior_edges]
+    #                 )
+    #                 * v_grad
+    #             ).sum(-2, keepdim=True)
+
+    #         return interpolator, interpolator_grad
+
+    def interpolate(
+        self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None
+    ) -> (
+        Tuple[torch.Tensor, torch.Tensor]
+        | Tuple[
+            Callable[..., torch.Tensor],
+            Callable[..., torch.Tensor],
+        ]
+    ):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            nb_fractures = self.mesh.batch_size()[0]
-            nb_vertices_4_cells = self.mesh["cells", "vertices"].shape[-1]
-            # vertices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
-            vertices_4_cells_4_interior_edges = self._global_dofs4elements.reshape(
-                nb_fractures, -1, 1, nb_vertices_4_cells
-            )
+            vertices_4_cells_4_interior_edges = self._global_dofs4elements.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
@@ -225,10 +313,6 @@ class FractureBasis(AbstractBasis):
         elif basis.__class__ == InteriorEdgesFractureBasis:
 
             cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
-
-            vertices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
-                basis.mesh["cells", "vertices"], cells_4_interior_edges
-            ).unsqueeze(-2)
 
             coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
                 self.mesh["cells", "coordinates_3d"][..., [0], :],
@@ -239,27 +323,35 @@ class FractureBasis(AbstractBasis):
                 self._inv_map_jacobian, cells_4_interior_edges
             )
 
-            integration_points = basis.integration_points.unsqueeze(-3)
+            integrations_points = basis.integration_points.unsqueeze(-4)
 
             # For computing the inverse mapping of the integrations points of the interior edges,
-            # is necessary that tensor are in the size (N_T, q_T, q_E, N_f, N_d).
+            # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
+            # (2 meaning the triangle that share and edge).
 
             new_integrations_points = self._element.compute_inverse_map(
-                coordinates_4_cells_first_vertex, integration_points, inv_map_jacobian
+                coordinates_4_cells_first_vertex,
+                integrations_points,
+                inv_map_jacobian,
             )
 
-            bar_coords = self._element.compute_barycentric_coordinates(
-                new_integrations_points.squeeze(-3)
+            new_bar_coords = self._element.compute_barycentric_coordinates(
+                new_integrations_points
+            ).squeeze(-3)
+
+            new_v, new_v_grad = self._element.compute_shape_functions(
+                new_bar_coords, inv_map_jacobian
             )
 
-            v, v_grad = self._element.compute_shape_functions(
-                bar_coords, inv_map_jacobian
-            )
+            v = new_v
+            v_grad = new_v_grad
+
+            vertices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
+                basis.mesh["cells", "vertices"], cells_4_interior_edges
+            ).unsqueeze(-2)
 
         else:
-            raise NotImplementedError(
-                "Interpolation to {basis.__class__} not implemented"
-            )
+            raise NotImplementedError("Interpolation for this basis not implemented")
 
         if tensor is not None:
 
@@ -273,21 +365,20 @@ class FractureBasis(AbstractBasis):
 
             return interpolation, interpolation_grad
 
-        else:
+        nodes = self._coords4global_dofs
 
-            nodes = self.mesh["vertices", "coordinates_3d"]
+        def interpolator(
+            function: Callable[[torch.Tensor], torch.Tensor],
+        ) -> torch.Tensor:
+            return (function(nodes)[vertices_4_cells_4_interior_edges] * v).sum(
+                -2, keepdim=True
+            )
 
-            def interpolator(function):
-                return (function(nodes)[vertices_4_cells_4_interior_edges] * v).sum(
-                    -2, keepdim=True
-                )
+        def interpolator_grad(
+            function: Callable[[torch.Tensor], torch.Tensor],
+        ) -> torch.Tensor:
+            return (function(nodes)[vertices_4_cells_4_interior_edges] * v_grad).sum(
+                -2, keepdim=True
+            )
 
-            def interpolator_grad(function):
-                return (
-                    self.mesh.apply_mask(
-                        function(nodes), [vertices_4_cells_4_interior_edges]
-                    )
-                    * v_grad
-                ).sum(-2, keepdim=True)
-
-            return interpolator, interpolator_grad
+        return interpolator, interpolator_grad

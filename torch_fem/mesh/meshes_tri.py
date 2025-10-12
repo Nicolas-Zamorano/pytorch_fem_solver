@@ -57,68 +57,68 @@ class MeshesTri(MeshTri):
         vertices_4_boundary_edges: torch.Tensor,
         vertices_4_interior_edges: torch.Tensor,
     ):
-        if "neighbors" in triangulation["cells"]:
-            neighbors = triangulation["cells", "neighbors"]
-            number_meshes, number_cells, number_edges = neighbors.shape
+        # if "neighbors" in triangulation["cells"]:
+        #     neighbors = triangulation["cells", "neighbors"]
+        #     number_meshes, number_cells, number_edges = neighbors.shape
 
-            cells_idx = torch.arange(number_cells, device=neighbors.device)
-            cells_idx = cells_idx.repeat_interleave(number_edges)
-            cells_idx = cells_idx.unsqueeze(0).expand(number_meshes, -1)
+        #     cells_idx = torch.arange(number_cells, device=neighbors.device)
+        #     cells_idx = cells_idx.repeat_interleave(number_edges)
+        #     cells_idx = cells_idx.unsqueeze(0).expand(number_meshes, -1)
 
-            neigh_flat = neighbors.reshape(number_meshes, -1)
+        #     neigh_flat = neighbors.reshape(number_meshes, -1)
 
-            mask_inner = neigh_flat != -1
-            mask_boundary = neigh_flat == -1
+        #     mask_inner = neigh_flat != -1
+        #     mask_boundary = neigh_flat == -1
 
-            cells_4_interior_edges_list = []
-            cells_4_boundary_edges_list = []
+        #     cells_4_interior_edges_list = []
+        #     cells_4_boundary_edges_list = []
 
-            cells_4_interior_edges = torch.tensor([])
-            cells_4_boundary_edges = torch.tensor([])
+        #     cells_4_interior_edges = torch.tensor([])
+        #     cells_4_boundary_edges = torch.tensor([])
 
-            for m in range(number_meshes):
+        #     for m in range(number_meshes):
 
-                mask_m = mask_inner[m]
-                tri1_m = cells_idx[m][mask_m]
-                tri2_m = neigh_flat[m][mask_m]
+        #         mask_m = mask_inner[m]
+        #         tri1_m = cells_idx[m][mask_m]
+        #         tri2_m = neigh_flat[m][mask_m]
 
-                pair_m = torch.stack(
-                    [torch.minimum(tri1_m, tri2_m), torch.maximum(tri1_m, tri2_m)],
-                    dim=1,
-                )
+        #         pair_m = torch.stack(
+        #             [torch.minimum(tri1_m, tri2_m), torch.maximum(tri1_m, tri2_m)],
+        #             dim=1,
+        #         )
 
-                edges_int = torch.unique(pair_m, dim=0)
-                edges_bou = cells_idx[m][mask_boundary[m]].unsqueeze(1)
+        #         edges_int = torch.unique(pair_m, dim=0)
+        #         edges_bou = cells_idx[m][mask_boundary[m]].unsqueeze(1)
 
-                cells_4_interior_edges_list.append(edges_int)
-                cells_4_boundary_edges_list.append(edges_bou)
+        #         cells_4_interior_edges_list.append(edges_int)
+        #         cells_4_boundary_edges_list.append(edges_bou)
 
-                cells_4_interior_edges = torch.stack(cells_4_interior_edges_list, dim=0)
-                cells_4_boundary_edges = torch.stack(cells_4_boundary_edges_list, dim=0)
-        else:
-            vertices_4_cells = triangulation["cells", "vertices"]
+        #         cells_4_interior_edges = torch.stack(cells_4_interior_edges_list, dim=0)
+        #         cells_4_boundary_edges = torch.stack(cells_4_boundary_edges_list, dim=0)
+        # else:
+        vertices_4_cells = triangulation["cells", "vertices"]
 
-            number_meshes = vertices_4_cells.shape[0]
+        number_meshes = vertices_4_cells.shape[0]
 
-            cells_4_boundary_edges = (
-                (
-                    vertices_4_boundary_edges.unsqueeze(-2).unsqueeze(-2)
-                    == vertices_4_cells.unsqueeze(-1).unsqueeze(-4)
-                )
-                .any(dim=-2)
-                .all(dim=-1)
-                .float()
-                .argmax(dim=-1, keepdim=True)
+        cells_4_boundary_edges = (
+            (
+                vertices_4_boundary_edges.unsqueeze(-2).unsqueeze(-2)
+                == vertices_4_cells.unsqueeze(-1).unsqueeze(-4)
             )
-            cells_4_interior_edges = torch.nonzero(
-                (
-                    vertices_4_interior_edges.unsqueeze(-2).unsqueeze(-2)
-                    == vertices_4_cells.unsqueeze(-1).unsqueeze(-4)
-                )
-                .any(dim=-2)
-                .all(dim=-1),
-                as_tuple=True,
-            )[1].reshape(number_meshes, -1, 2)
+            .any(dim=-2)
+            .all(dim=-1)
+            .float()
+            .argmax(dim=-1, keepdim=True)
+        )
+        cells_4_interior_edges = torch.nonzero(
+            (
+                vertices_4_interior_edges.unsqueeze(-2).unsqueeze(-2)
+                == vertices_4_cells.unsqueeze(-1).unsqueeze(-4)
+            )
+            .any(dim=-2)
+            .all(dim=-1),
+            as_tuple=True,
+        )[1].reshape(number_meshes, -1, 2)
 
         return cells_4_boundary_edges, cells_4_interior_edges
 

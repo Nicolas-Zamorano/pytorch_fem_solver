@@ -9,8 +9,6 @@ class FracturesTri(MeshesTri):
 
     def __init__(self, triangulations: list, fractures_3d_data: torch.Tensor):
 
-        triangulations = self._stack_triangulations(triangulations)
-
         super().__init__(triangulations)
 
         self._compute_fracture_map(fractures_3d_data)

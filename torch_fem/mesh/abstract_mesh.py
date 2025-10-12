@@ -56,6 +56,8 @@ class AbstractMesh(abc.ABC):
                     sub_dictionaries[subname][new_key] = torch.tensor(
                         value, dtype=torch.get_default_dtype()
                     )
+                elif isinstance(value, torch.Tensor):
+                    sub_dictionaries[subname][new_key] = value
 
         mesh_tensordict = tensordict.TensorDict(
             {
@@ -71,7 +73,7 @@ class AbstractMesh(abc.ABC):
             batch_size=[],
         )
 
-        return mesh_tensordict.auto_batch_size_()
+        return mesh_tensordict
 
     def _build_optional_parameters(
         self, triangulation: tensordict.TensorDict
@@ -102,7 +104,7 @@ class AbstractMesh(abc.ABC):
             triangulation["vertices", "coordinates"], triangulation["edges", "vertices"]
         )
 
-        return triangulation
+        return triangulation.auto_batch_size_()
 
     def _compute_interior_and_boundary_edges(
         self, triangulation: tensordict.TensorDict
@@ -254,7 +256,7 @@ class AbstractMesh(abc.ABC):
             .any(dim=-2)
             .all(dim=-1),
             as_tuple=True,
-        )[1].reshape(-1, triangulation["vertices", "coordinates"].shape[-1])
+        )[1].reshape(-1, 2)
 
         return cells_4_boundary_edges, cells_4_interior_edges
 
@@ -310,14 +312,13 @@ class AbstractMesh(abc.ABC):
             torch.split(coordinates_4_edges, 1, dim=-2)
         )
 
-        diameter_4_cells = torch.min(
+        diameter_4_cells = torch.max(
             torch.norm(
                 coordinates_4_edges_second_vertex - coordinates_4_edges_first_vertex,
                 dim=-1,
-                keepdim=True,
             ),
             dim=-2,
-            keepdim=True,
+            keepdim=False,
         )[0]
 
         return diameter_4_cells
