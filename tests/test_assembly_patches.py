@@ -7,6 +7,8 @@ import triangle as tr
 
 from torch_fem import Basis, ElementTri, MeshTri, Patches, PatchesBasis
 
+torch.set_default_dtype(torch.float64)
+
 centers = torch.tensor([[0.5, 0.5]])
 
 radius = torch.tensor([[0.5]])

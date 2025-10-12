@@ -1,15 +1,14 @@
 """Example of FEM solver for 2D fractures in 3D."""
 
-# import matplotlib.cm as cm
-# import matplotlib.colors as colors
+import matplotlib.cm as cm
+import matplotlib.colors as colors
+from matplotlib.collections import PolyCollection
 import matplotlib.pyplot as plt
 
-# import numpy as np
-import tensordict as td
+import numpy as np
 import torch
 import triangle as tr
 
-# from matplotlib.collections import PolyCollection
 
 from torch_fem import (
     ElementLine,
@@ -19,8 +18,8 @@ from torch_fem import (
     InteriorEdgesFractureBasis,
 )
 
-torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
-torch.cuda.empty_cache()
+# torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
+# torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
 # ---------------------- FEM Parameters ----------------------#
@@ -115,12 +114,6 @@ def a(basis):
 
     return v_grad @ v_grad.mT
 
-
-# def g(x, y):
-#     return torch.ones_like(x)
-
-# def g(x, y):
-#     return x + torch.sqrt(y)
 
 # ---------------------- Error Parameters ----------------------#
 
@@ -240,9 +233,7 @@ A = V.integrate_bilinear_form(a)
 
 b = V.integrate_linear_form(l)
 
-u_h = V.solution_tensor()
-
-u_h = V.solve(A, u_h, b)
+u_h = V.solve(A, b)
 
 I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 
@@ -292,7 +283,7 @@ points_trace_fracture_1, points_trace_fracture_2 = torch.unbind(
 
 I_E_u_h, I_E_u_grad = V.interpolate(V_inner_edges, u_h)
 
-I_E_u_h_grad_K_plus, I_E_u_h_grad_minus = torch.unbind(I_E_u_grad, dim=-4)
+I_E_u_h_grad_K_plus, I_E_u_h_grad_minus = torch.unbind(I_E_u_grad, dim=-4)  # type: ignore
 
 jump_u_h = (I_E_u_h_grad_K_plus * n_E).sum(-1) + (I_E_u_h_grad_minus * -n_E).sum(-1)
 
@@ -322,7 +313,7 @@ exact_value_global = exact_value_local.reshape(-1, 1)[
 
 I_E_u, I_E_u_grad = V.interpolate(V_inner_edges, exact_value_global)
 
-I_E_u_grad_K_plus, I_E_u_grad_minus = torch.unbind(I_E_u_grad, dim=-4)
+I_E_u_grad_K_plus, I_E_u_grad_minus = torch.unbind(I_E_u_grad, dim=-4)  # type: ignore
 
 jump_u = (I_E_u_grad_K_plus * n_E).sum(-1) + (I_E_u_grad_minus * -n_E).sum(-1)
 
@@ -426,7 +417,7 @@ plt.ylabel("jump value")
 plt.legend()
 # plt.savefig("trace_jump_fracture_2.png")
 
-# # ------------------ RELATIVE ERROR ------------------
+# # # ------------------ RELATIVE ERROR ------------------
 
 # # Convert to numpy
 # H1_error_fracture_1 = H1_error_fracture_1.numpy(force=True)
@@ -443,13 +434,13 @@ plt.legend()
 # fig, ax = plt.subplots(dpi=200)
 # face_colors = cmap(norm(H1_error_fracture_1))
 # collection = PolyCollection(
-#     c4e_fracture_1, facecolors=face_colors, edgecolors="black", linewidths=0.2
+#     c4e_fracture_1, facecolors=face_colors, edgecolors="black", linewidths=0.2  # type: ignore
 # )
 # ax.add_collection(collection)
 # ax.autoscale()
 # ax.set_aspect("equal")
-# ax.set_xlim([-1, 1])
-# ax.set_ylim([0, 1])
+# ax.set_xlim((-1, 1))
+# ax.set_ylim((0, 1))
 # ax.tick_params(labelsize=8)
 # sm = cm.ScalarMappable(cmap=cmap, norm=norm)
 # sm.set_array([])
@@ -464,13 +455,13 @@ plt.legend()
 # fig, ax = plt.subplots(dpi=200)
 # face_colors = cmap(norm(H1_error_fracture_2))
 # collection = PolyCollection(
-#     c4e_fracture_2, facecolors=face_colors, edgecolors="black", linewidths=0.2
+#     c4e_fracture_2, facecolors=face_colors, edgecolors="black", linewidths=0.2  # type: ignore
 # )
 # ax.add_collection(collection)
 # ax.autoscale()
 # ax.set_aspect("equal")
-# ax.set_xlim([-1, 1])
-# ax.set_ylim([0, 1])
+# ax.set_xlim((-1, 1))
+# ax.set_ylim((0, 1))
 # ax.tick_params(labelsize=8)
 # sm = cm.ScalarMappable(cmap=cmap, norm=norm)
 # sm.set_array([])
@@ -479,6 +470,6 @@ plt.legend()
 # fig.colorbar(sm, ax=ax, orientation="vertical", label=r"$H^1$ relative error")
 # plt.tight_layout()
 # # plt.savefig("relative_error_fracture_2.png")
-#
-#
+
+
 plt.show()

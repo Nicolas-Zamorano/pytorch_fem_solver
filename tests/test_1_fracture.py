@@ -16,7 +16,7 @@ torch.set_default_dtype(torch.float64)
 
 # ---------------------- FEM Parameters ----------------------#
 
-MESH_SIZE = 0.5 ** (9)
+MESH_SIZE = 0.5 ** (10)
 
 fracture_2d_data = {
     "vertices": [
@@ -157,9 +157,7 @@ A = V.integrate_bilinear_form(a)
 
 b = V.integrate_linear_form(l)
 
-u_h = V.solution_tensor()
-
-u_h = V.solve(A, u_h, b)
+u_h = V.solve(A, b)
 
 I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 

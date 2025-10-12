@@ -9,8 +9,8 @@ import torch
 import triangle as tr
 from torch_fem import FracturesTri
 
-torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
-torch.cuda.empty_cache()
+# torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
+# torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
 # ---------------------- FEM Parameters ----------------------#

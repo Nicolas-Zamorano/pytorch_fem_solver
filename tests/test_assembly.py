@@ -9,8 +9,6 @@ import torch
 import triangle as tr
 from skfem.helpers import dot, grad
 
-from tensordict import TensorDict
-
 from torch_fem import Basis, ElementTri, MeshTri
 
 # pyright: reportArgumentType=false

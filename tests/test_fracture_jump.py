@@ -17,16 +17,16 @@ from torch_fem import (
 
 torch.set_default_dtype(torch.float64)
 
-MESH_SIZE = 0.5**4
+MESH_SIZE = 0.5**2
 
 mesh_data = tr.triangulate(
-    {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
+    {"vertices": [[-1.0, 0.0], [1.0, 0.0], [-1.0, 1.0], [1.0, 1.0]]},
     "Dqena" + str(MESH_SIZE),
 )
 
 mesh = MeshTri(mesh_data)
 
-elements = ElementTri(polynomial_order=1, integration_order=4)
+elements = ElementTri(polynomial_order=1, integration_order=2)
 
 V = Basis(mesh, elements)
 
@@ -57,9 +57,7 @@ A = V.integrate_bilinear_form(a)
 
 b = V.integrate_linear_form(l, rhs)
 
-u_h = V.solution_tensor()
-
-u_h = V.solve(A, u_h, b)
+u_h = V.solve(A, b)
 
 V_inner_edges = InteriorEdgesBasis(
     mesh, ElementLine(polynomial_order=1, integration_order=2)
@@ -91,7 +89,7 @@ eta_E = V_inner_edges.integrate_functional(jump, h_E, n_E, I_u_grad).squeeze(-1)
 fractures_triangulation = [mesh_data]
 
 fractures_data = torch.tensor(
-    [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]]]
+    [[[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [-1.0, 1.0, 0.0], [1.0, 1.0, 0.0]]]
 )
 
 mesh_f = FracturesTri(
@@ -102,12 +100,10 @@ elements_f = ElementTri(polynomial_order=1, integration_order=2)
 
 V_f = FractureBasis(mesh_f, elements_f)
 
-A_f = V_f.reduce(V_f.integrate_bilinear_form(a))
-b_f = V_f.reduce(V_f.integrate_linear_form(l, rhs_3d))
+A_f = V_f.integrate_bilinear_form(a)
+b_f = V_f.integrate_linear_form(l, rhs_3d)
 
-u_f = V.solution_tensor()
-
-u_f = V.solve(A_f, u_f, b_f)
+u_f = V.solve(A_f, b_f)
 
 V_f_inner_edges = InteriorEdgesFractureBasis(
     mesh_f, ElementLine(polynomial_order=1, integration_order=2)
@@ -118,7 +114,7 @@ I_u_f, I_u_f_grad = cast(
 )
 
 h_E_f = V_f.mesh["interior_edges", "length"].unsqueeze(-2)
-n_E_f = V_f.mesh["interior_edges", "normals_3d"]
+n_E_f = V_f.mesh["interior_edges", "normals_3d"].unsqueeze(-2)
 
 I_u_values, I_u_count = torch.unique(
     torch.round(I_u.reshape(-1), decimals=12), return_counts=True

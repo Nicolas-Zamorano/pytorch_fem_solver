@@ -71,7 +71,7 @@ def h1_norm(basis, solution, solution_grad):
     )
 
 
-MESH_SIZE = 0.5**4
+MESH_SIZE = 0.5**2
 
 fracture_2d_data = {
     "vertices": [
@@ -100,9 +100,7 @@ A = V.integrate_bilinear_form(a)
 
 b = V.integrate_linear_form(l)
 
-u_h = V.solution_tensor()
-
-u_h = V.solve(A, u_h, b)
+u_h = V.solve(A, b)
 
 exact_value = exact(*torch.unbind(mesh["vertices", "coordinates"], -1))
 

@@ -1,7 +1,5 @@
 "# Example of solving a Poisson equation using a neural network and Patches."
 
-import math
-
 import matplotlib.pyplot as plt
 from matplotlib.collections import PolyCollection
 import torch
@@ -70,7 +68,7 @@ def generate_patches_info(n):
     return torch.Tensor(initial_centers), torch.Tensor(initial_radius).unsqueeze(-1)
 
 
-centers, radius = generate_patches_info(3)
+centers, radius = generate_patches_info(5)
 
 patches = Patches(centers, radius)
 
@@ -81,36 +79,85 @@ mesh_data = tr.triangulate(
 
 mesh = MeshTri(triangulation=mesh_data)
 
-elements = ElementTri(polynomial_order=1, integration_order=2)
-
-validation_elements = ElementTri(polynomial_order=1, integration_order=4)
+elements = ElementTri(polynomial_order=1, integration_order=4)
 
 discrete_basis = PatchesBasis(patches, elements)
-
-validation_basis = PatchesBasis(patches, validation_elements)
 
 error_basis = Basis(mesh, elements)
 
 # ---------------------- Residual Parameters ----------------------#
 
 
-def rhs(x, y):
+EXPONENTIAL_COEFFICIENT = 2.5
+SCALING_CONSTANT = 5
+
+
+def rhs(coordinates: torch.Tensor) -> torch.Tensor:
     """Right-hand side function."""
-    return 2.0 * math.pi**2 * torch.sin(math.pi * x) * torch.sin(math.pi * y)
+    x, y = torch.split(coordinates, 1, -1)
+
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
+
+    gxx = (
+        -2 * (exponential_value - 1)
+        + 2 * EXPONENTIAL_COEFFICIENT * (1 - 2 * x) * exponential_value
+        + EXPONENTIAL_COEFFICIENT**2 * x * (1 - x) * exponential_value
+    )
+
+    fxx = SCALING_CONSTANT * y * (1 - y) * gxx
+
+    fyy = SCALING_CONSTANT * (-2) * x * (1 - x) * (exponential_value - 1)
+
+    lap = fxx + fyy
+    return -lap
+
+
+def exact(coordinates: torch.Tensor) -> torch.Tensor:
+    """Exact solution of the PDE."""
+    x, y = torch.split(coordinates, 1, -1)
+    return (
+        SCALING_CONSTANT
+        * x
+        * y
+        * (1 - x)
+        * (1 - y)
+        * (torch.exp(EXPONENTIAL_COEFFICIENT * x) - 1)
+    )
+
+
+def exact_dx(coordinates: torch.Tensor) -> torch.Tensor:
+    """Exact solution derivative with respect to x."""
+
+    x, y = torch.split(coordinates, 1, -1)
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
+
+    return (
+        SCALING_CONSTANT
+        * y
+        * (1 - y)
+        * (
+            (1 - 2 * x) * (exponential_value - 1)
+            + EXPONENTIAL_COEFFICIENT * x * (1 - x) * exponential_value
+        )
+    )
+
+
+def exact_dy(coordinates: torch.Tensor) -> torch.Tensor:
+    """Exact solution derivative with respect to y."""
+    x, y = torch.split(coordinates, 1, -1)
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
+
+    return SCALING_CONSTANT * (1 - 2 * y) * x * (1 - x) * (exponential_value - 1)
 
 
 def residual(basis, gradient):
     """Residual of the PDE."""
-    integration_points = basis.integration_points
-    x, y = torch.split(integration_points, 1, dim=-1)
-
-    grad = gradient(integration_points)
 
     v = basis.v
     v_grad = basis.v_grad
-    rhs_value = rhs(x, y)
+    rhs_value = rhs(basis.integration_points)
 
-    return rhs_value * v - (v_grad @ grad.mT)
+    return rhs_value * v - (v_grad @ gradient.mT)
 
 
 def gram_matrix(basis):
@@ -127,48 +174,31 @@ gram_matrix_inverse = torch.inverse(
 )
 
 validation_gram_matrix_inverse = torch.inverse(
-    discrete_basis.reduce(validation_basis.integrate_bilinear_form(gram_matrix))
-    .unsqueeze(-1)
-    .unsqueeze(-1)
+    error_basis.reduce(error_basis.integrate_bilinear_form(gram_matrix))
 )
 
 
 # ---------------------- Error Parameters ----------------------#
 
 
-def exact(x, y):
-    """Exact solution of the PDE."""
-    return torch.sin(math.pi * x) * torch.sin(math.pi * y)
-
-
-def exact_dx(x, y):
-    """Exact solution derivative with respect to x."""
-    return math.pi * torch.cos(math.pi * x) * torch.sin(math.pi * y)
-
-
-def exact_dy(x, y):
-    """Exact solution derivative with respect to y."""
-    return math.pi * torch.sin(math.pi * x) * torch.cos(math.pi * y)
-
-
 def h1_exact(basis):
     """H1 norm of the exact solution."""
-    x, y = torch.split(basis.integration_points, 1, dim=-1)
+    x = basis.integration_points
 
-    return exact(x, y) ** 2 + exact_dx(x, y) ** 2 + exact_dy(x, y) ** 2
+    return exact(x) ** 2 + exact_dx(x) ** 2 + exact_dy(x) ** 2
 
 
 def h1_norm(basis, neural_network, gradient):
     """H1 norm of the neural network solution."""
     integration_points = basis.integration_points
-    x, y = torch.split(integration_points, 1, dim=-1)
+    x = integration_points
 
-    nn_dx, nn_dy = torch.split(gradient(integration_points), 1, dim=-1)
+    nn_dx, nn_dy = torch.split(gradient, 1, dim=-1)
 
     return (
-        (exact(x, y) - neural_network(integration_points)) ** 2
-        + (exact_dx(x, y) - nn_dx) ** 2
-        + (exact_dy(x, y) - nn_dy) ** 2
+        (exact(x) - neural_network) ** 2
+        + (exact_dx(x) - nn_dx) ** 2
+        + (exact_dy(x) - nn_dy) ** 2
     )
 
 
@@ -177,10 +207,17 @@ exact_norm = torch.sqrt(torch.sum(error_basis.integrate_functional(h1_exact)))
 # ---------------------- Training ----------------------#
 
 
-def training_step(neural_network):
+def training_step(neural_network: FeedForwardNeuralNetwork):
     """Training step for the neural network."""
+
+    _, nn_grad = neural_network.value_and_gradient(discrete_basis.integration_points)
+
+    nn_validation_value, nn_validation_grad = neural_network.value_and_gradient(
+        error_basis.integration_points
+    )
+
     residual_vector = discrete_basis.reduce(
-        discrete_basis.integrate_linear_form(residual, neural_network.gradient)
+        discrete_basis.integrate_linear_form(residual, nn_grad)
     ).unsqueeze(-1)
 
     loss_value = torch.sum(
@@ -189,27 +226,25 @@ def training_step(neural_network):
 
     # loss_value = torch.sum(residual_vector**2, dim=0)
 
-    validation_residual_vector = validation_basis.reduce(
-        discrete_basis.integrate_linear_form(residual, neural_network.gradient)
-    ).unsqueeze(-1)
+    validation_residual_vector = error_basis.reduce(
+        error_basis.integrate_linear_form(residual, nn_validation_grad)
+    )
 
-    validation_loss_value = torch.sum(
-        validation_residual_vector.mT
-        @ (validation_gram_matrix_inverse @ validation_residual_vector),
-        dim=0,
+    validation_loss_value = validation_residual_vector.T @ (
+        validation_gram_matrix_inverse @ validation_residual_vector
     )
 
     validation_loss_value = torch.sqrt(validation_loss_value) / exact_norm**2
 
-    h1_error = torch.sqrt(
+    error_h1 = torch.sqrt(
         torch.sum(
             error_basis.integrate_functional(
-                h1_norm, neural_network, neural_network.gradient
+                h1_norm, nn_validation_value, nn_validation_grad
             )
         )
     )
 
-    return loss_value, validation_loss_value, h1_error / exact_norm
+    return loss_value, validation_loss_value, error_h1 / exact_norm
 
 
 model = Model(
@@ -220,8 +255,8 @@ model = Model(
     optimizer_kwargs={"lr": 0.001},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.99**100},
-    use_early_stopping=True,
-    early_stopping_patience=10,
+    use_early_stopping=False,
+    early_stopping_patience=800,
     min_delta=1e-15,
 )
 
@@ -232,8 +267,10 @@ model.train()
 
 model.load_optimal_parameters()
 
+nn_error_value, nn_error_grad = NN.value_and_gradient(error_basis.integration_points)
+
 h1_error = torch.sqrt(
-    error_basis.integrate_functional(h1_norm, NN, NN.gradient)
+    error_basis.integrate_functional(h1_norm, nn_error_value, nn_error_grad)
 ).squeeze(-1)
 
 figure_solution, axis_solution = plt.subplots()
@@ -241,7 +278,7 @@ figure_solution, axis_solution = plt.subplots()
 c4e = torch.Tensor.numpy(error_basis.mesh["cells", "coordinates"], force=True)
 
 collection = PolyCollection(
-    c4e,
+    c4e,  # type: ignore
     array=h1_error.numpy(force=True),
     cmap="viridis",
     edgecolors="black",

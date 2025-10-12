@@ -61,8 +61,7 @@ V_edges = InteriorEdgesBasis(mesh, elements_1D)
 
 jump_integration_points = discrete_basis.compute_jump_integration_points(V_edges)
 
-h_T = discrete_basis.mesh["cells", "length"].reshape(-1, 1, 3, 1)
-h_E = discrete_basis.mesh["interior_edges", "length"].squeeze(-1)
+h_T = discrete_basis.mesh["cells", "length"]
 n_E = discrete_basis.mesh["interior_edges", "normals"].unsqueeze(-2)
 
 # ---------------------- Residual Parameters ----------------------#
@@ -115,12 +114,11 @@ def jump(
 
 def bulk(
     _,
-    triangle_size: torch.Tensor,
     laplacian: torch.Tensor,
     value_rhs: torch.Tensor,
 ) -> torch.Tensor:
     """Residual term for the right-hand side"""
-    return triangle_size**2 * (value_rhs + laplacian) ** 2
+    return (value_rhs + laplacian) ** 2
 
 
 gram_matrix_inverse = torch.inverse(
@@ -219,7 +217,6 @@ values = [
     exact_norm,
     gram_matrix_inverse,
     h_T,
-    h_E,
     n_E,
 ]
 
@@ -243,7 +240,6 @@ def training_step(
         norm_exact,
         matrix,
         triangle_size,
-        edge_size,
         normals_edges,
     ) = precomputed_values
 
@@ -264,11 +260,13 @@ def training_step(
     loss_value = residual_vector.T @ (matrix @ residual_vector)
 
     bulk_value = (
-        basis.integrate_functional(bulk, triangle_size, nn_laplacian, value_rhs)
+        triangle_size
+        * basis.integrate_functional(bulk, triangle_size, nn_laplacian, value_rhs)
     ).sum()
 
     jump_value = (
-        edge_size * V_edges.integrate_functional(jump, normals_edges, nn_jump_grad)
+        triangle_size ** (1 / 2)
+        * V_edges.integrate_functional(jump, normals_edges, nn_jump_grad)
     ).sum()
 
     residual_history.append(loss_value.item())
@@ -293,14 +291,14 @@ def training_step(
 model = Model(
     neural_network=NN,
     training_step=lambda nn: training_step(nn, discrete_basis, values),
-    epochs=20000,
+    epochs=12000,
     optimizer=torch.optim.Adam,
     optimizer_kwargs={"lr": 1e-3},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.9999},
     use_early_stopping=False,
-    early_stopping_patience=2000,
-    min_delta=1e-16,
+    early_stopping_patience=600,
+    min_delta=1e-15,
 )
 
 
@@ -356,7 +354,7 @@ model.plot_training_history(
         "loss": r"$\mathcal{L}(u_{\theta})$",
         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-        "title": "RVPINNs exponential",
+        "title": "Traning History",
     }
 )
 
