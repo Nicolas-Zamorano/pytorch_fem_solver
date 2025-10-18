@@ -9,7 +9,7 @@ from .basis import (
 )
 from .element import ElementLine, ElementTri
 from .mesh import FracturesTri, MeshTri, Patches
-from .model import Model, FeedForwardNeuralNetwork
+from .model import Model, FeedForwardNeuralNetwork, DistanceFunctionBC
 
 
 __all__ = [
@@ -25,4 +25,5 @@ __all__ = [
     "Patches",
     "Model",
     "FeedForwardNeuralNetwork",
+    "DistanceFunctionBC",
 ]
