@@ -68,21 +68,13 @@ class InteriorEdgesBasis(AbstractBasis):
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
         )
 
-    def integrate_over_interior_edges(
-        self,
-        function: Callable[..., torch.Tensor],
-        *args: Optional[Any],
-        **kwargs: Optional[Any],
-    ) -> torch.Tensor:
-        """Integrate over the interior_edges"""
-        integral_value = torch.zeros(self._basis_parameters["linear_form_shape"])
+    def compute_jump_integration_points(self, delta: float = 1e-12) -> torch.Tensor:
+        """Compute the jump integration points on the interior edges of the mesh."""
 
-        integrand_value = (function(self, *args, **kwargs) * self._dx).sum(-3)
+        deltas = torch.tensor([delta, -delta]).reshape(2, 1, 1, 1)
 
-        integral_value.index_put_(
-            self.mesh["interior_edges", "vertices"],
-            self.reshape_for_assembly(integrand_value, "linear"),
-            accumulate=True,
-        )
+        jump_integration_points = self.integration_points.unsqueeze(
+            -4
+        ) + deltas * self.mesh["interior_edges", "normals"].unsqueeze(-3).unsqueeze(-3)
 
-        return integral_value
+        return jump_integration_points
