@@ -48,7 +48,9 @@ class AbstractMesh(abc.ABC):
         for key, value in mesh_dict.items():
             if key in key_map:
                 subname, new_key = key_map[key]
-                if value.dtype == int32:
+                if isinstance(value, torch.Tensor):
+                    sub_dictionaries[subname][new_key] = value
+                elif value.dtype == int32:
                     sub_dictionaries[subname][new_key] = torch.tensor(
                         value, dtype=torch.int
                     )
@@ -56,8 +58,6 @@ class AbstractMesh(abc.ABC):
                     sub_dictionaries[subname][new_key] = torch.tensor(
                         value, dtype=torch.get_default_dtype()
                     )
-                elif isinstance(value, torch.Tensor):
-                    sub_dictionaries[subname][new_key] = value
 
         mesh_tensordict = tensordict.TensorDict(
             {
