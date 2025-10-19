@@ -57,7 +57,9 @@ u_sk = skfem.solve(*skfem.condense(A_sk, b_sk, I=mesh_sk.interior_nodes()))
 
 i_range = [0, 1]
 
-fbasis = [skfem.InteriorFacetBasis(mesh_sk, elem_sk, side=i) for i in i_range]
+fbasis = [
+    skfem.InteriorFacetBasis(mesh_sk, elem_sk, side=i, intorder=2) for i in i_range
+]
 u_facet = {"u" + str(i + 1): fbasis[i].interpolate(u_sk) for i in i_range}
 
 I_u_sk = torch.stack([torch.tensor(u_facet["u1"]), torch.tensor(u_facet["u2"])], dim=-1)
@@ -141,6 +143,10 @@ print(
     "Repeat:",
     I_u_grad_sk_count.numpy(),
 )
+
+print("Size of    I_u_grad: ", I_u_grad.size())
+print("Size of I_u_grad_sk: ", I_u_grad_sk.size())
+
 print(
     "I_u error        norm:",
     (torch.norm(I_u.squeeze(-1).squeeze(-1) - I_u_sk) / torch.norm(I_u_sk)).item(),
@@ -151,9 +157,6 @@ print(
         torch.norm(I_u_grad.squeeze(-2) - I_u_grad_sk.mT) / torch.norm(I_u_grad_sk)
     ).item(),
 )
-
-print("Size of    I_u_grad: ", I_u_grad.size())
-print("Size of I_u_grad_sk: ", I_u_grad_sk.size())
 
 
 def jump(_, h_element, n_element, solution_grad):
