@@ -98,6 +98,7 @@ class Basis(AbstractBasis):
         nb_local_dofs = global_dofs4elements.size(-1)
 
         inner_dofs = torch.nonzero(nodes4boundary_dofs != 1, as_tuple=True)[-2]
+        boundary_dofs = torch.nonzero(nodes4boundary_dofs == 1, as_tuple=True)[-2]
 
         rows_idx = global_dofs4elements.repeat(1, 1, nb_local_dofs).reshape(-1)
         cols_idx = global_dofs4elements.repeat_interleave(nb_local_dofs).reshape(-1)
@@ -110,6 +111,7 @@ class Basis(AbstractBasis):
             "linear_form_shape": (nb_global_dofs, 1),
             "linear_form_idx": (form_idx,),
             "inner_dofs": inner_dofs,
+            "boundary_dofs": boundary_dofs,
             "nb_dofs": nb_global_dofs,
         }
 
@@ -123,36 +125,6 @@ class Basis(AbstractBasis):
         return (
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
         )
-
-    def compute_jump_integration_points(
-        self, basis: InteriorEdgesBasis
-    ) -> torch.Tensor:
-        """Compute integrations points for computing jump term"""
-
-        cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
-
-        coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
-            self.mesh["cells", "coordinates"][..., [0], :],
-            cells_4_interior_edges,
-        ).unsqueeze(-3)
-
-        inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
-            self._inv_map_jacobian, cells_4_interior_edges
-        )
-
-        integrations_points = basis.integration_points.unsqueeze(-4)
-
-        # For computing the inverse mapping of the integrations points of the interior edges,
-        # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
-        # (2 meaning the triangle that share and edge).
-
-        new_integrations_points = self._element.compute_inverse_map(
-            coordinates_4_cells_first_vertex,
-            integrations_points,
-            inv_map_jacobian,
-        )
-
-        return new_integrations_points
 
     def interpolate(
         self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None
