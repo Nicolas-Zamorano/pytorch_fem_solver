@@ -1,6 +1,5 @@
 "Test derivate of NN w.r.t inputs." ""
 
-from typing import cast
 import torch
 import triangle as tr
 
@@ -9,6 +8,7 @@ from torch_fem import (
     ElementTri,
     MeshTri,
     FeedForwardNeuralNetwork as NeuralNetwork,
+    DistanceFunctionBC,
 )
 
 torch.set_default_dtype(torch.float32)
@@ -24,13 +24,14 @@ def test_derivate_wrt_inputs():
     else:
         raise ValueError("Unsupported torch dtype")
 
-    class BoundaryConstrain(torch.nn.Module):
-        """Class to strongly apply bc"""
-
-        def forward(self, inputs):
-            """Boundary condition modifier function."""
-            inputs_x, inputs_y = torch.split(inputs, 1, dim=-1)
-            return inputs_x * (inputs_x - 1) * inputs_y * (inputs_y - 1)
+    segments = torch.tensor(
+        [
+            [[0.0, 0.0], [1.0, 0.0]],
+            [[1.0, 0.0], [1.0, 1.0]],
+            [[1.0, 1.0], [0.0, 1.0]],
+            [[0.0, 1.0], [0.0, 0.0]],
+        ]
+    )
 
     neural_network = torch.jit.script(
         NeuralNetwork(
@@ -38,7 +39,7 @@ def test_derivate_wrt_inputs():
             output_dimension=1,
             nb_hidden_layers=4,
             neurons_per_layers=25,
-            boundary_condition_modifier=BoundaryConstrain(),
+            boundary_condition_modifier=DistanceFunctionBC(segments),
         )
     )
 
@@ -57,7 +58,7 @@ def test_derivate_wrt_inputs():
 
     x, y = torch.split(integration_points, 1, dim=-1)
 
-    gradients = cast(torch.Tensor, neural_network.gradient(integration_points))
+    _, gradients = neural_network.value_and_gradient(integration_points)
 
     step_size = 2**-9
 

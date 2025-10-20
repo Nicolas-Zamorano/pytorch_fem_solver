@@ -58,17 +58,17 @@ u_sk = skfem.solve(*skfem.condense(A_sk, b_sk, I=mesh_sk.interior_nodes()))
 i_range = [0, 1]
 
 fbasis = [
-    skfem.InteriorFacetBasis(mesh_sk, elem_sk, side=i, intorder=2) for i in i_range
+    skfem.InteriorFacetBasis(mesh_sk, elem_sk, side=i, intorder=4) for i in i_range
 ]
 u_facet = {"u" + str(i + 1): fbasis[i].interpolate(u_sk) for i in i_range}
 
-I_u_sk = torch.stack([torch.tensor(u_facet["u1"]), torch.tensor(u_facet["u2"])], dim=-1)
+I_u_sk = torch.stack([torch.tensor(u_facet["u1"]), torch.tensor(u_facet["u2"])], dim=-2)
 I_u_grad_sk = torch.stack(
     [
         torch.tensor(grad(u_facet["u1"])).permute(1, 2, 0),
         torch.tensor(grad(u_facet["u2"])).permute(1, 2, 0),
     ],
-    dim=-1,
+    dim=1,
 )
 
 
@@ -107,7 +107,7 @@ b = V.integrate_linear_form(l)
 
 sol = V.solve(A, b)
 
-element_inner_edges = ElementLine(polynomial_order=1, integration_order=2)
+element_inner_edges = ElementLine(polynomial_order=1, integration_order=3)
 
 V_inner_edges = InteriorEdgesBasis(mesh, element_inner_edges)
 
@@ -153,9 +153,7 @@ print(
 )
 print(
     "I_u_grad         norm:",
-    (
-        torch.norm(I_u_grad.squeeze(-2) - I_u_grad_sk.mT) / torch.norm(I_u_grad_sk)
-    ).item(),
+    (torch.norm(I_u_grad.squeeze(-2) - I_u_grad_sk) / torch.norm(I_u_grad_sk)).item(),
 )
 
 

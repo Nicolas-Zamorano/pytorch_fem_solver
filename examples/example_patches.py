@@ -376,7 +376,7 @@ figure_solution.tight_layout()
 #         "loss": r"$\mathcal{L}(u_{\theta})$",
 #         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
 #         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-#         "title": "Traning History",
+#         "title": "Training History",
 #     }
 # )
 
