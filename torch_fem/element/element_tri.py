@@ -25,21 +25,6 @@ class ElementTri(AbstractElement):
             [1.0 - x[..., [0]] - x[..., [1]], x[..., [0]], x[..., [1]]], dim=-2
         )
 
-    def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
-
-        ab, cd = torch.split(map_jacobian, 1, dim=-2)
-
-        a, b = torch.split(ab, 1, dim=-1)
-        c, d = torch.split(cd, 1, dim=-1)
-
-        det_map_jacobian = (a * d - b * c).unsqueeze(-3)
-
-        inv_map_jacobian = (1 / det_map_jacobian) * torch.stack(
-            [torch.concat([d, -b], dim=-1), torch.concat([-c, a], dim=-1)], dim=-2
-        )
-
-        return det_map_jacobian, inv_map_jacobian
-
     def compute_shape_functions(
         self, bar_coords: torch.Tensor, inv_map_jacobian: torch.Tensor
     ):
@@ -402,3 +387,18 @@ class ElementTri(AbstractElement):
             raise NotImplementedError("Integration order not implemented")
 
         return gaussian_nodes, gaussian_weights
+
+    def compute_det_and_inv_map(self, map_jacobian: torch.Tensor):
+
+        ab, cd = torch.split(map_jacobian, 1, dim=-2)
+
+        a, b = torch.split(ab, 1, dim=-1)
+        c, d = torch.split(cd, 1, dim=-1)
+
+        det_map_jacobian = (a * d - b * c).unsqueeze(-3)
+
+        inv_map_jacobian = (1 / det_map_jacobian) * torch.stack(
+            [torch.concat([d, -b], dim=-1), torch.concat([-c, a], dim=-1)], dim=-2
+        )
+
+        return det_map_jacobian, inv_map_jacobian

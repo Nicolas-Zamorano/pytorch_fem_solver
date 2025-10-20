@@ -76,52 +76,6 @@ class Basis(AbstractBasis):
             nodes_4_boundary_dofs = torch.cat(
                 [mesh["vertices", "markers"], new_markers_4_new_dofs], dim=-2
             )
-
-        else:
-            raise NotImplementedError("Polynomial order not implemented")
-
-        coords_4_elements = mesh.compute_coordinates_4_cells(
-            coords_4_global_dofs, global_dofs_4_elements
-        )
-
-        return (
-            coords_4_global_dofs,
-            global_dofs_4_elements,
-            nodes_4_boundary_dofs,
-            coords_4_elements,
-        )
-
-    def _compute_edges_dofs(
-        self,
-        mesh: AbstractMesh,
-        element: AbstractElement,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute the edge degrees of freedom for the basis functions"""
-
-        if element.polynomial_order == 2:
-
-            coordinates_4_vertices = mesh["vertices", "coordinates"]
-            coordinates_4_new_dofs = mesh["edges", "coordinates"].mean(-2)
-
-            vertices_4_edges = mesh["edges", "vertices"]
-
-            vertices_4_new_dofs = (
-                torch.arange(vertices_4_edges.shape[0])
-                + coordinates_4_vertices.shape[-2]
-            )
-
-            new_markers_4_new_dofs = mesh["edges", "markers"]
-
-            coords_4_global_dofs = torch.cat(
-                [mesh["edges", "coordinates"], coordinates_4_new_dofs], dim=-2
-            )
-            global_dofs_4_elements = torch.cat(
-                [mesh["edges", "vertices"], vertices_4_new_dofs], dim=-1
-            )
-            nodes_4_boundary_dofs = torch.cat(
-                [mesh["edges", "markers"], new_markers_4_new_dofs], dim=-2
-            )
-
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
@@ -198,7 +152,7 @@ class Basis(AbstractBasis):
             ).unsqueeze(-3)
 
             inv_map_jacobian = basis.mesh.compute_coordinates_4_cells(
-                self._inv_edges_map_jacobian, cells_4_interior_edges
+                self._inv_map_jacobian, cells_4_interior_edges
             )
 
             integrations_points = basis.integration_points.unsqueeze(-4)
