@@ -13,55 +13,85 @@ class IdentityBC(torch.nn.Module):
 
 
 class DistanceFunctionBC(torch.nn.Module):
-    """Distance layer for strong application of boundary conditions"""
+    """Distance layer for strong application of boundary conditions.
+
+    Uses an Rvachev-style distance function for a set of line segments.
+    """
 
     def __init__(self, segments_points: torch.Tensor):
         super().__init__()
-        self.segments_points = segments_points.unsqueeze(-3).unsqueeze(-3).unsqueeze(-3)
-        self.normalization_order = 1.0
-
-        self.diff_points, self.length, self.segments_midpoint = (
-            self.compute_segment_values(self.segments_points)
+        self.segments_endpoints = (
+            segments_points.unsqueeze(-3).unsqueeze(-3).unsqueeze(-3)
         )
+        self.segments_endpoints_first_point = torch.index_select(
+            self.segments_endpoints, -2, torch.tensor([0], dtype=torch.long)
+        )
+        self.normalization_power = 1.0
+
+        (self.segment_vectors, self.segment_lengths, self.segment_midpoints) = (
+            self.compute_segment_values(self.segments_endpoints)
+        )
+
+        (
+            self.segment_midpoints_first_coordinate,
+            self.segment_midpoints_second_coordinate,
+        ) = torch.split(self.segment_midpoints, 1, dim=-1)
 
     def compute_segment_values(
         self, segments_points: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute values used in the distance function."""
-        diff_points = segments_points[..., [1], :] - segments_points[..., [0], :]
-        length = torch.norm(diff_points, dim=-1, keepdim=True)
-        segments_midpoint = segments_points.mean(dim=-2, keepdim=True)
+        """Compute per-segment vectors, lengths and midpoints."""
+        segments_first_point, segments_second_point = torch.split(
+            segments_points, 1, dim=-2
+        )
+        segment_vectors = segments_second_point - segments_first_point
+        segment_lengths = torch.norm(segment_vectors, dim=-1, keepdim=True)
+        segment_midpoints = segments_points.mean(dim=-2, keepdim=True)
 
-        return diff_points, length, segments_midpoint
-
-    def linseg(self, points: torch.Tensor) -> torch.Tensor:
-        """Compute the Rvachev function for a set of line segments."""
-        diff_segments_points = points - self.segments_points[..., [0], :]
-
-        signed_distance_function = (1 / self.length) * (
-            diff_segments_points[..., [0]] * self.diff_points[..., [1]]
-            - diff_segments_points[..., [1]] * self.diff_points[..., [0]]
+        return (
+            segment_vectors,
+            segment_lengths,
+            segment_midpoints,
         )
 
-        trimming_function = (1.0 / self.length) * (
-            (self.length / 2.0) ** 2
-            - torch.norm(points - self.segments_midpoint, dim=-1, keepdim=True) ** 2
+    def compute_rvachev_for_segments(self, points: torch.Tensor) -> torch.Tensor:
+        """Compute the Rvachev distance-like value for each line segment.
+
+        Returns a tensor of per-segment distance contributions for the input points.
+        """
+        vectors_from_segment_start = points - self.segments_endpoints_first_point
+
+        (
+            vectors_from_segment_start_first_coordinate,
+            vectors_from_segment_start_second_coordinate,
+        ) = torch.split(vectors_from_segment_start, 1, dim=-1)
+
+        signed_distances = (1 / self.segment_lengths) * (
+            vectors_from_segment_start_first_coordinate
+            * self.segment_midpoints_second_coordinate
+            - vectors_from_segment_start_second_coordinate
+            * self.segment_midpoints_first_coordinate
         )
 
-        varphi = torch.sqrt(trimming_function**2 + signed_distance_function**4)
-
-        phi = torch.sqrt(
-            signed_distance_function**2 + 0.25 * (varphi - trimming_function) ** 2
+        trimming_values = (1.0 / self.segment_lengths) * (
+            (self.segment_lengths / 2.0) ** 2
+            - torch.norm(points - self.segment_midpoints, dim=-1, keepdim=True) ** 2
         )
-        return phi
+
+        function_value = torch.sqrt(trimming_values**2 + signed_distances**4)
+
+        segment_distance = torch.sqrt(
+            signed_distances**2 + 0.25 * (function_value - trimming_values) ** 2
+        )
+        return segment_distance
 
     def forward(self, points: torch.Tensor) -> torch.Tensor:
-        """Normalized Rvachev function for a set of line segments."""
-        phi_val = self.linseg(points)
-        rvachev_function = 1.0 / torch.sqrt(
-            (1.0 / (phi_val**self.normalization_order)).sum(0)
+        """Normalized Rvachev function aggregated over segments for the given points."""
+        per_segment_distances = self.compute_rvachev_for_segments(points)
+        normalized_rvachev = 1.0 / torch.sqrt(
+            (1.0 / (per_segment_distances**self.normalization_power)).sum(0)
         )
-        return rvachev_function.squeeze(0)
+        return normalized_rvachev.squeeze(0)
 
 
 class FeedForwardNeuralNetwork(torch.nn.Module):
