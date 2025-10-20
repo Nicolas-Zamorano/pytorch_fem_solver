@@ -164,7 +164,7 @@ class MeshesTri(MeshTri):
 
         return vertices_4_boundary_edges, vertices_4_interior_edges
 
-    def _compute_cells_min_length(self, triangulation: tensordict.TensorDict):
+    def _compute_cells_max_length(self, triangulation: tensordict.TensorDict):
         """For each cells, compute the smaller length of the edges."""
         vertices_4_edges, _ = torch.sort(
             triangulation["cells", "vertices"][..., self.edges_permutations], dim=-1
