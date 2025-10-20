@@ -3,6 +3,7 @@
 import abc
 from typing import Callable, Tuple, Any, Optional
 import torch
+import tensordict
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
 
@@ -10,18 +11,31 @@ from ..element.abstract_element import AbstractElement
 class AbstractBasis(abc.ABC):
     """Abstract class for basis representation"""
 
-    def __init__(self, mesh: AbstractMesh, element: AbstractElement):
+    def __init__(
+        self,
+        mesh: AbstractMesh,
+        cells_element: AbstractElement,
+        edges_element: Optional[AbstractElement] = None,
+    ):
 
-        self._element = element
+        self._element = cells_element
         self.mesh = mesh
 
         (
-            self.v,
-            self.v_grad,
-            self.integration_points,
+            v,
+            v_grad,
+            integration_points,
             self._dx,
-            self._inv_map_jacobian,
-        ) = self._compute_integral_values(mesh, element)
+            self._inv_edges_map_jacobian,
+        ) = self._compute_integral_values(mesh, cells_element)
+
+        self.cells_integration_values = tensordict.TensorDict(
+            {
+                "shape_functions": v,
+                "shape_function_gradients": v_grad,
+                "integration_points": integration_points,
+            }
+        )
 
         (
             self._coords4global_dofs,
@@ -30,8 +44,28 @@ class AbstractBasis(abc.ABC):
             self._coords4elements,
         ) = self._compute_dofs(
             mesh,
-            element,
+            cells_element,
         )
+
+        if cells_element.polynomial_order >= 2:
+            self.mesh.compute_edges_values()
+
+        if edges_element is not None:
+            self._edge_element = edges_element
+            self.mesh.compute_edges_values()
+
+            (
+                v,
+                v_grad,
+                integration_points,
+                self._ds,
+                self._inv_edges_map_jacobian,
+            ) = self._compute_integral_values(mesh, cells_element)
+
+            self._ = self._compute_edges_dofs(
+                mesh,
+                edges_element,
+            )
 
         self._basis_parameters = self._compute_basis_parameters(
             self._coords4global_dofs,
