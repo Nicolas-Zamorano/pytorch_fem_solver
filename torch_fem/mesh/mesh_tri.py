@@ -79,29 +79,37 @@ class MeshTri(AbstractMesh):
         return cells_4_boundary_edges, cells_4_interior_edges
 
     def _compute_edges_vertices(self, triangulation):
-        raise NotImplementedError("current implementation does not work as expected")
-
-        vertices_4_edges = triangulation["cells", "vertices"][
-            ..., self.edges_permutations
-        ]
-
+        vertices = triangulation["cells", "vertices"]
+        vertices_4_edges = vertices[..., self.edges_permutations.to(vertices.device)]
         edges_flat = vertices_4_edges.reshape(-1, 2)
 
+        # Count occurrences per undirected edge key
+        edges_list = edges_flat.tolist()
+        counts = {}
+        for a, b in edges_list:
+            key = (a, b) if a <= b else (b, a)
+            counts[key] = counts.get(key, 0) + 1
+
+        # Keep first appearance and preserve its orientation; mark boundary if count == 1
         seen = set()
-        unique_edges = []
-        mask = torch.ones(edges_flat.shape[0])
+        unique_edges_list = []
+        boundary_mask_list = []
+        for a, b in edges_list:
+            key = (a, b) if a <= b else (b, a)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_edges_list.append([a, b])  # preserve original orientation
+            boundary_mask_list.append(1 if counts[key] == 1 else 0)
 
-        for i, e in enumerate(edges_flat):
-            a, b = e.tolist()
-            key = tuple(sorted((a, b)))
-            if key not in seen:
-                seen.add(key)
-                unique_edges.append([a, b])
-                mask[i] = 1
+        unique_edges = torch.tensor(
+            unique_edges_list, dtype=edges_flat.dtype, device=edges_flat.device
+        )
+        keep_mask = torch.tensor(
+            boundary_mask_list, dtype=torch.long, device=edges_flat.device
+        ).unsqueeze(-1)
 
-        unique_edges = torch.tensor(unique_edges)
-
-        return unique_edges, mask
+        return unique_edges, keep_mask
 
     def _compute_cells_max_length(self, triangulation):
         vertices_4_edges, _ = torch.sort(
