@@ -17,20 +17,21 @@ class Basis(AbstractBasis):
         element: AbstractElement,
     ):
 
+        coordinates_4_vertices = mesh["vertices", "coordinates"]
+        vertices_4_cells = mesh["cells", "vertices"]
+        markers_4_vertices = mesh["vertices", "markers"]
+
         if element.polynomial_order == 1:
 
-            coords_4_global_dofs = mesh["vertices", "coordinates"]
-            global_dofs_4_elements = mesh["cells", "vertices"]
-            nodes_4_boundary_dofs = mesh["vertices", "markers"]
+            coords_4_global_dofs = coordinates_4_vertices
+            global_dofs_4_elements = vertices_4_cells
+            nodes_4_boundary_dofs = markers_4_vertices
 
         elif element.polynomial_order == 2:
 
-            coordinates_4_vertices = mesh["vertices", "coordinates"]
+            vertices_4_edges = mesh["edges", "vertices"]
 
             coordinates_4_new_dofs = mesh["edges", "coordinates"].mean(-2)
-
-            vertices_4_cells = mesh["cells", "vertices"]
-            vertices_4_edges = mesh["edges", "vertices"]
 
             new_dofs_enumeration = (
                 torch.arange(vertices_4_edges.shape[0])
@@ -68,14 +69,119 @@ class Basis(AbstractBasis):
             new_markers_4_new_dofs = mesh["edges", "markers"]
 
             coords_4_global_dofs = torch.cat(
-                [mesh["vertices", "coordinates"], coordinates_4_new_dofs], dim=-2
+                [coordinates_4_vertices, coordinates_4_new_dofs], dim=-2
             )
             global_dofs_4_elements = torch.cat(
-                [mesh["cells", "vertices"], vertices_4_new_dofs], dim=-1
+                [vertices_4_cells, vertices_4_new_dofs], dim=-1
             )
             nodes_4_boundary_dofs = torch.cat(
-                [mesh["vertices", "markers"], new_markers_4_new_dofs], dim=-2
+                [markers_4_vertices, new_markers_4_new_dofs], dim=-2
             )
+
+        elif element.polynomial_order == 3:
+
+            vertices_4_edges = mesh["edges", "vertices"]
+
+            (
+                coordinates_4_vertices_first_vertex,
+                coordinates_4_vertices_second_vertex,
+            ) = torch.unbind(mesh["edges", "coordinates"], dim=-2)
+
+            coordinates_4_new_edge_dofs = torch.stack(
+                [
+                    coordinates_4_vertices_first_vertex * 2 / 3
+                    + coordinates_4_vertices_second_vertex * 1 / 3,
+                    coordinates_4_vertices_first_vertex * 1 / 3
+                    + coordinates_4_vertices_second_vertex * 2 / 3,
+                ],
+                dim=-2,
+            ).reshape(-1, 2)
+
+            # Cell-center DOFs (one per cell)
+            coordinates_4_cell_center_dofs = mesh["cells", "coordinates"].mean(dim=-2)
+
+            coordinates_4_new_dofs = torch.cat(
+                [coordinates_4_new_edge_dofs, coordinates_4_cell_center_dofs],
+                dim=-2,
+            )
+
+            # Enumerate edge DOFs
+            new_edge_dofs_enumeration = (
+                torch.arange(vertices_4_edges.shape[0] * 2)
+                + coordinates_4_vertices.shape[-2]
+            )
+
+            # Enumerate cell-center DOFs
+            new_cell_dofs_enumeration = (
+                torch.arange(vertices_4_cells.shape[0])
+                + coordinates_4_vertices.shape[-2]
+                + vertices_4_edges.shape[0] * 2
+            )
+
+            vertices_4_non_unique_edges = vertices_4_cells[..., mesh.edges_permutations]
+
+            vertices_4_non_unique_edges_sorted, _ = vertices_4_non_unique_edges.sort(
+                dim=-1
+            )
+            vertices_4_edges_sorted, _ = vertices_4_edges.sort(dim=-1)
+
+            vertices_offset = vertices_4_cells.max() + 1
+            vertices_keys = (
+                vertices_4_non_unique_edges_sorted[..., 0] * vertices_offset
+                + vertices_4_non_unique_edges_sorted[..., 1]
+            )
+            edge_keys = (
+                vertices_4_edges_sorted[:, 0] * vertices_offset
+                + vertices_4_edges_sorted[:, 1]
+            )
+
+            map_dict = -torch.ones(vertices_offset * vertices_offset, dtype=torch.int64)
+
+            map_dict[edge_keys] = torch.arange(
+                vertices_4_edges.shape[0],
+                dtype=torch.int64,
+            )
+
+            global_edge_ids = map_dict[vertices_keys]
+
+            # For polynomial order 3, we have 2 DOFs per edge
+            # Create indices for both DOFs: [edge_id*2, edge_id*2+1]
+            global_edge_ids_expanded = torch.stack(
+                [global_edge_ids * 2, global_edge_ids * 2 + 1], dim=-1
+            )
+            vertices_4_new_edge_dofs = new_edge_dofs_enumeration[
+                global_edge_ids_expanded.reshape(*global_edge_ids.shape[:-1], -1)
+            ]
+
+            # Cell-center DOF indices (one per cell)
+            vertices_4_cell_center_dofs = new_cell_dofs_enumeration.unsqueeze(-1)
+
+            # Combine edge DOFs and cell-center DOFs
+            vertices_4_new_dofs = torch.cat(
+                [vertices_4_new_edge_dofs, vertices_4_cell_center_dofs], dim=-1
+            )
+
+            # Markers: edge DOFs inherit edge markers, cell DOFs are interior (marker=0)
+            new_markers_4_edge_dofs = mesh["edges", "markers"].repeat_interleave(
+                2, dim=-2
+            )
+            new_markers_4_cell_dofs = torch.zeros(
+                (vertices_4_cells.shape[0], 1), dtype=mesh["edges", "markers"].dtype
+            )
+            new_markers_4_new_dofs = torch.cat(
+                [new_markers_4_edge_dofs, new_markers_4_cell_dofs], dim=-2
+            )
+
+            coords_4_global_dofs = torch.cat(
+                [coordinates_4_vertices, coordinates_4_new_dofs], dim=-2
+            )
+            global_dofs_4_elements = torch.cat(
+                [vertices_4_cells, vertices_4_new_dofs], dim=-1
+            )
+            nodes_4_boundary_dofs = torch.cat(
+                [markers_4_vertices, new_markers_4_new_dofs], dim=-2
+            )
+
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
