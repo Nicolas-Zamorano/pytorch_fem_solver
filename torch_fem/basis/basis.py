@@ -243,10 +243,30 @@ class Basis(AbstractBasis):
     ):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            vertices_4_cells_4_interior_edges = self._global_dofs4elements.unsqueeze(-2)
+            indices_4_dofs = self._global_dofs4elements.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
+
+        elif basis.__class__ == Basis and basis is not self:
+
+            elements_mask = self.mesh.map_fine_mesh(basis.mesh)
+
+            # dofs_idx = self.global_dofs4elements[elements_mask]
+
+            # coords4elements_first_node = self.coords4elements[..., [0], :][
+            #     elements_mask
+            # ]
+
+            # inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+
+            # new_integrations_points = self.elements.compute_inverse_map(
+            #     coords4elements_first_node, basis.integration_points, inv_map_jacobian
+            # )
+
+            # _, v, v_grad = self.elements.compute_shape_functions(
+            #     new_integrations_points.squeeze(-2), inv_map_jacobian
+            # )
 
         elif basis.__class__ == InteriorEdgesBasis:
 
@@ -284,7 +304,7 @@ class Basis(AbstractBasis):
             v = new_v
             v_grad = new_v_grad
 
-            vertices_4_cells_4_interior_edges = basis.mesh.compute_coordinates_4_cells(
+            indices_4_dofs = basis.mesh.compute_coordinates_4_cells(
                 basis.mesh["cells", "vertices"], cells_4_interior_edges
             ).unsqueeze(-2)
 
@@ -293,29 +313,25 @@ class Basis(AbstractBasis):
 
         if tensor is not None:
 
-            interpolation = (tensor[vertices_4_cells_4_interior_edges] * v).sum(
-                -2, keepdim=True
-            )
+            interpolation = (tensor[indices_4_dofs] * v).sum(-2, keepdim=True)
 
-            interpolation_grad = (
-                tensor[vertices_4_cells_4_interior_edges] * v_grad
-            ).sum(-2, keepdim=True)
+            interpolation_grad = (tensor[indices_4_dofs] * v_grad).sum(-2, keepdim=True)
 
             return interpolation, interpolation_grad
 
-        nodes = self._coords4global_dofs
+        coordinates_4_dofs = self._coords4global_dofs
 
         def interpolator(
             function: Callable[[torch.Tensor], torch.Tensor],
         ) -> torch.Tensor:
-            return (function(nodes)[vertices_4_cells_4_interior_edges] * v).sum(
+            return (function(coordinates_4_dofs)[indices_4_dofs] * v).sum(
                 -2, keepdim=True
             )
 
         def interpolator_grad(
             function: Callable[[torch.Tensor], torch.Tensor],
         ) -> torch.Tensor:
-            return (function(nodes)[vertices_4_cells_4_interior_edges] * v_grad).sum(
+            return (function(coordinates_4_dofs)[indices_4_dofs] * v_grad).sum(
                 -2, keepdim=True
             )
 
