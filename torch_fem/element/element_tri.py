@@ -68,6 +68,79 @@ class ElementTri(AbstractElement):
                 )
                 @ inv_map_jacobian
             )
+
+        elif self.polynomial_order == 3:
+
+            v = torch.concat(
+                [
+                    # Vertex DOFs (3)
+                    0.5 * lambda_1 * (3 * lambda_1 - 1) * (3 * lambda_1 - 2),
+                    0.5 * lambda_2 * (3 * lambda_2 - 1) * (3 * lambda_2 - 2),
+                    0.5 * lambda_3 * (3 * lambda_3 - 1) * (3 * lambda_3 - 2),
+                    # Edge DOFs (6): 2 per edge (1-2, 2-3, 3-1)
+                    4.5 * lambda_1 * lambda_2 * (3 * lambda_1 - 1),
+                    4.5 * lambda_1 * lambda_2 * (3 * lambda_2 - 1),
+                    4.5 * lambda_2 * lambda_3 * (3 * lambda_2 - 1),
+                    4.5 * lambda_2 * lambda_3 * (3 * lambda_3 - 1),
+                    4.5 * lambda_3 * lambda_1 * (3 * lambda_3 - 1),
+                    4.5 * lambda_3 * lambda_1 * (3 * lambda_1 - 1),
+                    # Cell-center DOF (1)
+                    27 * lambda_1 * lambda_2 * lambda_3,
+                ],
+                dim=-2,
+            )
+
+            v_grad = (
+                torch.concat(
+                    [
+                        # Gradients of vertex DOFs
+                        0.5 * (27 * lambda_1**2 - 18 * lambda_1 + 2) * grad_lambda_1,
+                        0.5 * (27 * lambda_2**2 - 18 * lambda_2 + 2) * grad_lambda_2,
+                        0.5 * (27 * lambda_3**2 - 18 * lambda_3 + 2) * grad_lambda_3,
+                        # Gradients of edge DOFs
+                        4.5
+                        * (
+                            lambda_2 * (6 * lambda_1 - 1) * grad_lambda_1
+                            + lambda_1 * (3 * lambda_1 - 1) * grad_lambda_2
+                        ),
+                        4.5
+                        * (
+                            lambda_2 * (3 * lambda_2 - 1) * grad_lambda_1
+                            + lambda_1 * (6 * lambda_2 - 1) * grad_lambda_2
+                        ),
+                        4.5
+                        * (
+                            lambda_3 * (3 * lambda_2 - 1) * grad_lambda_2
+                            + lambda_2 * (6 * lambda_2 - 1) * grad_lambda_3
+                        ),
+                        4.5
+                        * (
+                            lambda_3 * (6 * lambda_3 - 1) * grad_lambda_2
+                            + lambda_2 * (3 * lambda_3 - 1) * grad_lambda_3
+                        ),
+                        4.5
+                        * (
+                            lambda_1 * (3 * lambda_3 - 1) * grad_lambda_3
+                            + lambda_3 * (6 * lambda_3 - 1) * grad_lambda_1
+                        ),
+                        4.5
+                        * (
+                            lambda_1 * (6 * lambda_1 - 1) * grad_lambda_3
+                            + lambda_3 * (3 * lambda_1 - 1) * grad_lambda_1
+                        ),
+                        # Gradient of cell-center DOF
+                        27
+                        * (
+                            lambda_2 * lambda_3 * grad_lambda_1
+                            + lambda_1 * lambda_3 * grad_lambda_2
+                            + lambda_1 * lambda_2 * grad_lambda_3
+                        ),
+                    ],
+                    dim=-2,
+                )
+                @ inv_map_jacobian
+            )
+
         else:
 
             raise NotImplementedError("Polynomial order not implemented")
