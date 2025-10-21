@@ -13,6 +13,7 @@ from torch_fem import (
     InteriorEdgesBasis,
     FeedForwardNeuralNetwork as NeuralNetwork,
     Model,
+    DistanceFunctionBC,
 )
 
 
@@ -20,31 +21,128 @@ from torch_fem import (
 # torch.cuda.empty_cache()
 torch.set_default_dtype(torch.float64)
 
-# ---------------------- FEM Parameters ----------------------#
 
-mesh_data = tr.triangulate(
-    {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**10),
+# ---------------------- Neural Network Parameters ----------------------#
+
+
+# class BoundaryConstrain(torch.nn.Module):
+#     """Class to strongly apply bc"""
+
+#     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+#         """Boundary condition modifier function."""
+#         x, y = torch.split(inputs, 1, dim=-1)
+#         return x * (x - 1) * y * (y - 1)
+
+
+segments = torch.tensor(
+    [
+        [[0.0, 0.0], [1.0, 0.0]],
+        [[1.0, 0.0], [1.0, 1.0]],
+        [[1.0, 1.0], [0.0, 1.0]],
+        [[0.0, 1.0], [0.0, 0.0]],
+    ]
 )
 
-mesh = MeshTri(triangulation=mesh_data)
 
-elements = ElementTri(polynomial_order=1, integration_order=3)
+NN = NeuralNetwork(
+    input_dimension=2,
+    output_dimension=1,
+    nb_hidden_layers=4,
+    neurons_per_layers=15,
+    boundary_condition_modifier=DistanceFunctionBC(segments),
+    # boundary_condition_modifier=BoundaryConstrain(),
+    use_xavier_initialization=True,
+)
 
-discrete_basis = Basis(mesh, elements)
+# ---------------------- FEM Parameters ----------------------#
 
-elements_1D = ElementLine(polynomial_order=1, integration_order=3)
+K_INTERPOLATION = 3
+K_TEST_FUNCTIONS = 1
+ORDER_PRECISION_INTEGRATION = 2
 
-V_edges = InteriorEdgesBasis(mesh, elements_1D)
+mesh_data_coarser = tr.triangulate(
+    {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
+    "Dqena" + str(0.5**8),
+)
 
-jump_integration_points = V_edges.compute_jump_integration_points(delta=1e-12)
+mesh_coarser = MeshTri(triangulation=mesh_data_coarser)
 
-h_T = discrete_basis.mesh["cells", "length"]
-h_E = discrete_basis.mesh["interior_edges", "length"]
-n_E = discrete_basis.mesh["interior_edges", "normals"].unsqueeze(-2)
+elements_coarser = ElementTri(polynomial_order=1, integration_order=4)
+
+basis_coarser = Basis(mesh_coarser, elements_coarser)
+
+verties_finer = basis_coarser._coords4global_dofs.numpy(force=True)
+
+mesh_data_finer = tr.triangulate(
+    dict(
+        vertices=new_vertices,
+    ),
+    "Dqnel",
+)
+
+mesh_finer = MeshTri(triangulation=mesh_data_finer)
+
+elements_finer = ElementTri(polynomial_order=1, integration_order=2)
+
+basis_finer = Basis(mesh_finer, elements_finer)
+
+tr.compare(
+    plt,
+    mesh_data_coarser,
+    mesh_data_finer,
+)
+
+plt.show()
+
+interpolation_function, grad_interpolation_function = basis_coarser.interpolate(
+    basis_finer
+)
+
+# elements_1D = ElementLine(polynomial_order=1, integration_order=4)
+
+# V_edges = InteriorEdgesBasis(mesh_coarser, elements_1D)
+
+# jump_integration_points = V_edges.compute_jump_integration_points(delta=1e-12)
+
+# h_T = basis_coarser.mesh["cells", "length"]
+# h_E = basis_coarser.mesh["interior_edges", "length"]
+# n_E = basis_coarser.mesh["interior_edges", "normals"].unsqueeze(-2)
+
+
+def interpolate(function: torch.nn.Module):
+    """Interpolate the neural network using FEM basis."""
+    return interpolation_function(function)
+
+
+def grad_interpolate(function: torch.nn.Module):
+    """Interpolate the gradient of the neural network using FEM basis."""
+    return grad_interpolation_function(function)
 
 
 # ---------------------- Residual Parameters ----------------------#
+
+EXPONENTIAL_COEFFICIENT = 5
+SCALING_CONSTANT = 1
+
+
+def rhs(coordinates: torch.Tensor) -> torch.Tensor:
+    """Right-hand side function."""
+    x, y = torch.split(coordinates, 1, -1)
+
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
+
+    gxx = (
+        -2 * (exponential_value - 1)
+        + 2 * EXPONENTIAL_COEFFICIENT * (1 - 2 * x) * exponential_value
+        + EXPONENTIAL_COEFFICIENT**2 * x * (1 - x) * exponential_value
+    )
+
+    fxx = SCALING_CONSTANT * y * (1 - y) * gxx
+
+    fyy = SCALING_CONSTANT * (-2) * x * (1 - x) * (exponential_value - 1)
+
+    lap = fxx + fyy
+    return -lap
 
 
 def residual(
@@ -78,9 +176,9 @@ def bulk(
     return (value_rhs + laplacian) ** 2
 
 
-gram_matrix_inverse = torch.inverse(
-    discrete_basis.reduce(discrete_basis.integrate_bilinear_form(gram_matrix))
-)
+# gram_matrix_inverse = torch.inverse(
+#     discrete_basis.reduce(discrete_basis.integrate_bilinear_form(gram_matrix))
+# )
 
 # ---------------------- Error Parameters ----------------------#
 
@@ -88,36 +186,39 @@ gram_matrix_inverse = torch.inverse(
 def exact(coordinates: torch.Tensor) -> torch.Tensor:
     """Exact solution of the PDE."""
     x, y = torch.split(coordinates, 1, -1)
-    return torch.tanh(2 * (x**3 - y**4))
+    return (
+        SCALING_CONSTANT
+        * x
+        * y
+        * (1 - x)
+        * (1 - y)
+        * (torch.exp(EXPONENTIAL_COEFFICIENT * x) - 1)
+    )
 
 
 def exact_dx(coordinates: torch.Tensor) -> torch.Tensor:
     """Exact solution derivative with respect to x."""
 
     x, y = torch.split(coordinates, 1, -1)
-    return 6 * x**2 * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
+
+    return (
+        SCALING_CONSTANT
+        * y
+        * (1 - y)
+        * (
+            (1 - 2 * x) * (exponential_value - 1)
+            + EXPONENTIAL_COEFFICIENT * x * (1 - x) * exponential_value
+        )
+    )
 
 
 def exact_dy(coordinates: torch.Tensor) -> torch.Tensor:
     """Exact solution derivative with respect to y."""
     x, y = torch.split(coordinates, 1, -1)
+    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
 
-    return -8 * y**3 * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
-
-
-def rhs(coordinates: torch.Tensor) -> torch.Tensor:
-    """Right-hand side function."""
-    x, y = torch.split(coordinates, 1, -1)
-
-    return (
-        4
-        * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
-        * (
-            -3 * x
-            + 6 * y**2
-            + 2 * (9 * x**4 + 16 * y**6) * torch.tanh(2 * (x**3 - y**4))
-        )
-    )
+    return SCALING_CONSTANT * (1 - 2 * y) * x * (1 - x) * (exponential_value - 1)
 
 
 def h1_exact(
@@ -144,65 +245,23 @@ def h1_norm(
     return (value - solution_value) ** 2 + (dx - nn_dx) ** 2 + (dy - nn_dy) ** 2
 
 
-integration_points = discrete_basis.integration_points
+# ---------------------- Training ----------------------#
+
+integration_points = basis_coarser.integration_points
 
 # Precompute values
 
 rhs_value = rhs(integration_points)
 exact_value = exact(integration_points)
-
-value_boundary_condition = discrete_basis.solution_tensor()
-value_boundary_condition[discrete_basis._basis_parameters["boundary_dofs"], :] += exact(
-    discrete_basis._coords4global_dofs
-)[discrete_basis._basis_parameters["boundary_dofs"], :]
-
-extended_boundary_value, _ = discrete_basis.interpolate(
-    discrete_basis, value_boundary_condition
-)
 exact_dx_value = exact_dx(integration_points)
 exact_dy_value = exact_dy(integration_points)
 exact_norm = torch.sqrt(
     torch.sum(
-        discrete_basis.integrate_functional(
+        basis_coarser.integrate_functional(
             h1_exact, exact_value, exact_dx_value, exact_dy_value
         )
     )
 )
-
-# ---------------------- Neural Network Parameters ----------------------#
-
-
-class BoundaryConstrain(torch.nn.Module):
-    """Class to strongly apply bc"""
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """Boundary condition modifier function."""
-        x, y = torch.split(inputs, 1, dim=-1)
-        return x * (x - 1) * y * (y - 1)
-
-
-segments = torch.tensor(
-    [
-        [[0.0, 0.0], [1.0, 0.0]],
-        [[1.0, 0.0], [1.0, 1.0]],
-        [[1.0, 1.0], [0.0, 1.0]],
-        [[0.0, 1.0], [0.0, 0.0]],
-    ]
-)
-
-
-NN = NeuralNetwork(
-    input_dimension=2,
-    output_dimension=1,
-    nb_hidden_layers=3,
-    neurons_per_layers=50,
-    # boundary_condition_modifier=DistanceFunctionBC(segments),
-    boundary_condition_modifier=BoundaryConstrain(),
-    use_xavier_initialization=True,
-    boundary_condition_value=extended_boundary_value,
-)
-
-# ---------------------- Training ----------------------#
 
 values = [
     rhs_value,
@@ -210,15 +269,15 @@ values = [
     exact_dx_value,
     exact_dy_value,
     exact_norm,
-    gram_matrix_inverse,
-    h_T,
-    h_E,
-    n_E,
+    # gram_matrix_inverse,
+    #     h_T,
+    #     h_E,
+    #     n_E,
 ]
 
-bulk_history = []
-jump_history = []
-residual_history = []
+# bulk_history = []
+# jump_history = []
+# residual_history = []
 
 
 def training_step(
@@ -234,10 +293,10 @@ def training_step(
         value_exact_dx,
         value_exact_dy,
         norm_exact,
-        matrix,
-        triangle_size,
-        edge_size,
-        normals_edges,
+        # matrix,
+        # triangle_size,
+        # edge_size,
+        # normals_edges,
     ) = precomputed_values
 
     nn_value, nn_grad = neural_network.value_and_gradient(basis.integration_points)
@@ -252,9 +311,9 @@ def training_step(
         basis.integrate_linear_form(residual, nn_grad, value_rhs)
     )
 
-    # loss_value = torch.sum(residual_vector**2)
+    loss_value = torch.sum(residual_vector**2)
 
-    loss_value = residual_vector.T @ (matrix @ residual_vector)
+    # loss_value = residual_vector.T @ (matrix @ residual_vector)
 
     # bulk_value = (
     #     triangle_size * basis.integrate_functional(bulk, nn_laplacian, value_rhs)
@@ -271,8 +330,6 @@ def training_step(
 
     # loss_value += bulk_value + jump_value
 
-    relative_loss = torch.sqrt(loss_value) / norm_exact
-
     h1_error = torch.sqrt(
         torch.sum(
             basis.integrate_functional(
@@ -281,19 +338,21 @@ def training_step(
         )
     )
 
+    relative_loss = torch.sqrt(loss_value) / h1_error
+
     return loss_value, relative_loss, h1_error / norm_exact
 
 
 model = Model(
     neural_network=NN,
-    training_step=lambda nn: training_step(nn, discrete_basis, values),
-    epochs=10000,
+    training_step=lambda nn: training_step(nn, basis_coarser, values),
+    epochs=12000,
     optimizer=torch.optim.Adam,
-    optimizer_kwargs={"lr": 1e-3},
-    # learning_rate_scheduler=torch.optim.lr_scheduler.LinearLR,
-    # scheduler_kwargs={"start_factor": 1.0, "end_factor": 0.1, "total_iters": 1000},
+    optimizer_kwargs={"lr": 1e-4},
+    # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
+    # scheduler_kwargs={"gamma": 0.9999},
     use_early_stopping=True,
-    early_stopping_patience=100,
+    early_stopping_patience=120,
     min_delta=1e-15,
 )
 
@@ -304,11 +363,11 @@ model.train()
 
 model.load_optimal_parameters()
 
-opt_nn_value, opt_nn_grad = NN.value_and_gradient(discrete_basis.integration_points)
+opt_nn_value, opt_nn_grad = NN.value_and_gradient(basis_coarser.integration_points)
 
 h1_error_plot = (
     torch.sqrt(
-        discrete_basis.integrate_functional(
+        basis_coarser.integrate_functional(
             h1_norm,
             opt_nn_value,
             opt_nn_grad,
@@ -323,7 +382,7 @@ h1_error_plot = (
 
 figure_solution, axis_solution = plt.subplots()
 
-c4e = torch.Tensor.numpy(discrete_basis.mesh["cells", "coordinates"], force=True)
+c4e = torch.Tensor.numpy(basis_coarser.mesh["cells", "coordinates"], force=True)
 
 triangles_plot = PolyCollection(
     c4e,  # type: ignore
@@ -345,26 +404,56 @@ color_bar.set_label(r"$H^1$ error")
 
 figure_solution.tight_layout()
 
-model.plot_training_history(
-    plot_names={
-        "loss": r"$\mathcal{L}(u_{\theta})$",
-        "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
-        "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-        "title": "Traning History",
-    }
+# model.plot_training_history(
+#     plot_names={
+#         "loss": r"$\mathcal{L}(u_{\theta})$",
+#         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
+#         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
+#         "title": "Traning History",
+#     }
+# )
+
+loss_history, validation_history, accuracy_history = model.get_training_history()
+
+fig_loss, ax_loss = plt.subplots()
+ax_loss.semilogy(
+    loss_history,
+    label=r"$\mathcal{L}_{r_{h}}(u_{\theta})$",
+    linestyle="-",
 )
+ax_loss.semilogy(
+    accuracy_history,
+    label=r"$\frac{\|u_{\text{ex}}-u_{\theta}\|_U}{\|u_{\text{ex}}\|_U}$",
+    linestyle=":",
+)
+ax_loss.set_xlabel("# Epochs")
+ax_loss.set_ylabel("Value")
+ax_loss.set_title("Training History")
+ax_loss.legend()
 
-figure_residuals, axis_residuals = plt.subplots()
+fig_convergence, ax_convergence = plt.subplots()
+ax_convergence.semilogy(
+    validation_history,
+    label=r"$\frac{\sqrt{\mathcal{L}_{r_{h}}(u_{\theta})}}{\|u_{\text{ex}}-u_{\theta}\|_U}$",
+    linestyle="--",
+)
+ax_convergence.set_xlabel("# Epochs")
+ax_convergence.set_ylabel("Value")
+ax_convergence.set_title("Validation History")
+ax_convergence.legend()
 
-axis_residuals.semilogy(residual_history, linestyle="-", label="residual")
-axis_residuals.semilogy(bulk_history, linestyle="--", label="bulk")
-axis_residuals.semilogy(jump_history, linestyle=":", label="jump")
 
-axis_residuals.set_xlabel("# Epochs")
-axis_residuals.set_ylabel("Value")
-axis_residuals.set_title("Value of components of Loss over training phase")
-axis_residuals.legend()
-figure_residuals.tight_layout()
+# figure_residuals, axis_residuals = plt.subplots()
+
+# axis_residuals.semilogy(residual_history, linestyle="-", label="residual")
+# axis_residuals.semilogy(bulk_history, linestyle="--", label="bulk")
+# axis_residuals.semilogy(jump_history, linestyle=":", label="jump")
+
+# axis_residuals.set_xlabel("# Epochs")
+# axis_residuals.set_ylabel("Value")
+# axis_residuals.set_title("Value of components of Loss over training phase")
+# axis_residuals.legend()
+# figure_residuals.tight_layout()
 
 
 plt.show()

@@ -31,7 +31,7 @@ def test_assembly():
         t=mesh_data_meshio.cells_dict["triangle"].T,
     )
 
-    basis_scikit = skfem.Basis(mesh_scikit, skfem.ElementTriP2(), intorder=4)
+    basis_scikit = skfem.Basis(mesh_scikit, skfem.ElementTriP3(), intorder=6)
 
     @skfem.BilinearForm
     def bilinear_scikit(u, v, _):
@@ -59,7 +59,7 @@ def test_assembly():
 
     mesh = MeshTri(mesh_data)
 
-    elements = ElementTri(polynomial_order=2, integration_order=4)
+    elements = ElementTri(polynomial_order=3, integration_order=6)
 
     basis_h = Basis(mesh, elements)
 

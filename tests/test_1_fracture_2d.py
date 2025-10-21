@@ -5,6 +5,7 @@ import torch
 import matplotlib.pyplot as plt
 import tensordict as td
 import triangle as tr
+from mpl_toolkits.mplot3d.art3d import PolyCollection
 from torch_fem import MeshTri, ElementTri, Basis
 
 torch.set_default_dtype(torch.float64)
@@ -71,7 +72,7 @@ def h1_norm(basis, solution, solution_grad):
     )
 
 
-MESH_SIZE = 0.5**2
+MESH_SIZE = 0.5**10
 
 fracture_2d_data = {
     "vertices": [
@@ -92,7 +93,7 @@ fracture_triangulation = td.TensorDict(
 
 mesh = MeshTri(triangulation=fracture_triangulation)
 
-elements = ElementTri(polynomial_order=1, integration_order=2)
+elements = ElementTri(polynomial_order=3, integration_order=6)
 
 V = Basis(mesh, elements)
 
@@ -102,7 +103,9 @@ b = V.integrate_linear_form(l)
 
 u_h = V.solve(A, b)
 
-exact_value = exact(*torch.unbind(mesh["vertices", "coordinates"], -1))
+c4e = V._coords4elements
+
+exact_value = exact(*torch.unbind(c4e, -1))
 
 I_u_h, I_u_h_grad = V.interpolate(V, u_h)
 
@@ -114,58 +117,54 @@ H1_norm_value = torch.sqrt(
 
 print((H1_norm_value / exact_H1_norm).item())
 
-fig = plt.figure(figsize=(10, 4), dpi=100)
-fig.suptitle(r"FEM computed for $\omega_1$", fontsize=16)
+# Create figure with 3D plot for polynomial order 3 DOFs
+fig = plt.figure(figsize=(12, 5), dpi=100)
 
-ax1 = fig.add_subplot(1, 3, 1, projection="3d")
+# 2D plot
+ax1 = fig.add_subplot(1, 2, 1)
 
-ax1.plot_trisurf(
-    mesh["vertices", "coordinates"][:, 0],
-    mesh["vertices", "coordinates"][:, 1],
-    u_h.squeeze(-1),
-    triangles=mesh["cells", "vertices"],
+triangles_plot = PolyCollection(
+    c4e,  # type: ignore
+    array=u_h.squeeze(-1),
     cmap="viridis",
-    edgecolor="black",
-    linewidth=0.3,
+    edgecolors="black",
+    linewidths=0.2,
 )
 
-ax1.set_title("FEM solution")
+ax1.add_collection(triangles_plot)
+ax1.set_title("FEM solution (2D)")
 ax1.set_xlabel("x")
 ax1.set_ylabel("y")
-ax1.set_zlabel(r"$u_h(x,y)$")
+fig.colorbar(triangles_plot, ax=ax1, label=r"$u_h(x,y)$")
 
-ax2 = fig.add_subplot(1, 3, 2, projection="3d")
+# 3D surface plot using triangulation at DOF nodes
+ax2 = fig.add_subplot(1, 2, 2, projection="3d")
 
+# Get coordinates of all DOFs
+dof_coords = V._coords4global_dofs  # Shape: (num_dofs, 2)
+x_dofs = dof_coords[:, 0].numpy()
+y_dofs = dof_coords[:, 1].numpy()
+u_dofs = u_h.squeeze(-1).numpy()
+
+# Get the DOF connectivity for each element
+dof_connectivity = (
+    V._global_dofs4elements.numpy()
+)  # Shape: (num_cells, num_dofs_per_cell)
+
+# Create triangulated surface plot
 ax2.plot_trisurf(
-    mesh["vertices", "coordinates"][:, 0],
-    mesh["vertices", "coordinates"][:, 1],
-    exact_value,
-    triangles=mesh["cells", "vertices"],
+    x_dofs,
+    y_dofs,
+    u_dofs,
+    triangles=dof_connectivity[:, :3],  # Use first 3 DOFs (vertices) for triangulation
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,
 )
 
-ax2.set_title("Exact solution")
+ax2.set_title("FEM solution (3D surface)")
 ax2.set_xlabel("x")
 ax2.set_ylabel("y")
-ax2.set_zlabel(r"$u(x,y)$")
-
-ax3 = fig.add_subplot(1, 3, 3, projection="3d")
-
-ax3.plot_trisurf(
-    mesh["vertices", "coordinates"][:, 0],
-    mesh["vertices", "coordinates"][:, 1],
-    abs(exact_value - u_h.squeeze(-1)),
-    triangles=mesh["cells", "vertices"],
-    cmap="viridis",
-    edgecolor="black",
-    linewidth=0.3,
-)
-
-ax3.set_title("Error")
-ax3.set_xlabel("x")
-ax3.set_ylabel("y")
-ax3.set_zlabel(r"$|u-u_h|$")
+ax2.set_zlabel(r"$u_h(x,y)$")
 
 plt.show()

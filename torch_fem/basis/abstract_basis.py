@@ -15,6 +15,9 @@ class AbstractBasis(abc.ABC):
         self._element = element
         self.mesh = mesh
 
+        if element.polynomial_order >= 2:
+            mesh.compute_edges_values()
+
         (
             self.v,
             self.v_grad,

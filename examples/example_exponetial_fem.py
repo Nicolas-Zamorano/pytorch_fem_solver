@@ -15,12 +15,12 @@ torch.set_default_dtype(torch.float64)
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**8),
+    "Dqena" + str(0.5**1),
 )
 
 mesh = MeshTri(triangulation=mesh_data)
 
-elements = ElementTri(polynomial_order=1, integration_order=10)
+elements = ElementTri(polynomial_order=3, integration_order=10)
 
 discrete_basis = Basis(mesh, elements)
 
