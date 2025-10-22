@@ -32,6 +32,9 @@ class Model:
         self._optimizer = optimizer(
             self._neural_network.parameters(), **optimizer_kwargs
         )
+        if isinstance(self._optimizer, torch.optim.LBFGS):
+            self._closure = self.define_closure()
+
         if scheduler_kwargs is None:
             scheduler_kwargs = {}
 
@@ -60,17 +63,27 @@ class Model:
 
     def train(self):
         """Train the neural network."""
-        for _ in self._progress_bar:
-            self._optimizer.zero_grad()
-            loss, validation_loss, accuracy = self._training_step(self._neural_network)
-            loss.backward()
-            self._optimizer.step()
+        for epochs in self._progress_bar:
+            if isinstance(self._optimizer, torch.optim.LBFGS):
+                self._optimizer.step(self._closure)
+                loss_value_float = self.loss_value.pop()
+                relative_loss_float = self.validation_loss.pop()
+                accuracy_float = self.accuracy.pop()
+
+            else:
+                self._optimizer.zero_grad()
+                loss, validation_loss, accuracy = self._training_step(
+                    self._neural_network
+                )
+                loss.backward()
+                self._optimizer.step()
+
+                loss_value_float = loss.item()
+                relative_loss_float = validation_loss.item()
+                accuracy_float = accuracy.item()
+
             if self._learning_rate_scheduler is not None:
                 self._learning_rate_scheduler.step()
-
-            loss_value_float = loss.item()
-            relative_loss_float = validation_loss.item()
-            accuracy_float = accuracy.item()
 
             if self._use_early_stopping:
                 if loss_value_float < self._best_loss - self._min_delta:
