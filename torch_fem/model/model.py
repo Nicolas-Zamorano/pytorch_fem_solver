@@ -23,6 +23,9 @@ class Model:
         use_early_stopping: bool = False,
         early_stopping_patience: int = 10,
         min_delta: float = 1e-12,
+        optimizer_for_change: Optional[type[torch.optim.Optimizer]] = torch.optim.LBFGS,
+        optimizer_kwargs_for_change: Optional[dict] = None,
+        epochs_before_change: Optional[int] = None,
     ):
         self._neural_network = torch.jit.script(neural_network)
         self._training_step = training_step
@@ -60,6 +63,17 @@ class Model:
 
         if self._use_early_stopping:
             self.early_stopping_counter = 0
+
+        if optimizer_for_change is not None:
+            if optimizer_kwargs_for_change is None:
+                optimizer_kwargs_for_change = optimizer_kwargs
+            self._optimizer_for_change = optimizer_for_change(
+                self._neural_network.parameters(),
+                **optimizer_kwargs_for_change,
+            )
+            self._epochs_before_change = epochs_before_change
+            if isinstance(self._optimizer_for_change, torch.optim.LBFGS):
+                self._closure = self.define_closure()
 
     def train(self):
         """Train the neural network."""
@@ -111,6 +125,9 @@ class Model:
             self._validation_loss_history.append(relative_loss_float)
             self._accuracy_history.append(accuracy_float)
 
+            if epochs == self._epochs_before_change:
+                self._optimizer = self._optimizer_for_change
+
     def get_training_history(self):
         """Get the history of training losses."""
         return self._loss_history, self._validation_loss_history, self._accuracy_history
@@ -147,3 +164,21 @@ class Model:
         axis_loss.set_title(plot_names["title"])
         axis_loss.legend()
         figure_loss.tight_layout()
+
+    def define_closure(self) -> Callable[[], torch.Tensor]:
+        """Define closure for optimizers like LBFGS."""
+        self.loss_value = []
+        self.validation_loss = []
+        self.accuracy = []
+
+        def closure() -> torch.Tensor:
+            self._optimizer.zero_grad()
+            loss, validation_loss, accuracy = self._training_step(self._neural_network)
+            loss.backward()
+            loss_value_float = loss.item()
+            self.loss_value.append(loss_value_float)
+            self.validation_loss.append(validation_loss.item())
+            self.accuracy.append(accuracy.item())
+            return loss_value_float
+
+        return closure
