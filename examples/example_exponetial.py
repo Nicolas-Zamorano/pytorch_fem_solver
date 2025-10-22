@@ -135,9 +135,9 @@ def bulk(
     return (value_rhs + laplacian) ** 2
 
 
-# gram_matrix_inverse = torch.inverse(
-#     discrete_basis.reduce(discrete_basis.integrate_bilinear_form(gram_matrix))
-# )
+gram_matrix_inverse = torch.inverse(
+    discrete_basis.reduce(discrete_basis.integrate_bilinear_form(gram_matrix))
+)
 
 # ---------------------- Error Parameters ----------------------#
 
@@ -228,15 +228,15 @@ values = [
     exact_dx_value,
     exact_dy_value,
     exact_norm,
-    # gram_matrix_inverse,
-    #     h_T,
-    #     h_E,
-    #     n_E,
+    gram_matrix_inverse,
+    h_T,
+    h_E,
+    n_E,
 ]
 
-# bulk_history = []
-# jump_history = []
-# residual_history = []
+bulk_history = []
+jump_history = []
+residual_history = []
 
 
 def training_step(
@@ -252,42 +252,42 @@ def training_step(
         value_exact_dx,
         value_exact_dy,
         norm_exact,
-        # matrix,
-        # triangle_size,
-        # edge_size,
-        # normals_edges,
+        matrix,
+        triangle_size,
+        edge_size,
+        normals_edges,
     ) = precomputed_values
 
-    nn_value, nn_grad = neural_network.value_and_gradient(basis.integration_points)
+    # nn_value, nn_grad = neural_network.value_and_gradient(basis.integration_points)
 
-    # nn_value, nn_grad, nn_laplacian = neural_network.value_and_laplacian(
-    #     basis.integration_points
-    # )
+    nn_value, nn_grad, nn_laplacian = neural_network.value_and_laplacian(
+        basis.integration_points
+    )
 
-    # _, nn_jump_grad = neural_network.value_and_gradient(jump_integration_points)
+    _, nn_jump_grad = neural_network.value_and_gradient(jump_integration_points)
 
     residual_vector = basis.reduce(
         basis.integrate_linear_form(residual, nn_grad, value_rhs)
     )
 
-    loss_value = torch.sum(residual_vector**2)
+    # loss_value = torch.sum(residual_vector**2)
 
-    # loss_value = residual_vector.T @ (matrix @ residual_vector)
+    loss_value = residual_vector.T @ (matrix @ residual_vector)
 
-    # bulk_value = (
-    #     triangle_size * basis.integrate_functional(bulk, nn_laplacian, value_rhs)
-    # ).sum()
+    bulk_value = (
+        triangle_size * basis.integrate_functional(bulk, nn_laplacian, value_rhs)
+    ).sum()
 
-    # jump_value = (
-    #     torch.sqrt(edge_size)
-    #     * V_edges.integrate_functional(jump, normals_edges, nn_jump_grad)
-    # ).sum()
+    jump_value = (
+        torch.sqrt(edge_size)
+        * V_edges.integrate_functional(jump, normals_edges, nn_jump_grad)
+    ).sum()
 
-    # residual_history.append(loss_value.item())
-    # bulk_history.append(bulk_value.item())
-    # jump_history.append(jump_value.item())
+    residual_history.append(loss_value.item())
+    bulk_history.append(bulk_value.item())
+    jump_history.append(jump_value.item())
 
-    # loss_value += bulk_value + jump_value
+    loss_value += bulk_value + jump_value
 
     h1_error = torch.sqrt(
         torch.sum(
@@ -305,7 +305,7 @@ def training_step(
 model = Model(
     neural_network=NN,
     training_step=lambda nn: training_step(nn, discrete_basis, values),
-    epochs=12000,
+    epochs=8000,
     optimizer=torch.optim.Adam,
     optimizer_kwargs={"lr": 1e-4},
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
@@ -313,6 +313,9 @@ model = Model(
     use_early_stopping=True,
     early_stopping_patience=120,
     min_delta=1e-15,
+    # optimizer_for_change=torch.optim.LBFGS,
+    # optimizer_kwargs_for_change={"lr": 1.0},
+    # epochs_before_change=5000,
 )
 
 

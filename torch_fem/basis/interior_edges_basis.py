@@ -10,6 +10,10 @@ from .abstract_basis import AbstractBasis
 class InteriorEdgesBasis(AbstractBasis):
     """Class for basis representation on interior edges"""
 
+    def __init__(self, mesh: AbstractMesh, element: AbstractElement):
+        mesh.compute_edges_values()
+        super().__init__(mesh, element)
+
     def _compute_dofs(
         self,
         mesh: AbstractMesh,
