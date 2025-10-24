@@ -66,6 +66,21 @@ class Basis(AbstractBasis):
 
             vertices_4_new_dofs = new_dofs_enumeration[global_edge_ids]
 
+            first_vertices_4_edges, second_vertices_4_edges = torch.unbind(
+                vertices_4_edges, dim=-1
+            )
+
+            vertices_4_first_edge = torch.stack(
+                [first_vertices_4_edges, new_dofs_enumeration], dim=-1
+            )
+            vertices_4_second_edge = torch.stack(
+                [new_dofs_enumeration, second_vertices_4_edges], dim=-1
+            )
+
+            self.vertices_4_new_edges = torch.cat(
+                [vertices_4_first_edge, vertices_4_second_edge], dim=-2
+            )
+
             new_markers_4_new_dofs = mesh["edges", "markers"]
 
             coords_4_global_dofs = torch.cat(
@@ -120,9 +135,32 @@ class Basis(AbstractBasis):
 
             vertices_4_non_unique_edges = vertices_4_cells[..., mesh.edges_permutations]
 
+            first_vertices_4_edges, second_vertices_4_edges = torch.unbind(
+                vertices_4_edges, dim=-1
+            )
+
+            vertices_4_second_edge = new_edge_dofs_enumeration.reshape(-1, 2)
+
+            first_vertices_4_second_edge, second_vertices_4_second_edge = torch.unbind(
+                vertices_4_second_edge, dim=-1
+            )
+
+            vertices_4_first_edge = torch.stack(
+                [first_vertices_4_edges, first_vertices_4_second_edge], dim=-1
+            )
+            vertices_4_third_edge = torch.stack(
+                [second_vertices_4_second_edge, second_vertices_4_edges], dim=-1
+            )
+
+            self.vertices_4_new_edges = torch.cat(
+                [vertices_4_first_edge, vertices_4_second_edge, vertices_4_third_edge],
+                dim=-2,
+            )
+
             vertices_4_non_unique_edges_sorted, _ = vertices_4_non_unique_edges.sort(
                 dim=-1
             )
+
             vertices_4_edges_sorted, _ = vertices_4_edges.sort(dim=-1)
 
             vertices_offset = vertices_4_cells.max() + 1
