@@ -27,19 +27,19 @@ class AbstractBasis(abc.ABC):
         ) = self._compute_integral_values(mesh, element)
 
         (
-            self._coords4global_dofs,
-            self._global_dofs4elements,
-            self._nodes4boundary_dofs,
-            self._coords4elements,
+            self.coords4global_dofs,
+            self.global_dofs4elements,
+            self.nodes4boundary_dofs,
+            self.coords4elements,
         ) = self._compute_dofs(
             mesh,
             element,
         )
 
         self._basis_parameters = self._compute_basis_parameters(
-            self._coords4global_dofs,
-            self._global_dofs4elements,
-            self._nodes4boundary_dofs,
+            self.coords4global_dofs,
+            self.global_dofs4elements,
+            self.nodes4boundary_dofs,
         )
 
     def _compute_integral_values(
