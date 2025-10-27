@@ -45,6 +45,7 @@ class AbstractMesh(abc.ABC):
             "vertices": ("vertices", "coordinates"),
             "vertex_markers": ("vertices", "markers"),
             "triangles": ("cells", "vertices"),
+            "triangle_attributes": ("cells", "markers"),
             "neighbors": ("cells", "neighbors"),
             "edges": ("edges", "vertices"),
             "edge_markers": ("edges", "markers"),
