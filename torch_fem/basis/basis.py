@@ -260,7 +260,7 @@ class Basis(AbstractBasis):
         }
 
     def _compute_jacobian_map(self, mesh, element):
-        return mesh["cells", "coordinates"].mT @ element.barycentric_grad
+        return mesh["cells", "coordinates"].mT @ element.barycentric_gradients
 
     def _compute_integration_points(self, mesh, bar_coords):
         return bar_coords.mT @ mesh["cells", "coordinates"].unsqueeze(-3)

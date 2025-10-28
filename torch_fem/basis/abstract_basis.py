@@ -56,10 +56,12 @@ class AbstractBasis(abc.ABC):
         )
 
         v, v_grad = element.compute_shape_functions(
-            element.bar_coords, inv_map_jacobian
+            element.barycentric_coordinates, inv_map_jacobian
         )
 
-        integration_points = self._compute_integration_points(mesh, element.bar_coords)
+        integration_points = self._compute_integration_points(
+            mesh, element.barycentric_coordinates
+        )
 
         _dx = self._compute_integral_weights(element, det_map_jacobian)
 

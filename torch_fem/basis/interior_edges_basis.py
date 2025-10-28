@@ -62,7 +62,9 @@ class InteriorEdgesBasis(AbstractBasis):
         }
 
     def _compute_jacobian_map(self, mesh, element):
-        return mesh["interior_edges", "coordinates"].mT @ element.barycentric_grad
+        return (
+            mesh["interior_edges", "coordinates"].mT @ element.barycentric_map_gradient
+        )
 
     def _compute_integration_points(self, mesh, bar_coords):
         return bar_coords.mT @ mesh["interior_edges", "coordinates"].unsqueeze(-3)

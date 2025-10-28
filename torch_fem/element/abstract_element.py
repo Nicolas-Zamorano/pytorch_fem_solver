@@ -15,7 +15,9 @@ class AbstractElement(abc.ABC):
 
         self.gaussian_nodes, self.gaussian_weights = self._compute_gauss_values()
 
-        self.bar_coords = self.compute_barycentric_coordinates(self.gaussian_nodes)
+        self.barycentric_coordinates = self.compute_barycentric_coordinates(
+            self.gaussian_nodes
+        )
 
     def compute_inverse_map(
         self,
@@ -59,6 +61,6 @@ class AbstractElement(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def barycentric_grad(self) -> torch.Tensor:
-        """Return the gradients of the barycentric coordinates in the reference element"""
+    def barycentric_map_gradient(self) -> torch.Tensor:
+        """Return the gradients of the barycentric system map in the reference element"""
         raise NotImplementedError

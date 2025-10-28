@@ -83,4 +83,6 @@ class InteriorEdgesFractureBasis(
         ).mT
 
     def _compute_jacobian_map(self, mesh, element):
-        return mesh["interior_edges", "coordinates"].mT @ element.barycentric_grad
+        return (
+            mesh["interior_edges", "coordinates"].mT @ element.barycentric_map_gradient
+        )

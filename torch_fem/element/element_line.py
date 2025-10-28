@@ -9,7 +9,7 @@ class ElementLine(AbstractElement):
     """Class for 1D line element representation"""
 
     @property
-    def barycentric_grad(self):
+    def barycentric_map_gradient(self):
         return torch.tensor([[-0.5], [0.5]])
 
     @property
@@ -38,7 +38,7 @@ class ElementLine(AbstractElement):
 
             v = bar_coords
 
-            v_grad = self.barycentric_grad @ inv_map_jacobian
+            v_grad = self.barycentric_map_gradient @ inv_map_jacobian
 
         else:
 

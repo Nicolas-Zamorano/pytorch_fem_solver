@@ -209,7 +209,7 @@ class FractureBasis(AbstractBasis):
         ).mT
 
     def _compute_jacobian_map(self, mesh, element):
-        return mesh["cells", "coordinates"].mT @ element.barycentric_grad
+        return mesh["cells", "coordinates"].mT @ element.barycentric_map_gradient
 
     # def interpolate(self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None):
     #     """Interpolate a tensor from the current basis to another basis."""
@@ -305,7 +305,7 @@ class FractureBasis(AbstractBasis):
     ):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            vertices_4_cells_4_interior_edges = self._global_dofs4elements.unsqueeze(-2)
+            vertices_4_cells_4_interior_edges = self.global_dofs4elements.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
@@ -335,7 +335,7 @@ class FractureBasis(AbstractBasis):
                 inv_map_jacobian,
             )
 
-            new_bar_coords = self._element.compute_barycentric_coordinates(
+            new_bar_coords = self._element.barycentric_coordinates_value_and_grad(
                 new_integrations_points
             ).squeeze(-3)
 

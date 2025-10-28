@@ -8,17 +8,17 @@ class ElementTri(AbstractElement):
     """Class for 2D triangular element representation"""
 
     @property
-    def barycentric_grad(self):
+    def barycentric_map_gradient(self):
         return torch.tensor([[-1.0, -1.0], [1.0, 0.0], [0.0, 1.0]])
 
     @property
     def reference_element_area(self):
         return 0.5
 
-    @property
-    def outward_normal(self):
-        """Return the outward normal vectors of the reference triangle edges."""
-        return torch.tensor([[1.0, 1.0], [-1.0, 0.0], [0.0, -1.0]])
+    # @property
+    # def outward_normal(self):
+    #     """Return the outward normal vectors of the reference triangle edges."""
+    #     return torch.tensor([[1.0, 1.0], [-1.0, 0.0], [0.0, -1.0]])
 
     def compute_barycentric_coordinates(self, x: torch.Tensor):
         return torch.stack(
@@ -31,14 +31,14 @@ class ElementTri(AbstractElement):
         lambda_1, lambda_2, lambda_3 = torch.split(bar_coords, 1, dim=-2)
 
         grad_lambda_1, grad_lambda_2, grad_lambda_3 = torch.split(
-            self.barycentric_grad, 1, dim=-2
+            self.barycentric_map_gradient, 1, dim=-2
         )
 
         if self.polynomial_order == 1:
 
             v = bar_coords
 
-            v_grad = self.barycentric_grad @ inv_map_jacobian
+            v_grad = self.barycentric_map_gradient @ inv_map_jacobian
 
         elif self.polynomial_order == 2:
 
@@ -73,18 +73,15 @@ class ElementTri(AbstractElement):
 
             v = torch.concat(
                 [
-                    # Vertex DOFs (3)
                     0.5 * lambda_1 * (3 * lambda_1 - 1) * (3 * lambda_1 - 2),
                     0.5 * lambda_2 * (3 * lambda_2 - 1) * (3 * lambda_2 - 2),
                     0.5 * lambda_3 * (3 * lambda_3 - 1) * (3 * lambda_3 - 2),
-                    # Edge DOFs (6): 2 per edge (1-2, 2-3, 3-1)
                     4.5 * lambda_1 * lambda_2 * (3 * lambda_1 - 1),
                     4.5 * lambda_1 * lambda_2 * (3 * lambda_2 - 1),
                     4.5 * lambda_2 * lambda_3 * (3 * lambda_2 - 1),
                     4.5 * lambda_2 * lambda_3 * (3 * lambda_3 - 1),
                     4.5 * lambda_3 * lambda_1 * (3 * lambda_3 - 1),
                     4.5 * lambda_3 * lambda_1 * (3 * lambda_1 - 1),
-                    # Cell-center DOF (1)
                     27 * lambda_1 * lambda_2 * lambda_3,
                 ],
                 dim=-2,
@@ -93,11 +90,9 @@ class ElementTri(AbstractElement):
             v_grad = (
                 torch.concat(
                     [
-                        # Gradients of vertex DOFs
                         0.5 * (27 * lambda_1**2 - 18 * lambda_1 + 2) * grad_lambda_1,
                         0.5 * (27 * lambda_2**2 - 18 * lambda_2 + 2) * grad_lambda_2,
                         0.5 * (27 * lambda_3**2 - 18 * lambda_3 + 2) * grad_lambda_3,
-                        # Gradients of edge DOFs
                         4.5
                         * (
                             lambda_2 * (6 * lambda_1 - 1) * grad_lambda_1
@@ -128,7 +123,6 @@ class ElementTri(AbstractElement):
                             lambda_1 * (6 * lambda_1 - 1) * grad_lambda_3
                             + lambda_3 * (3 * lambda_1 - 1) * grad_lambda_1
                         ),
-                        # Gradient of cell-center DOF
                         27
                         * (
                             lambda_2 * lambda_3 * grad_lambda_1
