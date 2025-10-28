@@ -10,9 +10,8 @@ class PatchesBasis(AbstractBasis):
     """Basis class for Patches"""
 
     def __init__(self, mesh, element):
-        self.nb_patches = mesh.batch_size()[0]
+        self.nb_patches = mesh["cells", "vertices"].size(-3)
         self.patches_idx = torch.arange(self.nb_patches).unsqueeze(-1)
-
         super().__init__(mesh, element)
 
     def _compute_dofs(
