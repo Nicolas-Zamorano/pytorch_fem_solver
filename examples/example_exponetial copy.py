@@ -71,7 +71,7 @@ elements_coarser = ElementTri(polynomial_order=1, integration_order=4)
 
 basis_coarser = Basis(mesh_coarser, elements_coarser)
 
-verties_finer = basis_coarser._coords4global_dofs.numpy(force=True)
+verties_finer = basis_coarser.coords4global_dofs.numpy(force=True)
 
 mesh_data_finer = tr.triangulate(
     dict(

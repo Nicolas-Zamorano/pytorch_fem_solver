@@ -103,7 +103,7 @@ b = V.integrate_linear_form(l)
 
 u_h = V.solve(A, b)
 
-c4e = V._coords4elements
+c4e = V.coords4elements
 
 exact_value = exact(*torch.unbind(c4e, -1))
 
@@ -141,14 +141,14 @@ fig.colorbar(triangles_plot, ax=ax1, label=r"$u_h(x,y)$")
 ax2 = fig.add_subplot(1, 2, 2, projection="3d")
 
 # Get coordinates of all DOFs
-dof_coords = V._coords4global_dofs  # Shape: (num_dofs, 2)
+dof_coords = V.coords4global_dofs  # Shape: (num_dofs, 2)
 x_dofs = dof_coords[:, 0].numpy()
 y_dofs = dof_coords[:, 1].numpy()
 u_dofs = u_h.squeeze(-1).numpy()
 
 # Get the DOF connectivity for each element
 dof_connectivity = (
-    V._global_dofs4elements.numpy()
+    V.global_dofs4elements.numpy()
 )  # Shape: (num_cells, num_dofs_per_cell)
 
 # Create triangulated surface plot

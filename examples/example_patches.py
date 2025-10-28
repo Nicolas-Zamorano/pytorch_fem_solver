@@ -23,14 +23,13 @@ torch.set_default_dtype(torch.float64)
 
 # ---------------------- Neural Network Parameters ----------------------#
 
+# class BoundaryConstrain(torch.nn.Module):
+#     """Class to strongly apply bc"""
 
-class BoundaryConstrain(torch.nn.Module):
-    """Class to strongly apply bc"""
-
-    def forward(self, inputs):
-        """Boundary condition modifier function."""
-        x, y = torch.split(inputs, 1, dim=-1)
-        return x * (x - 1) * y * (y - 1)
+#     def forward(self, inputs):
+#         """Boundary condition modifier function."""
+#         x, y = torch.split(inputs, 1, dim=-1)
+#         return x * (x - 1) * y * (y - 1)
 
 
 segments = torch.tensor(
@@ -88,7 +87,7 @@ patches = Patches(centers, radius)
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**8),
+    "Dqena" + str(0.5**10),
 )
 
 mesh = MeshTri(triangulation=mesh_data)
@@ -239,8 +238,8 @@ values = [
 
 def training_step(
     neural_network: NeuralNetwork,
-    basis: PatchesBasis,
-    error_basis: Basis,
+    basis_patches: PatchesBasis,
+    basis_error: Basis,
     precomputed_values: list,
 ):
     """Training step for the neural network."""
@@ -257,44 +256,23 @@ def training_step(
         # normals_edges,
     ) = precomputed_values
 
-    _, nn_grad = neural_network.value_and_gradient(basis.integration_points)
+    _, nn_grad = neural_network.value_and_gradient(basis_patches.integration_points)
 
-    # nn_value, nn_grad, nn_laplacian = neural_network.value_and_laplacian(
-    #     basis.integration_points
-    # )
-
-    # _, nn_jump_grad = neural_network.value_and_gradient(jump_integration_points)
-
-    residual_vector = basis.reduce(
-        basis.integrate_linear_form(residual, nn_grad, value_rhs)
+    residual_vector = basis_patches.reduce(
+        basis_patches.integrate_linear_form(residual, nn_grad, value_rhs)
     ).unsqueeze(-1)
 
     # loss_value = torch.sum(residual_vector**2)
 
     loss_value = (residual_vector.mT @ (matrix @ residual_vector)).sum()
 
-    # bulk_value = (
-    #     triangle_size * basis.integrate_functional(bulk, nn_laplacian, value_rhs)
-    # ).sum()
-
-    # jump_value = (
-    #     torch.sqrt(edge_size)
-    #     * V_edges.integrate_functional(jump, normals_edges, nn_jump_grad)
-    # ).sum()
-
-    # residual_history.append(loss_value.item())
-    # bulk_history.append(bulk_value.item())
-    # jump_history.append(jump_value.item())
-
-    # loss_value += bulk_value + jump_value
-
     nn_value_error, nn_grad_error = neural_network.value_and_gradient(
-        error_basis.integration_points
+        basis_error.integration_points
     )
 
     h1_error = torch.sqrt(
         torch.sum(
-            error_basis.integrate_functional(
+            basis_error.integrate_functional(
                 h1_norm,
                 nn_value_error,
                 nn_grad_error,
@@ -305,7 +283,7 @@ def training_step(
         )
     )
 
-    relative_loss = torch.sqrt(loss_value) / h1_error
+    relative_loss = torch.sqrt(loss_value) / norm_exact
 
     return loss_value, relative_loss, h1_error / norm_exact
 

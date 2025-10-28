@@ -154,7 +154,7 @@ exact_value = exact(integration_points)
 value_boundary_condition = discrete_basis.solution_tensor()
 value_boundary_condition[discrete_basis.basis_parameters["boundary_dofs"], :] += exact(
     discrete_basis.coords4global_dofs
-)[discrete_basis.basis_parameters["boundary_dofs"], :]
+)[discrete_basis._basis_parameters["boundary_dofs"], :]
 
 extended_boundary_value, _ = discrete_basis.interpolate(
     discrete_basis, value_boundary_condition

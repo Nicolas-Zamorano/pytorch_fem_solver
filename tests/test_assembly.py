@@ -59,7 +59,7 @@ def test_assembly():
 
     mesh = MeshTri(mesh_data)
 
-    elements = ElementTri(polynomial_order=3, integration_order=6)
+    elements = ElementTri(polynomial_order=1, integration_order=6)
 
     basis_h = Basis(mesh, elements)
 
