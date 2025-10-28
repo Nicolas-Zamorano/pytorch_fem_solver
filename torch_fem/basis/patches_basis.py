@@ -95,8 +95,9 @@ class PatchesBasis(AbstractBasis):
     def _compute_jacobian_map(self, mesh, element):
         return mesh["cells", "coordinates"].mT @ element.barycentric_map_gradient
 
-    def reduce(self, tensor: torch.Tensor):
-        idx = self.basis_parameters["inner_dofs"]
+    def reduce(self, tensor, idx):
+        if idx is None:
+            idx = self.basis_parameters["inner_dofs"]
         return (
             tensor[self.patches_idx.squeeze(), idx, idx]
             if tensor.size(-1) != 1
