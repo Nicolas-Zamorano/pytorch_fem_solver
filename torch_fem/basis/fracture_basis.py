@@ -365,7 +365,7 @@ class FractureBasis(AbstractBasis):
 
             return interpolation, interpolation_grad
 
-        nodes = self._coords4global_dofs
+        nodes = self.coords4global_dofs
 
         def interpolator(
             function: Callable[[torch.Tensor], torch.Tensor],

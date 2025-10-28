@@ -36,7 +36,7 @@ class AbstractBasis(abc.ABC):
             element,
         )
 
-        self._basis_parameters = self._compute_basis_parameters(
+        self.basis_parameters = self._compute_basis_parameters(
             self.coords4global_dofs,
             self.global_dofs4elements,
             self.nodes4boundary_dofs,
@@ -83,12 +83,12 @@ class AbstractBasis(abc.ABC):
         **kwargs: Optional[Any],
     ) -> torch.Tensor:
         """Integrate a given bilinear form over the mesh elements"""
-        global_matrix = torch.zeros(self._basis_parameters["bilinear_form_shape"])
+        global_matrix = torch.zeros(self.basis_parameters["bilinear_form_shape"])
 
         local_matrix = (function(self, *args, **kwargs) * self._dx).sum(-3)
 
         global_matrix.index_put_(
-            self._basis_parameters["bilinear_form_idx"],
+            self.basis_parameters["bilinear_form_idx"],
             self.reshape_for_assembly(local_matrix, "bilinear"),
             accumulate=True,
         )
@@ -102,12 +102,12 @@ class AbstractBasis(abc.ABC):
         **kwargs: Optional[Any],
     ) -> torch.Tensor:
         """Integrate a given linear form over the mesh elements"""
-        integral_value = torch.zeros(self._basis_parameters["linear_form_shape"])
+        integral_value = torch.zeros(self.basis_parameters["linear_form_shape"])
 
         integrand_value = (function(self, *args, **kwargs) * self._dx).sum(-3)
 
         integral_value.index_put_(
-            self._basis_parameters["linear_form_idx"],
+            self.basis_parameters["linear_form_idx"],
             self.reshape_for_assembly(integrand_value, "linear"),
             accumulate=True,
         )
@@ -119,7 +119,7 @@ class AbstractBasis(abc.ABC):
     ) -> torch.Tensor:
         """Reduce a tensor to only include inner degrees of freedom"""
         if idx is None:
-            idx = self._basis_parameters["inner_dofs"]
+            idx = self.basis_parameters["inner_dofs"]
         return tensor[idx, :][:, idx] if tensor.size(-1) != 1 else tensor[idx]
 
     @abc.abstractmethod
@@ -178,7 +178,7 @@ class AbstractBasis(abc.ABC):
 
     def solution_tensor(self) -> torch.Tensor:
         """return a empty vector with size (nb_dofs, 1)."""
-        return torch.zeros(self._basis_parameters["linear_form_shape"])
+        return torch.zeros(self.basis_parameters["linear_form_shape"])
 
     def solve(
         self,
@@ -196,7 +196,7 @@ class AbstractBasis(abc.ABC):
             solution = self.solution_tensor()
 
         solution[
-            self._basis_parameters["inner_dofs"]
+            self.basis_parameters["inner_dofs"]
         ] += torch.linalg.solve(  # pylint: disable=not-callable
             matrix, vector
         )

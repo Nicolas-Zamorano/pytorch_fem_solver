@@ -281,7 +281,7 @@ class Basis(AbstractBasis):
     ):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            indices_4_dofs = self._global_dofs4elements.unsqueeze(-2)
+            indices_4_dofs = self.global_dofs4elements.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
@@ -357,7 +357,7 @@ class Basis(AbstractBasis):
 
             return interpolation, interpolation_grad
 
-        coordinates_4_dofs = self._coords4global_dofs
+        coordinates_4_dofs = self.coords4global_dofs
 
         def interpolator(
             function: Callable[[torch.Tensor], torch.Tensor],
