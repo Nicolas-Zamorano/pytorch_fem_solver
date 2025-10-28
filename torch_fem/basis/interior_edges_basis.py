@@ -20,10 +20,39 @@ class InteriorEdgesBasis(AbstractBasis):
         element: AbstractElement,
     ):
 
+        coords_4_global_dofs = mesh["vertices", "coordinates"]
+        global_dofs_4_elements = mesh["edges", "vertices"]
+        nodes_4_boundary_dofs = mesh["edges", "markers"]
+
         if element.polynomial_order == 1:
-            coords_4_global_dofs = mesh["vertices", "coordinates"]
-            global_dofs_4_elements = mesh["cells", "vertices"]
-            nodes4boundary_dofs = mesh["vertices", "markers"]
+            new_coords_4_global_dofs = coords_4_global_dofs
+            new_global_dofs_4_elements = global_dofs_4_elements
+            new_nodes_4_boundary_dofs = nodes_4_boundary_dofs
+
+        elif element.polynomial_order == 2:
+            coordinates_4_edges = mesh.compute_coordinates_4_cells(
+                coords_4_global_dofs, global_dofs_4_elements
+            )
+
+            midpoints = coordinates_4_edges.mean(dim=-2, keepdim=True)
+
+            vertices_4_new_dofs = (
+                torch.arange(global_dofs_4_elements.shape[-2])
+                + global_dofs_4_elements.shape[-2]
+            )
+
+            new_coords_4_global_dofs = torch.cat(
+                [coords_4_global_dofs, midpoints], dim=-2
+            )
+
+            new_global_dofs_4_elements = torch.cat(
+                [global_dofs_4_elements, vertices_4_new_dofs], dim=-1
+            )
+
+            new_nodes_4_boundary_dofs = torch.cat(
+                [nodes_4_boundary_dofs, nodes_4_boundary_dofs], dim=-2
+            )
+
         else:
             raise NotImplementedError("Polynomial order not implemented")
 
@@ -32,9 +61,9 @@ class InteriorEdgesBasis(AbstractBasis):
         )
 
         return (
-            coords_4_global_dofs,
-            global_dofs_4_elements,
-            nodes4boundary_dofs,
+            new_coords_4_global_dofs,
+            new_global_dofs_4_elements,
+            new_nodes_4_boundary_dofs,
             coords4elements,
         )
 
