@@ -288,23 +288,34 @@ class Basis(AbstractBasis):
 
         elif basis.__class__ == Basis and basis is not self:
 
-            elements_mask = self.mesh.map_fine_mesh(basis.mesh)
-
-            # dofs_idx = self.global_dofs4elements[elements_mask]
+            elements_mask = basis.mesh["cells", "markers"].squeeze(-1).type(torch.int)
 
             # coords4elements_first_node = self.coords4elements[..., [0], :][
             #     elements_mask
-            # ]
+            # ].unsqueeze(-3)
 
-            # inv_map_jacobian = self.elements.inv_map_jacobian[elements_mask]
+            # inv_map_jacobian = self._inv_map_jacobian[elements_mask]
 
-            # new_integrations_points = self.elements.compute_inverse_map(
+            # # For computing the inverse mapping of the integrations points of the interior edges,
+            # # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
+            # # (2 meaning the triangle that share and edge).
+
+            # new_integrations_points = self._element.compute_inverse_map(
             #     coords4elements_first_node, basis.integration_points, inv_map_jacobian
             # )
 
-            # _, v, v_grad = self.elements.compute_shape_functions(
-            #     new_integrations_points.squeeze(-2), inv_map_jacobian
+            # new_bar_coords = self._element.compute_barycentric_coordinates(
+            #     new_integrations_points
+            # ).squeeze(-3)
+
+            # v, v_grad = self._element.compute_shape_functions(
+            #     new_bar_coords, inv_map_jacobian
             # )
+
+            v = self.v[elements_mask].unsqueeze(-3)
+            v_grad = self.v_grad[elements_mask]
+
+            indices_4_dofs = self.global_dofs4elements[elements_mask].unsqueeze(-2)
 
         elif basis.__class__ == InteriorEdgesBasis:
 
