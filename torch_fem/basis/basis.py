@@ -112,7 +112,6 @@ class Basis(AbstractBasis):
                 dim=-2,
             ).reshape(-1, 2)
 
-            # Cell-center DOFs (one per cell)
             coordinates_4_cell_center_dofs = mesh["cells", "coordinates"].mean(dim=-2)
 
             coordinates_4_new_dofs = torch.cat(
@@ -120,13 +119,11 @@ class Basis(AbstractBasis):
                 dim=-2,
             )
 
-            # Enumerate edge DOFs
             new_edge_dofs_enumeration = (
                 torch.arange(vertices_4_edges.shape[0] * 2)
                 + coordinates_4_vertices.shape[-2]
             )
 
-            # Enumerate cell-center DOFs
             new_cell_dofs_enumeration = (
                 torch.arange(vertices_4_cells.shape[0])
                 + coordinates_4_vertices.shape[-2]
@@ -182,8 +179,6 @@ class Basis(AbstractBasis):
 
             global_edge_ids = map_dict[vertices_keys]
 
-            # For polynomial order 3, we have 2 DOFs per edge
-            # Create indices for both DOFs: [edge_id*2, edge_id*2+1]
             global_edge_ids_expanded = torch.stack(
                 [global_edge_ids * 2, global_edge_ids * 2 + 1], dim=-1
             )
@@ -191,23 +186,20 @@ class Basis(AbstractBasis):
                 global_edge_ids_expanded.reshape(*global_edge_ids.shape[:-1], -1)
             ]
 
-            # Cell-center DOF indices (one per cell)
             vertices_4_cell_center_dofs = new_cell_dofs_enumeration.unsqueeze(-1)
 
-            # Combine edge DOFs and cell-center DOFs
             vertices_4_new_dofs = torch.cat(
                 [vertices_4_new_edge_dofs, vertices_4_cell_center_dofs], dim=-1
             )
 
-            # Markers: edge DOFs inherit edge markers, cell DOFs are interior (marker=0)
             new_markers_4_edge_dofs = mesh["edges", "markers"].repeat_interleave(
                 2, dim=-2
             )
-            new_markers_4_cell_dofs = torch.zeros(
+            new_markers_4_interior_cell_dofs = torch.zeros(
                 (vertices_4_cells.shape[0], 1), dtype=mesh["edges", "markers"].dtype
             )
             new_markers_4_new_dofs = torch.cat(
-                [new_markers_4_edge_dofs, new_markers_4_cell_dofs], dim=-2
+                [new_markers_4_edge_dofs, new_markers_4_interior_cell_dofs], dim=-2
             )
 
             coords_4_global_dofs = torch.cat(
@@ -290,28 +282,6 @@ class Basis(AbstractBasis):
 
             elements_mask = basis.mesh["cells", "markers"].squeeze(-1).type(torch.int)
 
-            # coords4elements_first_node = self.coords4elements[..., [0], :][
-            #     elements_mask
-            # ].unsqueeze(-3)
-
-            # inv_map_jacobian = self._inv_map_jacobian[elements_mask]
-
-            # # For computing the inverse mapping of the integrations points of the interior edges,
-            # # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
-            # # (2 meaning the triangle that share and edge).
-
-            # new_integrations_points = self._element.compute_inverse_map(
-            #     coords4elements_first_node, basis.integration_points, inv_map_jacobian
-            # )
-
-            # new_bar_coords = self._element.compute_barycentric_coordinates(
-            #     new_integrations_points
-            # ).squeeze(-3)
-
-            # v, v_grad = self._element.compute_shape_functions(
-            #     new_bar_coords, inv_map_jacobian
-            # )
-
             v = self.v[elements_mask].unsqueeze(-3)
             v_grad = self.v_grad[elements_mask]
 
@@ -334,7 +304,7 @@ class Basis(AbstractBasis):
 
             # For computing the inverse mapping of the integrations points of the interior edges,
             # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
-            # (2 meaning the triangle that share and edge).
+            # (2 is the triangles that share that edge).
 
             new_integrations_points = self._element.compute_inverse_map(
                 coordinates_4_cells_first_vertex,
@@ -371,17 +341,13 @@ class Basis(AbstractBasis):
         coordinates_4_dofs = self.coords4global_dofs
 
         def interpolator(
-            function: Callable[[torch.Tensor], torch.Tensor],
+            tensor: torch.Tensor,
         ) -> torch.Tensor:
-            return (function(coordinates_4_dofs)[indices_4_dofs] * v).sum(
-                -2, keepdim=True
-            )
+            return (tensor[indices_4_dofs] * v).sum(-2, keepdim=True)
 
         def interpolator_grad(
-            function: Callable[[torch.Tensor], torch.Tensor],
+            tensor: torch.Tensor,
         ) -> torch.Tensor:
-            return (function(coordinates_4_dofs)[indices_4_dofs] * v_grad).sum(
-                -2, keepdim=True
-            )
+            return (tensor[indices_4_dofs] * v_grad).sum(-2, keepdim=True)
 
         return interpolator, interpolator_grad
