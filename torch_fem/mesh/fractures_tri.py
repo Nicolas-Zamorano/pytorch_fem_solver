@@ -11,6 +11,7 @@ class FracturesTri(MeshesTri):
 
         super().__init__(triangulations)
 
+        self.compute_edges_values()
         self._compute_fracture_map(fractures_3d_data)
 
         self._triangulation["vertices", "coordinates_3d"] = (
