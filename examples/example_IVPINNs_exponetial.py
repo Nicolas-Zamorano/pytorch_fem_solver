@@ -67,22 +67,30 @@ mesh_data_coarser = tr.triangulate(
 
 mesh_coarser = MeshTri(triangulation=mesh_data_coarser)
 
-elements_coarser = ElementTri(polynomial_order=1, integration_order=4)
+elements_coarser = ElementTri(polynomial_order=2, integration_order=4)
 
 basis_coarser = Basis(mesh_coarser, elements_coarser)
 
-verties_finer = basis_coarser.coords4global_dofs.numpy(force=True)
+new_vertices = basis_coarser.coords4global_dofs
+new_segments = basis_coarser.vertices_4_new_edges
+
+centroids = torch.Tensor.numpy(
+    mesh_coarser["cells", "coordinates"].mean(dim=-2), force=True
+)
+new_regions = [[c[0], c[1], i, 0] for i, c in enumerate(centroids)]
 
 mesh_data_finer = tr.triangulate(
     dict(
         vertices=new_vertices,
+        segments=new_segments,
+        regions=new_regions,
     ),
-    "Dqnel",
+    "penA",
 )
 
 mesh_finer = MeshTri(triangulation=mesh_data_finer)
 
-elements_finer = ElementTri(polynomial_order=1, integration_order=2)
+elements_finer = ElementTri(polynomial_order=1, integration_order=4)
 
 basis_finer = Basis(mesh_finer, elements_finer)
 
@@ -98,15 +106,15 @@ interpolation_function, grad_interpolation_function = basis_coarser.interpolate(
     basis_finer
 )
 
-# elements_1D = ElementLine(polynomial_order=1, integration_order=4)
+elements_1D = ElementLine(polynomial_order=1, integration_order=4)
 
-# V_edges = InteriorEdgesBasis(mesh_coarser, elements_1D)
+basis_edges = InteriorEdgesBasis(mesh_coarser, elements_1D)
 
-# jump_integration_points = V_edges.compute_jump_integration_points(delta=1e-12)
+# jump_integration_points = basis_edges.compute_jump_integration_points(delta=1e-12)
 
-# h_T = basis_coarser.mesh["cells", "length"]
-# h_E = basis_coarser.mesh["interior_edges", "length"]
-# n_E = basis_coarser.mesh["interior_edges", "normals"].unsqueeze(-2)
+h_T = basis_coarser.mesh["cells", "length"]
+h_E = basis_coarser.mesh["interior_edges", "length"]
+n_E = basis_coarser.mesh["interior_edges", "normals"].unsqueeze(-2)
 
 
 def interpolate(function: torch.nn.Module):
@@ -269,15 +277,15 @@ values = [
     exact_dx_value,
     exact_dy_value,
     exact_norm,
-    # gram_matrix_inverse,
-    #     h_T,
-    #     h_E,
-    #     n_E,
+    gram_matrix_inverse,
+    h_T,
+    h_E,
+    n_E,
 ]
 
-# bulk_history = []
-# jump_history = []
-# residual_history = []
+bulk_history = []
+jump_history = []
+residual_history = []
 
 
 def training_step(
@@ -293,19 +301,22 @@ def training_step(
         value_exact_dx,
         value_exact_dy,
         norm_exact,
-        # matrix,
-        # triangle_size,
-        # edge_size,
-        # normals_edges,
+        matrix,
+        triangle_size,
+        edge_size,
+        normals_edges,
     ) = precomputed_values
 
-    nn_value, nn_grad = neural_network.value_and_gradient(basis.integration_points)
+    # nn_value, nn_grad = neural_network.value_and_gradient(basis.coords4global_dofs)
 
-    # nn_value, nn_grad, nn_laplacian = neural_network.value_and_laplacian(
-    #     basis.integration_points
-    # )
+    nn_value, nn_grad, nn_laplacian = neural_network.value_and_laplacian(
+        basis.coords4global_dofs
+    )
 
-    # _, nn_jump_grad = neural_network.value_and_gradient(jump_integration_points)
+    _, nn_jump_grad = neural_network.value_and_gradient(basis_edges.coords4global_dofs)
+
+    nn_value_interpolated, nn_grad_interpolated = interpolate(nn_value)
+    nn_grad_interpolated = grad_interpolate(nn_grad)
 
     residual_vector = basis.reduce(
         basis.integrate_linear_form(residual, nn_grad, value_rhs)
@@ -313,22 +324,22 @@ def training_step(
 
     loss_value = torch.sum(residual_vector**2)
 
-    # loss_value = residual_vector.T @ (matrix @ residual_vector)
+    loss_value = residual_vector.T @ (matrix @ residual_vector)
 
-    # bulk_value = (
-    #     triangle_size * basis.integrate_functional(bulk, nn_laplacian, value_rhs)
-    # ).sum()
+    bulk_value = (
+        triangle_size * basis.integrate_functional(bulk, nn_laplacian, value_rhs)
+    ).sum()
 
-    # jump_value = (
-    #     torch.sqrt(edge_size)
-    #     * V_edges.integrate_functional(jump, normals_edges, nn_jump_grad)
-    # ).sum()
+    jump_value = (
+        torch.sqrt(edge_size)
+        * basis_edges.integrate_functional(jump, normals_edges, nn_jump_grad)
+    ).sum()
 
-    # residual_history.append(loss_value.item())
-    # bulk_history.append(bulk_value.item())
-    # jump_history.append(jump_value.item())
+    residual_history.append(loss_value.item())
+    bulk_history.append(bulk_value.item())
+    jump_history.append(jump_value.item())
 
-    # loss_value += bulk_value + jump_value
+    loss_value += bulk_value + jump_value
 
     h1_error = torch.sqrt(
         torch.sum(

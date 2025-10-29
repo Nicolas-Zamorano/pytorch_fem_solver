@@ -13,12 +13,12 @@ torch.set_default_dtype(torch.float64)
 # pylint: disable=not-callable
 
 
-def rhs(x, y):
+def rhs(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """Right-hand side function."""
     return 6 * x * (y - y**2) + 2 * x * (1 - x**2)
 
 
-def l(basis):
+def l(basis: Basis) -> torch.Tensor:
     """Linear form."""
     integration_points = basis.integration_points
     x, y = torch.split(integration_points, 1, dim=-1)
@@ -28,24 +28,24 @@ def l(basis):
     return rhs(x, y) * v
 
 
-def a(basis):
+def a(basis: Basis) -> torch.Tensor:
     """Bilinear form."""
     v_grad = basis.v_grad
 
     return v_grad @ v_grad.mT
 
 
-def exact(x, y):
+def exact(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """Exact solution."""
     return y * (1 - y) * x * (1 - x**2)
 
 
-def exact_dx(x, y):
+def exact_dx(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """Derivative of the exact solution with respect to x."""
     return -y * (1 - y) * ((x**2 - 1) + 2 * x * x)
 
 
-def exact_dy(x, y):
+def exact_dy(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """Derivative of the exact solution with respect to y."""
     return -(1 - 2 * y) * x * (x**2 - 1)
 
@@ -58,7 +58,9 @@ def h1_exact(basis: Basis) -> torch.Tensor:
     return exact(x, y) ** 2 + exact_dx(x, y) ** 2 + exact_dy(x, y) ** 2
 
 
-def h1_norm(basis, solution, solution_grad):
+def h1_norm(
+    basis: Basis, solution: torch.Tensor, solution_grad: torch.Tensor
+) -> torch.Tensor:
     """H1 norm of the FEM solution."""
     integration_points = basis.integration_points
     x, y = torch.split(integration_points, 1, dim=-1)
@@ -93,7 +95,7 @@ fracture_triangulation = td.TensorDict(
 
 mesh = MeshTri(triangulation=fracture_triangulation)
 
-elements = ElementTri(polynomial_order=3, integration_order=6)
+elements = ElementTri(polynomial_order=2, integration_order=6)
 
 V = Basis(mesh, elements)
 
@@ -117,54 +119,51 @@ H1_norm_value = torch.sqrt(
 
 print((H1_norm_value / exact_H1_norm).item())
 
-# Create figure with 3D plot for polynomial order 3 DOFs
-fig = plt.figure(figsize=(12, 5), dpi=100)
+### --- PLOT 2D --- ###
 
-# 2D plot
-ax1 = fig.add_subplot(1, 2, 1)
+fig_2d, ax_2d = plt.subplots()
 
 triangles_plot = PolyCollection(
     c4e,  # type: ignore
-    array=u_h.squeeze(-1),
+    array=I_u_h.mean(dim=-3).reshape(-1),
     cmap="viridis",
     edgecolors="black",
     linewidths=0.2,
 )
 
-ax1.add_collection(triangles_plot)
-ax1.set_title("FEM solution (2D)")
-ax1.set_xlabel("x")
-ax1.set_ylabel("y")
-fig.colorbar(triangles_plot, ax=ax1, label=r"$u_h(x,y)$")
+ax_2d.add_collection(triangles_plot)
+ax_2d.set_title("FEM solution (2D)")
+ax_2d.set_xlabel("x")
+ax_2d.set_ylabel("y")
+ax_2d.set_xlim((-1, 1))
+ax_2d.set_ylim((0, 1))
+fig_2d.colorbar(triangles_plot, ax=ax_2d, label=r"$u_h(x,y)$")
 
-# 3D surface plot using triangulation at DOF nodes
-ax2 = fig.add_subplot(1, 2, 2, projection="3d")
+### --- PLOT 3D --- ###
 
-# Get coordinates of all DOFs
-dof_coords = V.coords4global_dofs  # Shape: (num_dofs, 2)
-x_dofs = dof_coords[:, 0].numpy()
-y_dofs = dof_coords[:, 1].numpy()
-u_dofs = u_h.squeeze(-1).numpy()
+fig_3d, ax_3d = plt.subplots(subplot_kw={"projection": "3d"})
+
+dof_coords = V.coords4global_dofs
+x_dofs = dof_coords[:, 0]
+y_dofs = dof_coords[:, 1]
+u_dofs = u_h.squeeze(-1)
 
 # Get the DOF connectivity for each element
-dof_connectivity = (
-    V.global_dofs4elements.numpy()
-)  # Shape: (num_cells, num_dofs_per_cell)
 
 # Create triangulated surface plot
-ax2.plot_trisurf(
+ax_3d.plot_trisurf(
     x_dofs,
     y_dofs,
     u_dofs,
-    triangles=dof_connectivity[:, :3],  # Use first 3 DOFs (vertices) for triangulation
+    triangles=V.global_dofs4elements[:, :3],
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,
 )
 
-ax2.set_title("FEM solution (3D surface)")
-ax2.set_xlabel("x")
-ax2.set_ylabel("y")
-ax2.set_zlabel(r"$u_h(x,y)$")
+ax_3d.set_title("FEM solution (3D surface)")
+ax_3d.set_xlabel("x")
+ax_3d.set_ylabel("y")
+ax_3d.set_zlabel(r"$u_h(x,y)$")
 
 plt.show()

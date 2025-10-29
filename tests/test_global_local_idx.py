@@ -52,7 +52,7 @@ def exact(x, y, z):
 #     return rhs_value
 
 
-MESH_SIZE = 0.5**1
+MESH_SIZE = 0.5**8
 
 fracture_2d_data = {
     "vertices": [

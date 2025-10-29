@@ -1,7 +1,6 @@
 "# Example of solving a Poisson equation using FEM."
 
 import matplotlib.pyplot as plt
-from matplotlib.collections import PolyCollection
 import torch
 import triangle as tr
 
@@ -15,12 +14,12 @@ torch.set_default_dtype(torch.float64)
 
 mesh_data = tr.triangulate(
     {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
-    "Dqena" + str(0.5**1),
+    "qena" + str(0.5**5),
 )
 
 mesh = MeshTri(triangulation=mesh_data)
 
-elements = ElementTri(polynomial_order=3, integration_order=10)
+elements = ElementTri(polynomial_order=2, integration_order=10)
 
 discrete_basis = Basis(mesh, elements)
 
@@ -61,9 +60,7 @@ def linear_form(basis: Basis) -> torch.Tensor:
 A = discrete_basis.integrate_bilinear_form(gram_matrix)
 b = discrete_basis.integrate_linear_form(linear_form)
 
-solution = discrete_basis.solution_tensor()
-
-discrete_basis.solve(A, solution, b)
+solution = discrete_basis.solve(A, b)
 
 figure_solution, axis_solution = plt.subplots(subplot_kw={"projection": "3d"})  # type: ignore
 

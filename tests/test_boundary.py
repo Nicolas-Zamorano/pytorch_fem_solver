@@ -24,7 +24,7 @@ mesh_data = tr.triangulate(
 
 mesh = MeshTri(triangulation=mesh_data)
 
-elements = ElementTri(polynomial_order=1, integration_order=4)
+elements = ElementTri(polynomial_order=3, integration_order=6)
 
 discrete_basis = Basis(mesh, elements)
 
@@ -38,9 +38,9 @@ exact = lambda x: torch.ones_like(x[..., :1])
 exact_value = exact(integration_points)
 
 value_boundary_condition = discrete_basis.solution_tensor()
-value_boundary_condition[discrete_basis._basis_parameters["boundary_dofs"], :] += exact(
-    discrete_basis._coords4global_dofs
-)[discrete_basis._basis_parameters["boundary_dofs"], :]
+value_boundary_condition[discrete_basis.basis_parameters["boundary_dofs"], :] += exact(
+    discrete_basis.coords4global_dofs
+)[discrete_basis.basis_parameters["boundary_dofs"], :]
 
 extended_boundary_value, _ = discrete_basis.interpolate(
     discrete_basis, value_boundary_condition
