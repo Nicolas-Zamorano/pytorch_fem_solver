@@ -28,7 +28,11 @@ mesh_sk = skfem.MeshTri(
     t=mesh_data_meshio.cells_dict["triangle"].T,
 )
 
-elem_sk = skfem.ElementTriP1()
+elem_sk = skfem.ElementTriP2()
+
+elem_boundary_sk = skfem.ElementTriP1()
+
+mesh_finer_sk = mesh_sk.refined(1)
 
 V_sk = skfem.Basis(mesh_sk, elem_sk, intorder=2)
 
@@ -58,7 +62,8 @@ u_sk = skfem.solve(*skfem.condense(A_sk, b_sk, I=mesh_sk.interior_nodes()))
 i_range = [0, 1]
 
 fbasis = [
-    skfem.InteriorFacetBasis(mesh_sk, elem_sk, side=i, intorder=4) for i in i_range
+    skfem.InteriorFacetBasis(mesh_finer_sk, elem_boundary_sk, side=i, intorder=4)
+    for i in i_range
 ]
 u_facet = {"u" + str(i + 1): fbasis[i].interpolate(u_sk) for i in i_range}
 
@@ -86,7 +91,7 @@ eta_E_sk = torch.tensor(jump_sk.elemental(fbasis[0], **u_facet))
 
 mesh = MeshTri(mesh_data)
 
-element = ElementTri(polynomial_order=1, integration_order=2)
+element = ElementTri(polynomial_order=2, integration_order=4)
 
 V = Basis(mesh, element)
 
@@ -107,7 +112,7 @@ b = V.integrate_linear_form(l)
 
 sol = V.solve(A, b)
 
-element_inner_edges = ElementLine(polynomial_order=1, integration_order=3)
+element_inner_edges = ElementLine(polynomial_order=2, integration_order=3)
 
 V_inner_edges = InteriorEdgesBasis(mesh, element_inner_edges)
 

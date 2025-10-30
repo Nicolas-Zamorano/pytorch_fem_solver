@@ -55,7 +55,7 @@ regions = [
 
 mesh_h = tr.triangulate(
     {
-        "vertices": V_H.coords4global_dofs,
+        "vertices": V_H.coords_4_global_dofs,
         "segments": V_H.vertices_4_new_edges,
         "regions": regions,
     },

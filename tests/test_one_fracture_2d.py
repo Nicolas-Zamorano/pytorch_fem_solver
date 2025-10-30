@@ -105,7 +105,7 @@ b = V.integrate_linear_form(l)
 
 u_h = V.solve(A, b)
 
-c4e = V.coords4elements
+c4e = V.coords_4_elements
 
 exact_value = exact(*torch.unbind(c4e, -1))
 
@@ -143,7 +143,7 @@ fig_2d.colorbar(triangles_plot, ax=ax_2d, label=r"$u_h(x,y)$")
 
 fig_3d, ax_3d = plt.subplots(subplot_kw={"projection": "3d"})
 
-dof_coords = V.coords4global_dofs
+dof_coords = V.coords_4_global_dofs
 x_dofs = dof_coords[:, 0]
 y_dofs = dof_coords[:, 1]
 u_dofs = u_h.squeeze(-1)
@@ -155,7 +155,7 @@ ax_3d.plot_trisurf(
     x_dofs,
     y_dofs,
     u_dofs,
-    triangles=V.global_dofs4elements[:, :3],
+    triangles=V.global_dofs_4_elements[:, :3],
     cmap="viridis",
     edgecolor="black",
     linewidth=0.3,

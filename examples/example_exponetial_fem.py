@@ -64,8 +64,8 @@ solution = discrete_basis.solve(A, b)
 
 figure_solution, axis_solution = plt.subplots(subplot_kw={"projection": "3d"})  # type: ignore
 
-vertices_plot = discrete_basis.coords4global_dofs.numpy(force=True)
-triangles_plot = discrete_basis.global_dofs4elements.numpy(force=True)
+vertices_plot = discrete_basis.coords_4_global_dofs.numpy(force=True)
+triangles_plot = discrete_basis.global_dofs_4_elements.numpy(force=True)
 solution_plot = solution.squeeze(-1).numpy(force=True)
 
 axis_solution.plot_trisurf(
