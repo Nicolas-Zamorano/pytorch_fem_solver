@@ -20,9 +20,7 @@ class DistanceFunctionBC(torch.nn.Module):
 
     def __init__(self, segments_points: torch.Tensor):
         super().__init__()
-        self.segments_endpoints = (
-            segments_points.unsqueeze(-3).unsqueeze(-3).unsqueeze(-3)
-        )
+        self.segments_endpoints = segments_points
         self.segments_endpoints_first_point = torch.index_select(
             self.segments_endpoints, -2, torch.tensor([0], dtype=torch.long)
         )
@@ -91,7 +89,7 @@ class DistanceFunctionBC(torch.nn.Module):
         normalized_rvachev = 1.0 / torch.sqrt(
             (1.0 / (per_segment_distances**self.normalization_power)).sum(0)
         )
-        return normalized_rvachev.squeeze(0)
+        return normalized_rvachev
 
 
 class FeedForwardNeuralNetwork(torch.nn.Module):
@@ -106,7 +104,6 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
         activation_function: torch.nn.Module = torch.nn.Tanh(),
         use_xavier_initialization: bool = False,
         boundary_condition_modifier: Optional[torch.nn.Module] = None,
-        boundary_condition_value: Optional[torch.Tensor] = None,
     ):
         super().__init__()
         self._input_dimension = input_dimension
@@ -120,11 +117,6 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
             self._boundary_condition_modifier = IdentityBC()
         else:
             self._boundary_condition_modifier = boundary_condition_modifier
-
-        if boundary_condition_value is None:
-            self._boundary_condition_value = torch.zeros(1)
-        else:
-            self._boundary_condition_value = boundary_condition_value
 
         self._neural_network = self.build_network(
             input_dimension,
@@ -167,9 +159,7 @@ class FeedForwardNeuralNetwork(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the network."""
-        return (
-            self._neural_network(x) * self._boundary_condition_modifier(x)
-        ) + self._boundary_condition_value
+        return self._neural_network(x) * self._boundary_condition_modifier(x)
 
     @torch.jit.export
     def value_and_gradient(
