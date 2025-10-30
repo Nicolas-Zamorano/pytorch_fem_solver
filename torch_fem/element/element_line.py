@@ -40,6 +40,31 @@ class ElementLine(AbstractElement):
 
             v_grad = self.barycentric_map_gradient @ inv_map_jacobian
 
+        elif self.polynomial_order == 2:
+
+            lambda_1, lambda_2 = torch.split(bar_coords, 1, dim=-2)
+            grad_lambda_1, grad_lambda_2 = torch.split(
+                self.barycentric_map_gradient, 1, dim=-2
+            )
+
+            v = torch.cat(
+                [
+                    lambda_1 * (2.0 * lambda_1 - 1.0),
+                    lambda_2 * (2.0 * lambda_2 - 1.0),
+                    4.0 * lambda_1 * lambda_2,
+                ],
+                dim=-2,
+            )
+
+            v_grad = torch.cat(
+                [
+                    grad_lambda_1 * (4.0 * lambda_1 - 1.0),
+                    grad_lambda_2 * (4.0 * lambda_2 - 1.0),
+                    4 * (grad_lambda_1 * lambda_2 + grad_lambda_2 * lambda_1),
+                ],
+                dim=-2,
+            )
+
         else:
 
             raise NotImplementedError("Polynomial order not implemented")
