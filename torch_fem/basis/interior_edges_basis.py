@@ -34,12 +34,12 @@ class InteriorEdgesBasis(AbstractBasis):
                 coords_4_global_dofs, global_dofs_4_elements
             )
 
-            midpoints = coordinates_4_edges.mean(dim=-2, keepdim=True)
+            midpoints = coordinates_4_edges.mean(dim=-2)
 
             vertices_4_new_dofs = (
                 torch.arange(global_dofs_4_elements.shape[-2])
                 + global_dofs_4_elements.shape[-2]
-            )
+            ).unsqueeze(-1)
 
             new_coords_4_global_dofs = torch.cat(
                 [coords_4_global_dofs, midpoints], dim=-2
