@@ -22,7 +22,7 @@ class InteriorEdgesBasis(AbstractBasis):
 
         coords_4_global_dofs = mesh["vertices", "coordinates"]
         global_dofs_4_elements = mesh["edges", "vertices"]
-        nodes_4_boundary_dofs = mesh["edges", "markers"]
+        nodes_4_boundary_dofs = mesh["vertices", "markers"]
 
         if element.polynomial_order == 1:
             new_coords_4_global_dofs = coords_4_global_dofs
