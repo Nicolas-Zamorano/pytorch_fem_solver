@@ -273,7 +273,7 @@ class Basis(AbstractBasis):
     ):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            indices_4_dofs = self.global_dofs4elements.unsqueeze(-2)
+            indices_4_dofs = self.global_dofs_4_elements.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
@@ -283,9 +283,15 @@ class Basis(AbstractBasis):
             elements_mask = basis.mesh["cells", "markers"].squeeze(-1).type(torch.int)
 
             v = self.v[elements_mask].unsqueeze(-3)
+            # Due to size of v is (N_dofs, N_qp, N_d) as their equal for each cells,
+            # so we need repeat it for each cell.
+
+            nb_triangles = self.mesh["cells", "coordinates"].shape[0]
+
+            v = self.v.repeat(nb_triangles, 1, 1, 1)[elements_mask]
             v_grad = self.v_grad[elements_mask]
 
-            indices_4_dofs = self.global_dofs4elements[elements_mask].unsqueeze(-2)
+            indices_4_dofs = self.global_dofs_4_elements[elements_mask].unsqueeze(-2)
 
         elif basis.__class__ == InteriorEdgesBasis:
 
@@ -324,7 +330,7 @@ class Basis(AbstractBasis):
             v_grad = new_v_grad
 
             indices_4_dofs = basis.mesh.compute_coordinates_4_cells(
-                basis.mesh["cells", "vertices"], cells_4_interior_edges
+                self.global_dofs_4_elements, cells_4_interior_edges
             ).unsqueeze(-2)
 
         else:
