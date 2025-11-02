@@ -13,7 +13,7 @@ from torch_fem import (
     InteriorEdgesBasis,
     FeedForwardNeuralNetwork as NeuralNetwork,
     Model,
-    DistanceFunctionBC,
+    # DistanceFunctionBC,
 )
 
 # pyright: reportCallIssue=false
@@ -25,39 +25,17 @@ torch.set_default_dtype(torch.float64)
 
 # ---------------------- Neural Network Parameters ----------------------#
 
-
-class BoundaryConstrain(torch.nn.Module):
-    """Class to strongly apply bc"""
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """Boundary condition modifier function."""
-        x, y = torch.split(inputs, 1, dim=-1)
-        return x * (x - 1) * y * (y - 1)
-
-
-# segments = torch.tensor(
-#     [
-#         [[0.0, 0.0], [1.0, 0.0]],
-#         [[1.0, 0.0], [1.0, 1.0]],
-#         [[1.0, 1.0], [0.0, 1.0]],
-#         [[0.0, 1.0], [0.0, 0.0]],
-#     ]
-# )
-
-
 NN = NeuralNetwork(
     input_dimension=2,
     output_dimension=1,
-    nb_hidden_layers=4,
-    neurons_per_layers=15,
-    # boundary_condition_modifier=DistanceFunctionBC(segments),
-    boundary_condition_modifier=BoundaryConstrain(),
+    nb_hidden_layers=2,
+    neurons_per_layers=50,
     use_xavier_initialization=True,
 )
 
 # ---------------------- FEM Parameters ----------------------#
 
-K_INTERPOLATION = 2
+K_INTERPOLATION = 3
 K_TEST_FUNCTIONS = 1
 ORDER_PRECISION_INTEGRATION = 2
 
@@ -74,8 +52,8 @@ elements_coarser = ElementTri(
 
 basis_coarser = Basis(mesh_coarser, elements_coarser)
 
-new_vertices = basis_coarser.coords_4_global_dofs
-new_segments = basis_coarser.vertices_4_new_edges
+new_vertices = basis_coarser.coords_4_global_dofs.numpy(force=True)
+new_segments = basis_coarser.vertices_4_new_edges.numpy(force=True)
 
 centroids = torch.Tensor.numpy(
     mesh_coarser["cells", "coordinates"].mean(dim=-2), force=True
@@ -103,10 +81,6 @@ interpolation_function, grad_interpolation_function = basis_coarser.interpolate(
     basis_finer
 )
 
-# interpolation_function, grad_interpolation_function = basis_coarser.interpolate(
-#     basis_coarser
-# )
-
 elements_edges_finer = ElementLine(
     polynomial_order=K_TEST_FUNCTIONS, integration_order=ORDER_PRECISION_INTEGRATION
 )
@@ -115,13 +89,12 @@ basis_edges_finer = InteriorEdgesBasis(mesh_finer, elements_edges_finer)
 
 _, grad_interpolation_edges_function = basis_finer.interpolate(basis_edges_finer)
 
-# jump_integration_points = basis_edges.compute_jump_integration_points(delta=1e-12)
-
 basis_finer.mesh.compute_edges_values()
 
 h_T = basis_finer.mesh["cells", "length"]
 h_E = basis_finer.mesh["interior_edges", "length"]
 n_E = basis_finer.mesh["interior_edges", "normals"].unsqueeze(-2)
+boundary_dofs = basis_finer.basis_parameters["boundary_dofs"].squeeze(-1)
 
 
 # ---------------------- Residual Parameters ----------------------#
@@ -134,9 +107,14 @@ def residual(
     return value_rhs * basis.v - (basis.v_grad @ nn_grad.mT)
 
 
-def gram_matrix(basis: Basis) -> torch.Tensor:
-    """Gram matrix of the basis functions."""
-    return basis.v_grad @ basis.v_grad.mT
+# def gram_matrix(basis: Basis) -> torch.Tensor:
+#     """Gram matrix of the basis functions."""
+#     return basis.v_grad @ basis.v_grad.mT
+
+
+# gram_matrix_inverse = torch.inverse(
+# basis_finer.integrate_bilinear_form(gram_matrix)
+# )
 
 
 def jump(
@@ -167,10 +145,6 @@ def h1_norm(
     """H1 norm"""
     return value**2 + value_dx**2 + value_dy**2
 
-
-gram_matrix_inverse = torch.inverse(
-    basis_finer.reduce(basis_finer.integrate_bilinear_form(gram_matrix))
-)
 
 # ---------------------- Right-hand Side and Exact Solution ----------------------#
 
@@ -287,20 +261,9 @@ integration_points = basis_finer.integration_points
 
 rhs_value = rhs(integration_points)
 exact_value = exact(integration_points)
-
-value_boundary_condition = basis_finer.solution_tensor()
-value_boundary_condition[basis_finer.basis_parameters["boundary_dofs"], :] += exact(
-    basis_finer.coords_4_global_dofs
-)[basis_finer.basis_parameters["boundary_dofs"], :]
-
-extended_boundary_value, _ = basis_finer.interpolate(
-    basis_finer, value_boundary_condition
-)
-
-rhs_value = rhs(basis_finer.integration_points)
-exact_value = exact(basis_finer.integration_points)
-exact_dx_value = exact_dx(basis_finer.integration_points)
-exact_dy_value = exact_dy(basis_finer.integration_points)
+exact_value_dofs = exact(basis_finer.coords_4_global_dofs)
+exact_dx_value = exact_dx(integration_points)
+exact_dy_value = exact_dy(integration_points)
 exact_norm = torch.sqrt(
     torch.sum(
         basis_finer.integrate_functional(
@@ -312,13 +275,15 @@ exact_norm = torch.sqrt(
 values = [
     rhs_value,
     exact_value,
+    exact_value_dofs,
     exact_dx_value,
     exact_dy_value,
     exact_norm,
-    gram_matrix_inverse,
+    # gram_matrix_inverse,
     h_T,
     h_E,
     n_E,
+    boundary_dofs,
 ]
 
 bulk_history = []
@@ -337,18 +302,22 @@ def training_step(
     (
         value_rhs,
         value_exact,
+        value_exact_dofs,
         value_exact_dx,
         value_exact_dy,
         norm_exact,
-        matrix,
+        # matrix,
         triangle_size,
         edge_size,
         normals_edges,
+        dofs_boundary,
     ) = precomputed_values
 
     nn_value, nn_grad = neural_network.value_and_gradient(
-        coarser_basis.coords_4_global_dofs, value_boundary_condition
+        coarser_basis.coords_4_global_dofs
     )
+
+    nn_value[dofs_boundary] = value_exact_dofs[dofs_boundary]
 
     nn_jump_grad_interpolated = grad_interpolation_edges_function(nn_value)
 
@@ -356,22 +325,19 @@ def training_step(
     nn_grad_interpolated = grad_interpolation_function(nn_value)
     nn_laplacian_interpolated = grad_interpolation_function(nn_grad)
 
-    residual_vector = finer_basis.reduce(
-        finer_basis.integrate_linear_form(
-            residual,
-            nn_grad_interpolated,
-            value_rhs,
-        )
+    residual_vector = finer_basis.integrate_linear_form(
+        residual,
+        nn_grad_interpolated,
+        value_rhs,
     )
 
-    # loss_value = torch.sum(residual_vector**2)
+    loss_value = torch.sum(residual_vector**2)
 
-    loss_value = residual_vector.T @ (matrix @ residual_vector)
+    # loss_value = residual_vector.T @ (matrix @ residual_vector)
 
     bulk_value = (
         triangle_size
         * finer_basis.integrate_functional(
-            # coarser_basis.integrate_functional(
             bulk,
             nn_laplacian_interpolated,
             value_rhs,
@@ -381,7 +347,6 @@ def training_step(
     jump_value = (
         torch.sqrt(edge_size)
         * basis_edges_finer.integrate_functional(
-            # basis_edges_coarser.integrate_functional(
             jump,
             normals_edges,
             nn_jump_grad_interpolated,
@@ -401,7 +366,6 @@ def training_step(
     h1_error = torch.sqrt(
         torch.sum(
             finer_basis.integrate_functional(
-                # coarser_basis.integrate_functional(
                 h1_norm,
                 value_exact - nn_value_interpolated,
                 value_exact_dx - nn_dx_interpolated,
@@ -429,7 +393,7 @@ model = Model(
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.9999},
     use_early_stopping=True,
-    early_stopping_patience=120,
+    early_stopping_patience=600,
     min_delta=1e-15,
 )
 
@@ -440,11 +404,13 @@ model.train()
 
 model.load_optimal_parameters()
 
-opt_nn_value, opt_nn_grad = NN.value_and_gradient(
-    basis_coarser.coords_4_global_dofs, value_boundary_condition
-)
-opt_nn_value = interpolation_function(opt_nn_value)
-opt_nn_grad = grad_interpolation_function(opt_nn_grad)
+opt_nn_value = NN(basis_coarser.coords_4_global_dofs)
+
+
+opt_nn_value[boundary_dofs] = exact_value_dofs[boundary_dofs]
+
+opt_nn_interpolated = interpolation_function(opt_nn_value)
+opt_nn_grad = grad_interpolation_function(opt_nn_value)
 opt_nn_dx, opt_nn_dy = torch.split(opt_nn_grad, 1, dim=-1)
 
 h1_error_plot = (
@@ -452,7 +418,7 @@ h1_error_plot = (
         # basis_coarser.integrate_functional(
         basis_finer.integrate_functional(
             h1_norm,
-            exact_value - opt_nn_value,
+            exact_value - opt_nn_interpolated,
             exact_dx_value - opt_nn_dx,
             exact_dy_value - opt_nn_dy,
         )
@@ -463,12 +429,13 @@ h1_error_plot = (
 
 figure_solution, axis_solution = plt.subplots()
 
-# c4e = torch.Tensor.numpy(basis_coarser.mesh["cells", "coordinates"], force=True)
-c4e = torch.Tensor.numpy(basis_finer.mesh["cells", "coordinates"], force=True)
+coordinates_4_triangles = torch.Tensor.numpy(
+    basis_finer.mesh["cells", "coordinates"], force=True
+)
 
 
 triangles_plot = PolyCollection(
-    c4e,  # type: ignore
+    coordinates_4_triangles,  # type: ignore
     array=h1_error_plot,
     cmap="viridis",
     edgecolors="black",
@@ -487,44 +454,14 @@ color_bar.set_label(r"$H^1$ error")
 
 figure_solution.tight_layout()
 
-# model.plot_training_history(
-#     plot_names={
-#         "loss": r"$\mathcal{L}(u_{\theta})$",
-#         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
-#         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-#         "title": "Training History",
-#     }
-# )
-
-loss_history, validation_history, accuracy_history = model.get_training_history()
-
-fig_loss, ax_loss = plt.subplots()
-ax_loss.semilogy(
-    loss_history,
-    label=r"$\mathcal{L}_{r_{h}}(u_{\theta})$",
-    linestyle="-",
+model.plot_training_history(
+    plot_names={
+        "loss": r"$\mathcal{L}(u_{\theta})$",
+        "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
+        "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
+        "title": "Training History",
+    }
 )
-ax_loss.semilogy(
-    accuracy_history,
-    label=r"$\frac{\|u_{\text{ex}}-u_{\theta}\|_U}{\|u_{\text{ex}}\|_U}$",
-    linestyle=":",
-)
-ax_loss.set_xlabel("# Epochs")
-ax_loss.set_ylabel("Value")
-ax_loss.set_title("Training History")
-ax_loss.legend()
-
-fig_convergence, ax_convergence = plt.subplots()
-ax_convergence.semilogy(
-    validation_history,
-    label=r"$\frac{\sqrt{\mathcal{L}_{r_{h}}(u_{\theta})}}{\|u_{\text{ex}}-u_{\theta}\|_U}$",
-    linestyle="--",
-)
-ax_convergence.set_xlabel("# Epochs")
-ax_convergence.set_ylabel("Value")
-ax_convergence.set_title("Validation History")
-ax_convergence.legend()
-
 
 figure_residuals, axis_residuals = plt.subplots()
 

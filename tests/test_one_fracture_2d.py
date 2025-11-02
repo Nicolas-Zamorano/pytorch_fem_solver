@@ -95,7 +95,7 @@ fracture_triangulation = td.TensorDict(
 
 mesh = MeshTri(triangulation=fracture_triangulation)
 
-elements = ElementTri(polynomial_order=2, integration_order=6)
+elements = ElementTri(polynomial_order=3, integration_order=6)
 
 V = Basis(mesh, elements)
 

@@ -46,8 +46,8 @@ torch.set_default_dtype(torch.float64)
 NN = NeuralNetwork(
     input_dimension=2,
     output_dimension=1,
-    nb_hidden_layers=4,
-    neurons_per_layers=15,
+    nb_hidden_layers=2,
+    neurons_per_layers=50,
     # boundary_condition_modifier=DistanceFunctionBC(segments),
     # boundary_condition_modifier=BoundaryConstrain(),
     use_xavier_initialization=True,
@@ -62,7 +62,7 @@ mesh_data = tr.triangulate(
 
 mesh = MeshTri(triangulation=mesh_data)
 
-elements = ElementTri(polynomial_order=1, integration_order=2)
+elements = ElementTri(polynomial_order=2, integration_order=6)
 
 discrete_basis = Basis(mesh, elements)
 
@@ -95,107 +95,107 @@ def h1_norm(
 
 #### Exponential Case ####
 
-EXPONENTIAL_COEFFICIENT = 5
-SCALING_CONSTANT = 1
-
-
-def exact(coordinates: torch.Tensor) -> torch.Tensor:
-    """Exact solution of the PDE."""
-    x, y = torch.split(coordinates, 1, -1)
-    return (
-        SCALING_CONSTANT
-        * x
-        * y
-        * (1 - x)
-        * (1 - y)
-        * (torch.exp(EXPONENTIAL_COEFFICIENT * x) - 1)
-    )
-
-
-def exact_dx(coordinates: torch.Tensor) -> torch.Tensor:
-    """Exact solution derivative with respect to x."""
-
-    x, y = torch.split(coordinates, 1, -1)
-    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
-
-    return (
-        SCALING_CONSTANT
-        * y
-        * (1 - y)
-        * (
-            (1 - 2 * x) * (exponential_value - 1)
-            + EXPONENTIAL_COEFFICIENT * x * (1 - x) * exponential_value
-        )
-    )
-
-
-def exact_dy(coordinates: torch.Tensor) -> torch.Tensor:
-    """Exact solution derivative with respect to y."""
-    x, y = torch.split(coordinates, 1, -1)
-    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
-
-    return SCALING_CONSTANT * (1 - 2 * y) * x * (1 - x) * (exponential_value - 1)
-
-
-def rhs(coordinates: torch.Tensor) -> torch.Tensor:
-    """Right-hand side function."""
-    x, y = torch.split(coordinates, 1, -1)
-
-    exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
-
-    exact_dxx = (
-        SCALING_CONSTANT
-        * y
-        * (1 - y)
-        * (
-            -2 * (exponential_value - 1)
-            + 2 * EXPONENTIAL_COEFFICIENT * (1 - 2 * x) * exponential_value
-            + EXPONENTIAL_COEFFICIENT**2 * x * (1 - x) * exponential_value
-        )
-    )
-
-    exact_dyy = SCALING_CONSTANT * (-2) * x * (1 - x) * (exponential_value - 1)
-
-    lap = exact_dxx + exact_dyy
-    return -lap
-
-
-#### Tanh Case ####
+# EXPONENTIAL_COEFFICIENT = 2.5
+# SCALING_CONSTANT = 1
 
 
 # def exact(coordinates: torch.Tensor) -> torch.Tensor:
 #     """Exact solution of the PDE."""
 #     x, y = torch.split(coordinates, 1, -1)
-#     return torch.tanh(2 * (x**3 - y**4))
+#     return (
+#         SCALING_CONSTANT
+#         * x
+#         * y
+#         * (1 - x)
+#         * (1 - y)
+#         * (torch.exp(EXPONENTIAL_COEFFICIENT * x) - 1)
+#     )
 
 
 # def exact_dx(coordinates: torch.Tensor) -> torch.Tensor:
 #     """Exact solution derivative with respect to x."""
 
 #     x, y = torch.split(coordinates, 1, -1)
-#     return 6 * x**2 * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
+#     exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
+
+#     return (
+#         SCALING_CONSTANT
+#         * y
+#         * (1 - y)
+#         * (
+#             (1 - 2 * x) * (exponential_value - 1)
+#             + EXPONENTIAL_COEFFICIENT * x * (1 - x) * exponential_value
+#         )
+#     )
 
 
 # def exact_dy(coordinates: torch.Tensor) -> torch.Tensor:
 #     """Exact solution derivative with respect to y."""
 #     x, y = torch.split(coordinates, 1, -1)
+#     exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
 
-#     return -8 * y**3 * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
+#     return SCALING_CONSTANT * (1 - 2 * y) * x * (1 - x) * (exponential_value - 1)
 
 
 # def rhs(coordinates: torch.Tensor) -> torch.Tensor:
 #     """Right-hand side function."""
 #     x, y = torch.split(coordinates, 1, -1)
 
-#     return (
-#         4
-#         * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
+#     exponential_value = torch.exp(EXPONENTIAL_COEFFICIENT * x)
+
+#     exact_dxx = (
+#         SCALING_CONSTANT
+#         * y
+#         * (1 - y)
 #         * (
-#             -3 * x
-#             + 6 * y**2
-#             + 2 * (9 * x**4 + 16 * y**6) * torch.tanh(2 * (x**3 - y**4))
+#             -2 * (exponential_value - 1)
+#             + 2 * EXPONENTIAL_COEFFICIENT * (1 - 2 * x) * exponential_value
+#             + EXPONENTIAL_COEFFICIENT**2 * x * (1 - x) * exponential_value
 #         )
 #     )
+
+#     exact_dyy = SCALING_CONSTANT * (-2) * x * (1 - x) * (exponential_value - 1)
+
+#     lap = exact_dxx + exact_dyy
+#     return -lap
+
+
+#### Tanh Case ####
+
+
+def exact(coordinates: torch.Tensor) -> torch.Tensor:
+    """Exact solution of the PDE."""
+    x, y = torch.split(coordinates, 1, -1)
+    return torch.tanh(2 * (x**3 - y**4))
+
+
+def exact_dx(coordinates: torch.Tensor) -> torch.Tensor:
+    """Exact solution derivative with respect to x."""
+
+    x, y = torch.split(coordinates, 1, -1)
+    return 6 * x**2 * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
+
+
+def exact_dy(coordinates: torch.Tensor) -> torch.Tensor:
+    """Exact solution derivative with respect to y."""
+    x, y = torch.split(coordinates, 1, -1)
+
+    return -8 * y**3 * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
+
+
+def rhs(coordinates: torch.Tensor) -> torch.Tensor:
+    """Right-hand side function."""
+    x, y = torch.split(coordinates, 1, -1)
+
+    return (
+        4
+        * (1.0 / torch.cosh(2 * (x**3 - y**4)) ** 2)
+        * (
+            -3 * x
+            + 6 * y**2
+            + 2 * (9 * x**4 + 16 * y**6) * torch.tanh(2 * (x**3 - y**4))
+        )
+    )
 
 
 # ---------------------- Training ----------------------#
@@ -276,7 +276,6 @@ def training_step(
     h1_error = torch.sqrt(
         torch.sum(
             basis.integrate_functional(
-                # coarser_basis.integrate_functional(
                 h1_norm,
                 value_exact - nn_interpolated,
                 value_exact_dx - nn_dx,
@@ -303,7 +302,7 @@ model = Model(
     # learning_rate_scheduler=torch.optim.lr_scheduler.ExponentialLR,
     # scheduler_kwargs={"gamma": 0.9999},
     use_early_stopping=True,
-    early_stopping_patience=120,
+    early_stopping_patience=600,
     min_delta=1e-15,
 )
 
@@ -338,7 +337,6 @@ h1_error_plot = (
 
 figure_solution, axis_solution = plt.subplots()
 
-# c4e = torch.Tensor.numpy(basis_coarser.mesh["cells", "coordinates"], force=True)
 c4e = torch.Tensor.numpy(discrete_basis.mesh["cells", "coordinates"], force=True)
 
 
@@ -362,56 +360,42 @@ color_bar.set_label(r"$H^1$ error")
 
 figure_solution.tight_layout()
 
-# model.plot_training_history(
-#     plot_names={
-#         "loss": r"$\mathcal{L}(u_{\theta})$",
-#         "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
-#         "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
-#         "title": "Training History",
-#     }
+model.plot_training_history(
+    plot_names={
+        "loss": r"$\mathcal{L}(u_{\theta})$",
+        "validation": r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
+        "accuracy": r"$\frac{\|u-u_{\theta}\|_U}{\|u_{\theta}\|_U}$",
+        "title": "Training History",
+    }
+)
+
+# loss_history, validation_history, accuracy_history = model.get_training_history()
+
+# fig_loss, ax_loss = plt.subplots()
+# ax_loss.semilogy(
+#     loss_history,
+#     label=r"$\mathcal{L}_{r_{h}}(u_{\theta})$",
+#     linestyle="-",
 # )
+# ax_loss.semilogy(
+#     accuracy_history,
+#     label=r"$\frac{\|u_{\text{ex}}-u_{\theta}\|_U}{\|u_{\text{ex}}\|_U}$",
+#     linestyle=":",
+# )
+# ax_loss.set_xlabel("# Epochs")
+# ax_loss.set_ylabel("Value")
+# ax_loss.set_title("Training History")
+# ax_loss.legend()
 
-loss_history, validation_history, accuracy_history = model.get_training_history()
-
-fig_loss, ax_loss = plt.subplots()
-ax_loss.semilogy(
-    loss_history,
-    label=r"$\mathcal{L}_{r_{h}}(u_{\theta})$",
-    linestyle="-",
-)
-ax_loss.semilogy(
-    accuracy_history,
-    label=r"$\frac{\|u_{\text{ex}}-u_{\theta}\|_U}{\|u_{\text{ex}}\|_U}$",
-    linestyle=":",
-)
-ax_loss.set_xlabel("# Epochs")
-ax_loss.set_ylabel("Value")
-ax_loss.set_title("Training History")
-ax_loss.legend()
-
-fig_convergence, ax_convergence = plt.subplots()
-ax_convergence.semilogy(
-    validation_history,
-    label=r"$\frac{\sqrt{\mathcal{L}_{r_{h}}(u_{\theta})}}{\|u_{\text{ex}}-u_{\theta}\|_U}$",
-    linestyle="--",
-)
-ax_convergence.set_xlabel("# Epochs")
-ax_convergence.set_ylabel("Value")
-ax_convergence.set_title("Validation History")
-ax_convergence.legend()
-
-
-figure_residuals, axis_residuals = plt.subplots()
-
-axis_residuals.semilogy(residual_history, linestyle="-", label="residual")
-axis_residuals.semilogy(bulk_history, linestyle="--", label="bulk")
-axis_residuals.semilogy(jump_history, linestyle=":", label="jump")
-
-axis_residuals.set_xlabel("# Epochs")
-axis_residuals.set_ylabel("Value")
-axis_residuals.set_title("Value of components of Loss over training phase")
-axis_residuals.legend()
-figure_residuals.tight_layout()
-
+# fig_convergence, ax_convergence = plt.subplots()
+# ax_convergence.semilogy(
+#     validation_history,
+#     label=r"$\frac{\sqrt{\mathcal{L}_{r_{h}}(u_{\theta})}}{\|u_{\text{ex}}-u_{\theta}\|_U}$",
+#     linestyle="--",
+# )
+# ax_convergence.set_xlabel("# Epochs")
+# ax_convergence.set_ylabel("Value")
+# ax_convergence.set_title("Validation History")
+# ax_convergence.legend()
 
 plt.show()
