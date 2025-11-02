@@ -95,7 +95,7 @@ class Basis(AbstractBasis):
 
         elif element.polynomial_order == 3:
 
-            vertices_4_edges = mesh["edges", "vertices"]
+            # new dofs
 
             (
                 coordinates_4_vertices_first_vertex,
@@ -119,6 +119,10 @@ class Basis(AbstractBasis):
                 dim=-2,
             )
 
+            # new dofs enumeration
+
+            vertices_4_edges = mesh["edges", "vertices"]
+
             new_edge_dofs_enumeration = (
                 torch.arange(vertices_4_edges.shape[0] * 2)
                 + coordinates_4_vertices.shape[-2]
@@ -130,7 +134,74 @@ class Basis(AbstractBasis):
                 + vertices_4_edges.shape[0] * 2
             )
 
+            vertices_4_edges_sorted, _ = vertices_4_edges.sort(dim=-1)
+
+            vertices_offset = vertices_4_cells.max() + 1
+
+            edge_keys = (
+                vertices_4_edges_sorted[:, 0] * vertices_offset
+                + vertices_4_edges_sorted[:, 1]
+            )
+
+            map_dict = -torch.ones(vertices_offset * vertices_offset, dtype=torch.int64)
+
+            map_dict[edge_keys] = torch.arange(
+                vertices_4_edges.shape[0],
+                dtype=torch.int64,
+            )
+
             vertices_4_non_unique_edges = vertices_4_cells[..., mesh.edges_permutations]
+
+            vertices_4_non_unique_edges_sorted, _ = vertices_4_non_unique_edges.sort(
+                dim=-1
+            )
+
+            vertices_keys = (
+                vertices_4_non_unique_edges_sorted[..., 0] * vertices_offset
+                + vertices_4_non_unique_edges_sorted[..., 1]
+            )
+
+            global_edge_ids = map_dict[vertices_keys]
+
+            is_flipped = (
+                vertices_4_non_unique_edges[..., 0]
+                > vertices_4_non_unique_edges[..., 1]
+            )
+
+            edge_dofs_for_element = torch.stack(
+                [
+                    new_edge_dofs_enumeration[global_edge_ids * 2],
+                    new_edge_dofs_enumeration[global_edge_ids * 2 + 1],
+                ],
+                dim=-1,
+            )
+            edge_dofs_for_element[is_flipped] = edge_dofs_for_element[is_flipped].flip(
+                -1
+            )
+
+            vertices_4_new_edge_dofs = edge_dofs_for_element.reshape(
+                vertices_4_cells.shape[0], -1
+            )
+
+            vertices_4_cell_center_dofs = new_cell_dofs_enumeration.unsqueeze(-1)
+
+            vertices_4_new_dofs = torch.cat(
+                [vertices_4_new_edge_dofs, vertices_4_cell_center_dofs], dim=-1
+            )
+
+            # markers for new dofs
+
+            new_markers_4_edge_dofs = mesh["edges", "markers"].repeat_interleave(
+                2, dim=-2
+            )
+            new_markers_4_interior_cell_dofs = torch.zeros(
+                (vertices_4_cells.shape[0], 1), dtype=mesh["edges", "markers"].dtype
+            )
+            new_markers_4_new_dofs = torch.cat(
+                [new_markers_4_edge_dofs, new_markers_4_interior_cell_dofs], dim=-2
+            )
+
+            # vertices for new edges
 
             first_vertices_4_edges, second_vertices_4_edges = torch.unbind(
                 vertices_4_edges, dim=-1
@@ -154,11 +225,18 @@ class Basis(AbstractBasis):
                 dim=-2,
             )
 
-            vertices_4_non_unique_edges_sorted, _ = vertices_4_non_unique_edges.sort(
-                dim=-1
+            # assemble global dofs
+
+            coords_4_global_dofs = torch.cat(
+                [coordinates_4_vertices, coordinates_4_new_dofs], dim=-2
+            )
+            global_dofs_4_elements = torch.cat(
+                [vertices_4_cells, vertices_4_new_dofs], dim=-1
+            )
+            nodes_4_boundary_dofs = torch.cat(
+                [markers_4_vertices, new_markers_4_new_dofs], dim=-2
             )
 
-            vertices_4_edges_sorted, _ = vertices_4_edges.sort(dim=-1)
 
             vertices_offset = vertices_4_cells.max() + 1
             vertices_keys = (
