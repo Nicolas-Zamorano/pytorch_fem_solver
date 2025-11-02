@@ -237,47 +237,166 @@ class Basis(AbstractBasis):
                 [markers_4_vertices, new_markers_4_new_dofs], dim=-2
             )
 
+        elif element.polynomial_order == 4:
 
-            vertices_offset = vertices_4_cells.max() + 1
-            vertices_keys = (
-                vertices_4_non_unique_edges_sorted[..., 0] * vertices_offset
-                + vertices_4_non_unique_edges_sorted[..., 1]
+            # new dofs on edges (3 per edge)
+            (
+                coordinates_4_vertices_first_vertex,
+                coordinates_4_vertices_second_vertex,
+            ) = torch.unbind(mesh["edges", "coordinates"], dim=-2)
+
+            coordinates_4_new_edge_dofs = torch.stack(
+                [
+                    coordinates_4_vertices_first_vertex * 3 / 4
+                    + coordinates_4_vertices_second_vertex * 1 / 4,
+                    coordinates_4_vertices_first_vertex * 2 / 4
+                    + coordinates_4_vertices_second_vertex * 2 / 4,
+                    coordinates_4_vertices_first_vertex * 1 / 4
+                    + coordinates_4_vertices_second_vertex * 3 / 4,
+                ],
+                dim=-2,
+            ).reshape(-1, 2)
+
+            # new dofs in element interior (3 per cell)
+
+            barycentric_points = torch.tensor(
+                [
+                    [0.25, 0.25, 0.5],
+                    [0.25, 0.5, 0.25],
+                    [0.5, 0.25, 0.25],
+                ]
             )
+            coordinates_4_new_cell_dofs = self._compute_integration_points(
+                mesh, barycentric_points
+            )
+
+            # coordinates_4_cell_coords = mesh["cells", "coordinates"]
+            # cell_center = coordinates_4_cell_coords.mean(dim=-2)
+
+            # # use barycentric-like interpolation for 3 interior points
+            # # (for triangles, this gives roughly uniform interior placement)
+            # coordinates_4_new_cell_dofs = torch.stack(
+            #     [
+            #         0.6 * coordinates_4_cell_coords[:, 0]
+            #         + 0.2 * coordinates_4_cell_coords[:, 1]
+            #         + 0.2 * coordinates_4_cell_coords[:, 2],
+            #         0.2 * coordinates_4_cell_coords[:, 0]
+            #         + 0.6 * coordinates_4_cell_coords[:, 1]
+            #         + 0.2 * coordinates_4_cell_coords[:, 2],
+            #         0.2 * coordinates_4_cell_coords[:, 0]
+            #         + 0.2 * coordinates_4_cell_coords[:, 1]
+            #         + 0.6 * coordinates_4_cell_coords[:, 2],
+            #     ],
+            #     dim=1,
+            # ).reshape(-1, 2)
+
+            coordinates_4_new_dofs = torch.cat(
+                [coordinates_4_new_edge_dofs, coordinates_4_new_cell_dofs], dim=-2
+            )
+
+            # enumeration of new dofs
+            vertices_4_edges = mesh["edges", "vertices"]
+
+            new_edge_dofs_enumeration = (
+                torch.arange(vertices_4_edges.shape[0] * 3)
+                + coordinates_4_vertices.shape[-2]
+            )
+            new_cell_dofs_enumeration = (
+                torch.arange(vertices_4_cells.shape[0] * 3)
+                + coordinates_4_vertices.shape[-2]
+                + vertices_4_edges.shape[0] * 3
+            )
+
+            # edge mapping (same logic as P3)
+            vertices_4_edges_sorted, _ = vertices_4_edges.sort(dim=-1)
+            vertices_offset = vertices_4_cells.max() + 1
             edge_keys = (
                 vertices_4_edges_sorted[:, 0] * vertices_offset
                 + vertices_4_edges_sorted[:, 1]
             )
 
             map_dict = -torch.ones(vertices_offset * vertices_offset, dtype=torch.int64)
-
             map_dict[edge_keys] = torch.arange(
                 vertices_4_edges.shape[0],
                 dtype=torch.int64,
             )
 
+            vertices_4_non_unique_edges = vertices_4_cells[..., mesh.edges_permutations]
+            vertices_4_non_unique_edges_sorted, _ = vertices_4_non_unique_edges.sort(
+                dim=-1
+            )
+
+            vertices_keys = (
+                vertices_4_non_unique_edges_sorted[..., 0] * vertices_offset
+                + vertices_4_non_unique_edges_sorted[..., 1]
+            )
+
             global_edge_ids = map_dict[vertices_keys]
 
-            global_edge_ids_expanded = torch.stack(
-                [global_edge_ids * 2, global_edge_ids * 2 + 1], dim=-1
+            # flipping for edge orientation
+            is_flipped = (
+                vertices_4_non_unique_edges[..., 0]
+                > vertices_4_non_unique_edges[..., 1]
             )
-            vertices_4_new_edge_dofs = new_edge_dofs_enumeration[
-                global_edge_ids_expanded.reshape(*global_edge_ids.shape[:-1], -1)
-            ]
 
-            vertices_4_cell_center_dofs = new_cell_dofs_enumeration.unsqueeze(-1)
+            # 3 dofs per edge
+            edge_dofs_for_element = torch.stack(
+                [
+                    new_edge_dofs_enumeration[global_edge_ids * 3 + 0],
+                    new_edge_dofs_enumeration[global_edge_ids * 3 + 1],
+                    new_edge_dofs_enumeration[global_edge_ids * 3 + 2],
+                ],
+                dim=-1,
+            )
+
+            edge_dofs_for_element[is_flipped] = edge_dofs_for_element[is_flipped].flip(
+                -1
+            )
+
+            vertices_4_new_edge_dofs = edge_dofs_for_element.reshape(
+                vertices_4_cells.shape[0], -1
+            )
+
+            vertices_4_cell_interior_dofs = new_cell_dofs_enumeration.reshape(
+                vertices_4_cells.shape[0], -1
+            )
 
             vertices_4_new_dofs = torch.cat(
-                [vertices_4_new_edge_dofs, vertices_4_cell_center_dofs], dim=-1
+                [vertices_4_new_edge_dofs, vertices_4_cell_interior_dofs], dim=-1
             )
 
+            # markers for new dofs
             new_markers_4_edge_dofs = mesh["edges", "markers"].repeat_interleave(
-                2, dim=-2
+                3, dim=-2
             )
             new_markers_4_interior_cell_dofs = torch.zeros(
-                (vertices_4_cells.shape[0], 1), dtype=mesh["edges", "markers"].dtype
+                (vertices_4_cells.shape[0] * 3, 1),
+                dtype=mesh["edges", "markers"].dtype,
             )
             new_markers_4_new_dofs = torch.cat(
                 [new_markers_4_edge_dofs, new_markers_4_interior_cell_dofs], dim=-2
+            )
+
+            # define new "edges" for visualization / connectivity
+            first_vertices_4_edges, second_vertices_4_edges = torch.unbind(
+                vertices_4_edges, dim=-1
+            )
+            vertices_4_second_edge = new_edge_dofs_enumeration.reshape(-1, 3)
+            v1, v2, v3 = torch.unbind(vertices_4_second_edge, dim=-1)
+
+            vertices_4_first_edge = torch.stack([first_vertices_4_edges, v1], dim=-1)
+            vertices_4_middle_edge1 = torch.stack([v1, v2], dim=-1)
+            vertices_4_middle_edge2 = torch.stack([v2, v3], dim=-1)
+            vertices_4_last_edge = torch.stack([v3, second_vertices_4_edges], dim=-1)
+
+            self.vertices_4_new_edges = torch.cat(
+                [
+                    vertices_4_first_edge,
+                    vertices_4_middle_edge1,
+                    vertices_4_middle_edge2,
+                    vertices_4_last_edge,
+                ],
+                dim=-2,
             )
 
             coords_4_global_dofs = torch.cat(
@@ -360,7 +479,6 @@ class Basis(AbstractBasis):
 
             elements_mask = basis.mesh["cells", "markers"].squeeze(-1).type(torch.int)
 
-            v = self.v[elements_mask].unsqueeze(-3)
             # Due to size of v is (N_dofs, N_qp, N_d) as their equal for each cells,
             # so we need repeat it for each cell.
 
@@ -421,8 +539,6 @@ class Basis(AbstractBasis):
             interpolation_grad = (tensor[indices_4_dofs] * v_grad).sum(-2, keepdim=True)
 
             return interpolation, interpolation_grad
-
-        coordinates_4_dofs = self.coords4global_dofs
 
         def interpolator(
             tensor: torch.Tensor,
