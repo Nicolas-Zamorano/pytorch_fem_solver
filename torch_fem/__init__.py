@@ -10,6 +10,14 @@ from .basis import (
 from .element import ElementLine, ElementTri
 from .mesh import FracturesTri, MeshTri, Patches
 from .model import Model, FeedForwardNeuralNetwork, DistanceFunctionBC
+from .solvers import FemSolver, VPINNsSolver, RVPINNsSolver, FEINNsSolver
+from .problems import (
+    ExponentialProblem,
+    SinsProblem,
+    TanhProblem,
+    PoissonProblem,
+    FractureProblem,
+)
 
 
 __all__ = [
@@ -26,4 +34,13 @@ __all__ = [
     "Model",
     "FeedForwardNeuralNetwork",
     "DistanceFunctionBC",
+    "FemSolver",
+    "ExponentialProblem",
+    "SinsProblem",
+    "TanhProblem",
+    "PoissonProblem",
+    "FractureProblem",
+    "VPINNsSolver",
+    "RVPINNsSolver",
+    "FEINNsSolver",
 ]

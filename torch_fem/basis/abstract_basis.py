@@ -177,7 +177,7 @@ class AbstractBasis(abc.ABC):
             raise NotImplementedError(f"Unknown form type: {format(form)}")
 
     def solution_tensor(self) -> torch.Tensor:
-        """return a empty vector with size (nb_dofs, 1)."""
+        """return an empty vector with size (nb_dofs, 1)."""
         return torch.zeros(self.basis_parameters["linear_form_shape"])
 
     def solve(
