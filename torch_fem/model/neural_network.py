@@ -20,20 +20,20 @@ class DistanceFunctionBC(torch.nn.Module):
 
     def __init__(self, segments_points: torch.Tensor):
         super().__init__()
-        self.segments_endpoints = segments_points
+        self.segments_points = segments_points.unsqueeze(-3)
         self.segments_endpoints_first_point = torch.index_select(
-            self.segments_endpoints, -2, torch.tensor([0], dtype=torch.long)
+            self.segments_points, -2, torch.tensor([0], dtype=torch.long)
         )
         self.normalization_power = 1.0
 
         (self.segment_vectors, self.segment_lengths, self.segment_midpoints) = (
-            self.compute_segment_values(self.segments_endpoints)
+            self.compute_segment_values(self.segments_points)
         )
 
         (
-            self.segment_midpoints_first_coordinate,
-            self.segment_midpoints_second_coordinate,
-        ) = torch.split(self.segment_midpoints, 1, dim=-1)
+            self.segment_vectors_first_coordinate,
+            self.segment_vectors_second_coordinate,
+        ) = torch.split(self.segment_vectors, 1, dim=-1)
 
     def compute_segment_values(
         self, segments_points: torch.Tensor
@@ -57,6 +57,8 @@ class DistanceFunctionBC(torch.nn.Module):
 
         Returns a tensor of per-segment distance contributions for the input points.
         """
+        points = points.unsqueeze(-4)
+
         vectors_from_segment_start = points - self.segments_endpoints_first_point
 
         (
@@ -66,9 +68,9 @@ class DistanceFunctionBC(torch.nn.Module):
 
         signed_distances = (1 / self.segment_lengths) * (
             vectors_from_segment_start_first_coordinate
-            * self.segment_midpoints_second_coordinate
+            * self.segment_vectors_second_coordinate
             - vectors_from_segment_start_second_coordinate
-            * self.segment_midpoints_first_coordinate
+            * self.segment_vectors_first_coordinate
         )
 
         trimming_values = (1.0 / self.segment_lengths) * (
@@ -87,7 +89,7 @@ class DistanceFunctionBC(torch.nn.Module):
         """Normalized Rvachev function aggregated over segments for the given points."""
         per_segment_distances = self.compute_rvachev_for_segments(points)
         normalized_rvachev = 1.0 / torch.sqrt(
-            (1.0 / (per_segment_distances**self.normalization_power)).sum(0)
+            (1.0 / (per_segment_distances**self.normalization_power)).sum(-4)
         )
         return normalized_rvachev
 
