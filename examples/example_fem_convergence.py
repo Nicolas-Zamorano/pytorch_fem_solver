@@ -122,24 +122,6 @@ def rhs(coordinates: torch.Tensor) -> torch.Tensor:
     return -lap
 
 
-def h1_norm(
-    _,
-    value: torch.Tensor,
-    value_dx: torch.Tensor,
-    value_dy: torch.Tensor,
-) -> torch.Tensor:
-    """H1 norm of the exact solution."""
-    return value**2 + value_dx**2 + value_dy**2
-
-
-def L2_norm(
-    _,
-    value: torch.Tensor,
-) -> torch.Tensor:
-    """L2 norm of the neural network solution."""
-    return value**2
-
-
 # ---------------------- Convergence Study Parameters ----------------------#
 
 CONVERGENCE_LEVELS = 8  # Number of refinement levels
