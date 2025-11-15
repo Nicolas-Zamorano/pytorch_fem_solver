@@ -551,3 +551,10 @@ class Basis(AbstractBasis):
             return (tensor[indices_4_dofs] * v_grad).sum(-2, keepdim=True)
 
         return interpolator, interpolator_grad
+
+    def evalute_at_boundary(self, function: Callable) -> torch.Tensor:
+        """Evaluate a tensor at the boundary dofs."""
+        boundary_dofs = self.basis_parameters["boundary_dofs"]
+        tensor = self.solution_tensor()
+        tensor[boundary_dofs] = function(self.coords_4_global_dofs[boundary_dofs])
+        return tensor
