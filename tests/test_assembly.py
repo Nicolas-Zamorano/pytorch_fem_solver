@@ -20,7 +20,8 @@ def test_assembly():
     torch.set_default_dtype(torch.float64)
 
     mesh_data = tr.triangulate(
-        {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]}, "qen"
+        {"vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]},
+        "qena" + str(0.5**1),
     )
 
     mesh_data_meshio = meshio.Mesh(
@@ -58,6 +59,16 @@ def test_assembly():
         rhs_functional_scikit.elemental(basis_scikit)
     ).unsqueeze(-1)
 
+    solution_scikit = torch.tensor(
+        skfem.solve(
+            *skfem.condense(
+                bilinear_scikit.assemble(basis_scikit),
+                load_scikit.assemble(basis_scikit),
+                D=basis_scikit.get_dofs(),
+            )
+        )
+    ).unsqueeze(-1)
+
     mesh = MeshTri(mesh_data)
 
     elements = ElementTri(polynomial_order=2, integration_order=4)
@@ -89,10 +100,13 @@ def test_assembly():
         return rhs(x, y) ** 2
 
     stiff_matrix = basis_h.integrate_bilinear_form(bilinear)
-
     rhs_vector = basis_h.integrate_linear_form(residual)
-
     rhs_functional = basis_h.integrate_functional(rhs_functional_form)
+
+    solution = basis_h.solve(
+        stiff_matrix,
+        rhs_vector,
+    )
 
     zero = torch.zeros((1))
 
@@ -108,6 +122,10 @@ def test_assembly():
     print("Stiffness matrix error norm:", matrix_error_norm.item())
     print("RHS vector error norm:", rhs_error_norm.item())
     print("RHS functional error norm:", functional_error_norm.item())
+    print(
+        "Solution error norm:",
+        (torch.norm(solution - solution_scikit) / torch.norm(solution_scikit)).item(),
+    )
 
     # # assert torch.isclose(matrix_error_norm, zero)
     # # assert torch.isclose(rhs_error_norm, zero)
@@ -119,31 +137,30 @@ def test_assembly():
     stiff_matrix_values, stiff_matrix_count = torch.unique(
         torch.round(stiff_matrix.reshape(-1), decimals=12), return_counts=True
     )
-    stiff_matrix_values, idx = torch.sort(stiff_matrix_values)
-
-    stiff_matrix_scikit_count = stiff_matrix_count[idx]
 
     stiff_matrix_scikit_values, stiff_matrix_scikit_count = torch.unique(
         torch.round(stiff_matrix_scikit.reshape(-1), decimals=12),
         return_counts=True,
     )
 
-    stiff_matrix_scikit_values, idx = torch.sort(stiff_matrix_scikit_values)
+    # print(
+    #     "Values of       A_h:",
+    #     stiff_matrix_values.numpy(),
+    #     "Repeat:",
+    #     stiff_matrix_count.numpy(),
+    # )
+    # print(
+    #     "Values of A_scikit:",
+    #     stiff_matrix_scikit_values.numpy(),
+    #     "Repeat:",
+    #     stiff_matrix_scikit_count.numpy(),
+    # )
 
-    stiff_matrix_scikit_count = stiff_matrix_scikit_count[idx]
+    # print(stiff_matrix)
+    # print(stiff_matrix_scikit)
 
-    print(
-        "Values of       A_h:",
-        stiff_matrix_values.numpy(),
-        "Repeat:",
-        stiff_matrix_count.numpy(),
-    )
-    print(
-        "Values of A_scikit:",
-        stiff_matrix_scikit_values.numpy(),
-        "Repeat:",
-        stiff_matrix_scikit_count.numpy(),
-    )
+    print(solution)
+    print(solution_scikit)
 
 
 if __name__ == "__main__":
