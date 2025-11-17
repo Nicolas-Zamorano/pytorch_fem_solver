@@ -6,6 +6,7 @@ from ..problems import AbstractProblem
 from .abstract_solver import AbstractSolver
 import matplotlib.pyplot as plt
 from matplotlib.collections import PolyCollection
+from ..model import FeedForwardNeuralNetwork as NeuralNetwork
 
 
 class DeepSolver(AbstractSolver):
@@ -17,7 +18,7 @@ class DeepSolver(AbstractSolver):
         p_order: int,
         q_order: int,
         problem: AbstractProblem,
-        neural_network: torch.nn.Module,
+        neural_network: NeuralNetwork,
         jit_compile: bool = True,
         posteriori_error: bool = False,
         epochs: int = 5000,
@@ -94,7 +95,6 @@ class DeepSolver(AbstractSolver):
         """Train the neural network."""
         for epochs in self._progress_bar:
             if isinstance(self._optimizer, torch.optim.LBFGS):
-                ### CHECK THIS PART ###
                 self._optimizer.step(self._closure)
                 loss_value_float = self._loss_history[-1]
                 relative_loss_float = self._validation_loss_history[-1]
@@ -143,16 +143,13 @@ class DeepSolver(AbstractSolver):
             if epochs == self.second_optimizer_epochs:
                 self._optimizer = self.second_optimizer
 
-        return self.optimal_parameters
+        self._neural_network.load_state_dict(self.optimal_parameters)
+
+        return self._neural_network
 
     def get_training_history(self):
         """Get the history of training losses."""
         return self._loss_history, self._validation_loss_history, self._accuracy_history
-
-    def load_optimal_parameters(self):
-        """Load the optimal parameters of the neural network."""
-        self._neural_network.load_state_dict(self.optimal_parameters)
-
 
     def define_closure(self) -> Callable[[], float]:
         """Define closure for optimizers like LBFGS."""
@@ -177,7 +174,9 @@ class DeepSolver(AbstractSolver):
         """Define a single training step."""
         raise NotImplementedError
 
-    def compute_error(self, neural_network) -> Tuple[torch.Tensor, torch.Tensor]:
+    def compute_error(
+        self, neural_network: NeuralNetwork
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         neural_network_value, neural_network_grad = neural_network.value_and_gradient(
             self.basis.integration_points
