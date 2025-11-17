@@ -7,7 +7,6 @@ from .deep_solver import DeepSolver
 from torch_fem import Basis, ElementTri, ElementLine, InteriorEdgesBasis
 import matplotlib.pyplot as plt
 from ..model.neural_network import FeedForwardNeuralNetwork as NeuralNetwork
-from ..model.model import Model
 
 
 class RVPINNsSolver(DeepSolver):

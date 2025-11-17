@@ -1,8 +1,8 @@
 import abc
 import torch
 from ..problems import AbstractProblem
-import matplotlib.pyplot as plt
-from matplotlib.collections import PolyCollection
+from ..basis import AbstractBasis
+from ..element import AbstractElement
 
 
 class AbstractSolver(abc.ABC):
