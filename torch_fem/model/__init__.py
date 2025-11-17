@@ -1,3 +1,2 @@
 from .neural_network import FeedForwardNeuralNetwork
 from .neural_network import DistanceFunctionBC
-from .model import Model
