@@ -76,15 +76,17 @@ class AbstractProblem(abc.ABC):
         raise NotImplementedError
 
     @staticmethod
-    @abc.abstractmethod
     def bulk_residual(
         basis, laplcian: torch.Tensor, rhs_values: torch.Tensor
     ) -> torch.Tensor:
         raise NotImplementedError
 
     @staticmethod
-    @abc.abstractmethod
     def jump_residual(
         edges_basis, gradient_for_jump: torch.Tensor, normals_4_elements: torch.Tensor
     ) -> torch.Tensor:
+        raise NotImplementedError
+
+    @staticmethod
+    def dirichlet_boundary(coordinates: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError

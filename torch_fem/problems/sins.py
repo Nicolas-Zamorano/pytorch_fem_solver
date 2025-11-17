@@ -21,3 +21,6 @@ class SinsProblem(PoissonProblem):
     def rhs(self, coordinates: torch.Tensor) -> torch.Tensor:
         x, y = torch.split(coordinates, 1, -1)
         return 2 * pi**2 * torch.sin(pi * x) * torch.sin(pi * y)
+
+    def dirichlet_boundary(self, coordinates: torch.Tensor) -> torch.Tensor:
+        return self.exact(coordinates)

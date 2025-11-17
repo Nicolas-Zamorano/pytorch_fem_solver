@@ -35,3 +35,6 @@ class TanhProblem(PoissonProblem):
                 + 2 * (9 * x**4 + 16 * y**6) * torch.tanh(2 * (x**3 - y**4))
             )
         )
+
+    def dirichlet_boundary(self, coordinates: torch.Tensor) -> torch.Tensor:
+        return self.exact(coordinates)

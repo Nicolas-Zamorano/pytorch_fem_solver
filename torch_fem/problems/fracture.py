@@ -157,3 +157,6 @@ class FractureProblem(PoissonProblem):
     #     grad_value = torch.cat([exact_grad_fracture_1, exact_grad_fracture_2], dim=0)
 
     #     return grad_value
+
+    def dirichlet_boundary(self, coordinates: torch.Tensor) -> torch.Tensor:
+        return self.exact(coordinates)

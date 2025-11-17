@@ -66,3 +66,6 @@ class ExponentialProblem(PoissonProblem):
 
         lap = fxx + fyy
         return -lap
+
+    def dirichlet_boundary(self, coordinates: torch.Tensor) -> torch.Tensor:
+        return self.exact(coordinates)
