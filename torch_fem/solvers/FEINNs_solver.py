@@ -1,5 +1,7 @@
 from typing import Tuple
 import torch
+import matplotlib.pyplot as plt
+from matplotlib.collections import PolyCollection
 
 from .deep_solver import DeepSolver
 from torch_fem import Basis, ElementTri, ElementLine, InteriorEdgesBasis
@@ -63,7 +65,7 @@ class FEINNsSolver(DeepSolver):
             "exact_dx_value": exact_dx_value,
             "exact_dy_value": exact_dy_value,
             "exact_L2_norm": exact_l2_norm,
-            "exact_h1_norm": exact_h1_norm,
+            "exact_H1_norm": exact_h1_norm,
             "interpolation_function": interpolation_function,
             "grad_interpolation_function": grad_interpolation_function,
             "exact_value_dofs": exact_value_dofs,
@@ -74,7 +76,7 @@ class FEINNsSolver(DeepSolver):
 
     def _training_step(self, neural_network: NeuralNetwork):
         if self._posteriori_error:
-            neural_network_value_dofs, neural_network_laplacian_dofs = (
+            neural_network_value_dofs, neural_network_gradient_dofs = (
                 neural_network.value_and_gradient(self.basis.coords_4_global_dofs)
             )
 
@@ -94,7 +96,7 @@ class FEINNsSolver(DeepSolver):
 
             neural_network_laplacian_interpolated = self.precomputed_values[
                 "grad_interpolation_function"
-            ](neural_network_laplacian_dofs)
+            ](neural_network_gradient_dofs)
 
             neural_network_grad_edges = self.grad_interpolation_edges_function(neural_network_value_dofs)  # type: ignore
 
@@ -170,13 +172,13 @@ class FEINNsSolver(DeepSolver):
         )
 
         relative_loss = (
-            torch.sqrt(loss_value) / self.precomputed_values["exact_h1_norm"]
+            torch.sqrt(loss_value) / self.precomputed_values["exact_H1_norm"]
         )
 
         return (
             loss_value,
             relative_loss,
-            h1_error / self.precomputed_values["exact_h1_norm"],
+            h1_error / self.precomputed_values["exact_H1_norm"],
         )
 
     def compute_error(self, neural_network) -> Tuple[torch.Tensor, torch.Tensor]:
