@@ -71,74 +71,78 @@ class ElementTri(AbstractElement):
 
         elif self.polynomial_order == 3:
 
-            v = torch.concat(
-                [
-                    0.5 * lambda_1 * (3 * lambda_1 - 1) * (3 * lambda_1 - 2),  # (0,0)
-                    0.5 * lambda_2 * (3 * lambda_2 - 1) * (3 * lambda_2 - 2),  # (1,0)
-                    0.5 * lambda_3 * (3 * lambda_3 - 1) * (3 * lambda_3 - 2),  # (0,1)
-                    4.5 * lambda_3 * lambda_1 * (3 * lambda_1 - 1),  # (1/3, 0)
-                    4.5 * lambda_3 * lambda_1 * (3 * lambda_3 - 1),  # (2/3, 0)
-                    4.5 * lambda_1 * lambda_2 * (3 * lambda_2 - 1),  # (2/3, 1/3)
-                    4.5 * lambda_1 * lambda_2 * (3 * lambda_1 - 1),  # (1/3, 2/3)
-                    4.5 * lambda_2 * lambda_3 * (3 * lambda_3 - 1),  # (0, 2/3)
-                    4.5 * lambda_2 * lambda_3 * (3 * lambda_2 - 1),  # (0, 1/3)
-                    27 * lambda_1 * lambda_2 * lambda_3,  # (1/3, 1/3)
-                ],
-                dim=-2,
+            # --- shape functions ---------------------------------------------------------
+
+            N1 = 0.5 * lambda_1 * (3 * lambda_1 - 1) * (3 * lambda_1 - 2)
+            N2 = 0.5 * lambda_2 * (3 * lambda_2 - 1) * (3 * lambda_2 - 2)
+            N3 = 0.5 * lambda_3 * (3 * lambda_3 - 1) * (3 * lambda_3 - 2)
+
+            # Edge λ1–λ2
+            N4 = 4.5 * lambda_1 * lambda_2 * (3 * lambda_1 - 1)
+            N5 = 4.5 * lambda_1 * lambda_2 * (3 * lambda_2 - 1)
+
+            # Edge λ2–λ3
+            N6 = 4.5 * lambda_2 * lambda_3 * (3 * lambda_2 - 1)
+            N7 = 4.5 * lambda_2 * lambda_3 * (3 * lambda_3 - 1)
+
+            # Edge λ3–λ1
+            N8 = 4.5 * lambda_3 * lambda_1 * (3 * lambda_3 - 1)
+            N9 = 4.5 * lambda_3 * lambda_1 * (3 * lambda_1 - 1)
+
+            # Interior bubble
+            N10 = 27 * lambda_1 * lambda_2 * lambda_3
+
+            v = torch.concat([N1, N2, N3, N4, N5, N6, N7, N8, N9, N10], dim=-2)
+
+            # --- gradients of the shape functions ----------------------------------------
+
+            # Vertex gradients
+            dN1 = 0.5 * (27 * lambda_1**2 - 18 * lambda_1 + 2) * grad_lambda_1
+            dN2 = 0.5 * (27 * lambda_2**2 - 18 * lambda_2 + 2) * grad_lambda_2
+            dN3 = 0.5 * (27 * lambda_3**2 - 18 * lambda_3 + 2) * grad_lambda_3
+
+            # Edge λ1–λ2
+            dN4 = 4.5 * (
+                (lambda_2 * (6 * lambda_1 - 1)) * grad_lambda_1
+                + (lambda_1 * (3 * lambda_1 - 1)) * grad_lambda_2
             )
 
-            v_grad = (
-                torch.concat(
-                    [
-                        0.5
-                        * (27 * lambda_1**2 - 18 * lambda_1 + 2)
-                        * grad_lambda_1,  # (0,0)
-                        0.5
-                        * (27 * lambda_2**2 - 18 * lambda_2 + 2)
-                        * grad_lambda_2,  # (1,0)
-                        0.5
-                        * (27 * lambda_3**2 - 18 * lambda_3 + 2)
-                        * grad_lambda_3,  # (0,1)
-                        4.5
-                        * (
-                            lambda_1 * (6 * lambda_1 - 1) * grad_lambda_3
-                            + lambda_3 * (3 * lambda_1 - 1) * grad_lambda_1
-                        ),  # (1/3, 0)
-                        4.5
-                        * (
-                            lambda_1 * (3 * lambda_3 - 1) * grad_lambda_3
-                            + lambda_3 * (6 * lambda_3 - 1) * grad_lambda_1
-                        ),  # (2/3, 0)
-                        4.5
-                        * (
-                            lambda_2 * (3 * lambda_2 - 1) * grad_lambda_1
-                            + lambda_1 * (6 * lambda_2 - 1) * grad_lambda_2
-                        ),  # (2/3, 1/3)
-                        4.5
-                        * (
-                            lambda_2 * (6 * lambda_1 - 1) * grad_lambda_1
-                            + lambda_1 * (3 * lambda_1 - 1) * grad_lambda_2
-                        ),  # (1/3, 2/3)
-                        4.5
-                        * (
-                            lambda_3 * (6 * lambda_3 - 1) * grad_lambda_2
-                            + lambda_2 * (3 * lambda_3 - 1) * grad_lambda_3
-                        ),  # (0, 2/3)
-                        4.5
-                        * (
-                            lambda_3 * (3 * lambda_2 - 1) * grad_lambda_2
-                            + lambda_2 * (6 * lambda_2 - 1) * grad_lambda_3
-                        ),  # (0, 1/3)
-                        27
-                        * (
-                            lambda_2 * lambda_3 * grad_lambda_1
-                            + lambda_1 * lambda_3 * grad_lambda_2
-                            + lambda_1 * lambda_2 * grad_lambda_3
-                        ),  # (1/3, 1/3)
-                    ],
-                    dim=-2,
-                )
-                @ inv_map_jacobian
+            dN5 = 4.5 * (
+                (lambda_2 * (3 * lambda_2 - 1)) * grad_lambda_1
+                + (lambda_1 * (6 * lambda_2 - 1)) * grad_lambda_2
+            )
+
+            # Edge λ2–λ3
+            dN6 = 4.5 * (
+                (lambda_3 * (6 * lambda_2 - 1)) * grad_lambda_2
+                + (lambda_2 * (3 * lambda_2 - 1)) * grad_lambda_3
+            )
+
+            dN7 = 4.5 * (
+                (lambda_3 * (3 * lambda_3 - 1)) * grad_lambda_2
+                + (lambda_2 * (6 * lambda_3 - 1)) * grad_lambda_3
+            )
+
+            # Edge λ3–λ1
+            dN8 = 4.5 * (
+                (lambda_1 * (6 * lambda_3 - 1)) * grad_lambda_3
+                + (lambda_3 * (3 * lambda_3 - 1)) * grad_lambda_1
+            )
+
+            dN9 = 4.5 * (
+                (lambda_1 * (3 * lambda_1 - 1)) * grad_lambda_3
+                + (lambda_3 * (6 * lambda_1 - 1)) * grad_lambda_1
+            )
+
+            # Interior bubble
+            dN10 = 27 * (
+                lambda_2 * lambda_3 * grad_lambda_1
+                + lambda_1 * lambda_3 * grad_lambda_2
+                + lambda_1 * lambda_2 * grad_lambda_3
+            )
+
+            v_grad = torch.concat(
+                [dN1, dN2, dN3, dN4, dN5, dN6, dN7, dN8, dN9, dN10], dim=-2
             )
 
         else:
