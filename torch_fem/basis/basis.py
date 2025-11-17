@@ -163,9 +163,10 @@ class Basis(AbstractBasis):
 
             global_edge_ids = map_dict[vertices_keys]
 
-            is_flipped = (
-                vertices_4_non_unique_edges[..., 0]
-                > vertices_4_non_unique_edges[..., 1]
+            canonical_edge_verts = vertices_4_edges[global_edge_ids]
+
+            is_flipped = ~(
+                (vertices_4_non_unique_edges == canonical_edge_verts).all(dim=-1)
             )
 
             edge_dofs_for_element = torch.stack(
@@ -333,10 +334,10 @@ class Basis(AbstractBasis):
 
             global_edge_ids = map_dict[vertices_keys]
 
-            # flipping for edge orientation
-            is_flipped = (
-                vertices_4_non_unique_edges[..., 0]
-                > vertices_4_non_unique_edges[..., 1]
+            canonical_edge_verts = vertices_4_edges[global_edge_ids]
+
+            is_flipped = ~(
+                (vertices_4_non_unique_edges == canonical_edge_verts).all(dim=-1)
             )
 
             # 3 dofs per edge
