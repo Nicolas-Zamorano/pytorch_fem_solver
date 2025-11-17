@@ -153,34 +153,6 @@ class DeepSolver(AbstractSolver):
         """Load the optimal parameters of the neural network."""
         self._neural_network.load_state_dict(self.optimal_parameters)
 
-    def plot_training_history(
-        self,
-        plot_names: Optional[dict] = None,
-    ):
-        """Plot the training history."""
-        if plot_names is None:
-            plot_names = {
-                "loss": "Training loss",
-                "validation": "Validation loss",
-                "accuracy": "Accuracy",
-                "title": "Training history",
-            }
-
-        figure_loss, axis_loss = plt.subplots()
-        axis_loss.semilogy(self._loss_history, linestyle="-", label=plot_names["loss"])
-        axis_loss.semilogy(
-            self._validation_loss_history,
-            linestyle="--",
-            label=plot_names["validation"],
-        )
-        axis_loss.semilogy(
-            self._accuracy_history, linestyle=":", label=plot_names["accuracy"]
-        )
-        axis_loss.set_xlabel("# Epochs")
-        axis_loss.set_ylabel("Loss")
-        axis_loss.set_title(plot_names["title"])
-        axis_loss.legend()
-        figure_loss.tight_layout()
 
     def define_closure(self) -> Callable[[], float]:
         """Define closure for optimizers like LBFGS."""
@@ -227,18 +199,19 @@ class DeepSolver(AbstractSolver):
 
         return L2_error, H1_error
 
-    def plot(self, optimal_paramters):
-        self.load_optimal_parameters()
+    def plot(self, neural_network: NeuralNetwork):
 
         coordinates_4_triangles = self.mesh["cells", "coordinates"]
         coordinates_4_vertices = self.mesh["vertices", "coordinates"]
+
         exact_value = self.problem.exact(coordinates_4_vertices).squeeze(-1)
         numerical_solution = (
-            self._neural_network(coordinates_4_vertices.unsqueeze(-2).unsqueeze(-2))
+            neural_network(coordinates_4_vertices.unsqueeze(-2).unsqueeze(-2))
             .reshape(-1)
             .numpy(force=True)
         )
-        L2_error, H1_error = self.compute_error(self._neural_network)
+
+        L2_error, H1_error = self.compute_error(neural_network)
 
         x_min, x_max = (
             coordinates_4_vertices[:, 0].min().numpy(force=True),
@@ -252,10 +225,9 @@ class DeepSolver(AbstractSolver):
             force=True
         ), exact_value.max().numpy(force=True)
 
-        figure_solution = plt.figure(figsize=(10, 4))
-
-        axis_numerical_solution = figure_solution.add_subplot(1, 2, 1, projection="3d")
-
+        figure_solution, (axis_numerical_solution, axis_exact_solution) = plt.subplots(
+            1, 2, figsize=(10, 4), subplot_kw={"projection": "3d"}
+        )
         axis_numerical_solution.plot_trisurf(
             coordinates_4_vertices[:, 0].numpy(force=True),
             coordinates_4_vertices[:, 1].numpy(force=True),
@@ -274,7 +246,6 @@ class DeepSolver(AbstractSolver):
         axis_numerical_solution.set_ylabel("y")
         axis_numerical_solution.set_zlabel("u(x,y)")
 
-        axis_exact_solution = figure_solution.add_subplot(1, 2, 2, projection="3d")
         axis_exact_solution.plot_trisurf(
             coordinates_4_vertices[:, 0].numpy(force=True),
             coordinates_4_vertices[:, 1].numpy(force=True),
@@ -295,7 +266,7 @@ class DeepSolver(AbstractSolver):
 
         figure_solution.tight_layout()
 
-        figure_error, axes_error = plt.subplots(1, 2, figsize=(10, 4))
+        figure_error, (axis_L2, axis_H1) = plt.subplots(1, 2, figsize=(10, 4))
 
         l2_error_surface = PolyCollection(
             coordinates_4_triangles,
@@ -304,14 +275,12 @@ class DeepSolver(AbstractSolver):
             edgecolor="black",
             linewidths=0.2,
         )
-        axes_error[0].add_collection(l2_error_surface)
-        axes_error[0].set_xlim(x_min, x_max)
-        axes_error[0].set_ylim(y_min, y_max)
-        axes_error[0].set_aspect("equal")
-        axes_error[0].set_title(
-            r"L2 Error = {:.4e}".format(L2_error.sum().sqrt().item())
-        )
-        figure_error.colorbar(l2_error_surface, ax=axes_error[0])
+        axis_L2.add_collection(l2_error_surface)
+        axis_L2.set_xlim(x_min, x_max)
+        axis_L2.set_ylim(y_min, y_max)
+        axis_L2.set_aspect("equal")
+        axis_L2.set_title(r"L2 Error = {:.4e}".format(L2_error.sum().sqrt().item()))
+        figure_error.colorbar(l2_error_surface, ax=axis_L2)
 
         h1_error_surface = PolyCollection(
             coordinates_4_triangles,
@@ -320,17 +289,62 @@ class DeepSolver(AbstractSolver):
             edgecolor="black",
             linewidths=0.2,
         )
-        axes_error[1].add_collection(h1_error_surface)
-        axes_error[1].set_xlim(x_min, x_max)
-        axes_error[1].set_ylim(y_min, y_max)
-        axes_error[1].set_aspect("equal")
-        axes_error[1].set_title(
-            r"H1 Error = {:.4e}".format(H1_error.sum().sqrt().item())
-        )
-        figure_error.colorbar(h1_error_surface, ax=axes_error[1])
+        axis_H1.add_collection(h1_error_surface)
+        axis_H1.set_xlim(x_min, x_max)
+        axis_H1.set_ylim(y_min, y_max)
+        axis_H1.set_aspect("equal")
+        axis_H1.set_title(r"H1 Error = {:.4e}".format(H1_error.sum().sqrt().item()))
+        figure_error.colorbar(h1_error_surface, ax=axis_H1)
 
         figure_error.tight_layout()
 
-        self.plot_training_history()
+        loss_history, validation_loss_history, accuracy_history = (
+            self.get_training_history()
+        )
 
-        plt.show()
+        figure_training, (axis_history, axis_robustness) = plt.subplots(
+            1, 2, figsize=(10, 4)
+        )
+
+        axis_history.plot(loss_history, "-", label=r"$\mathcal{L}(u_{\theta})$")
+        axis_history.plot(
+            validation_loss_history,
+            "--",
+            label=r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u\|_U}$",
+        )
+        axis_history.plot(
+            accuracy_history,
+            ":",
+            label=r"$\frac{\|u-u_{\theta}\|_U}{\|u\|_U}$",
+        )
+        axis_history.legend()
+        axis_history.set_yscale("log")
+        axis_history.set_xlabel("Epochs")
+        axis_history.set_ylabel("Value")
+        axis_history.set_title("Training History")
+        axis_history.grid(True)
+
+        robustness = [
+            valiation_loss / accuracy_history
+            for valiation_loss, accuracy_history in zip(
+                validation_loss_history, accuracy_history
+            )
+        ]
+
+        axis_robustness.plot(
+            robustness,
+            ":",
+            label=r"$\frac{\sqrt{\mathcal{L}(u_{\theta})}}{\|u-u_{\theta}\|_U}$",
+        )
+        axis_robustness.set_xlabel("Epochs")
+        axis_robustness.set_ylabel("Value")
+        axis_robustness.set_title("Training Robustness")
+        axis_robustness.legend()
+        axis_robustness.grid(True)
+        figure_training.tight_layout()
+
+        return (
+            figure_solution,
+            figure_error,
+            figure_training,
+        )
