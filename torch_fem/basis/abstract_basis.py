@@ -24,6 +24,7 @@ class AbstractBasis(abc.ABC):
             self.integration_points,
             self._dx,
             self._inv_map_jacobian,
+            self._det_map_jacobian,
         ) = self._compute_integral_values(mesh, element)
 
         (
@@ -65,7 +66,7 @@ class AbstractBasis(abc.ABC):
 
         _dx = self._compute_integral_weights(element, det_map_jacobian)
 
-        return v, v_grad, integration_points, _dx, inv_map_jacobian
+        return v, v_grad, integration_points, _dx, inv_map_jacobian, det_map_jacobian
 
     def integrate_functional(
         self,
