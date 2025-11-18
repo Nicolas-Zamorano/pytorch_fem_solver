@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from torch_fem import (
     MeshTri,
     VPINNsSolver as Solver,
-    TanhProblem as Problem,
+    ExponentialProblem as Problem,
     FeedForwardNeuralNetwork as NeuralNetwork,
 )
 
@@ -17,9 +17,9 @@ torch.set_default_dtype(torch.float64)
 BASE = 0.5
 EXPONENT = 8
 NB_REFINEMENTS = 13 - EXPONENT
-P_ORDER = 1
-A_POSTERIORI_ERROR = False
-EPOCHS = 1000
+P_ORDER = 2
+A_POSTERIORI_ERROR = True
+EPOCHS = 10000
 
 
 if Solver.__name__ == "VPINNsSolver" or Solver.__name__ == "RVPINNsSolver   ":
@@ -91,6 +91,9 @@ for level in range(NB_REFINEMENTS):
         neural_network=neural_network,
         posteriori_error=A_POSTERIORI_ERROR,
         epochs=EPOCHS,
+        use_early_stopping=True,
+        early_stopping_patience=EPOCHS // 10,
+        min_delta=1e-15,
     )
 
     solution = solver.solve()

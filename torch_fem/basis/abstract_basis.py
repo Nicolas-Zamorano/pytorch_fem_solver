@@ -27,6 +27,8 @@ class AbstractBasis(abc.ABC):
             self._det_map_jacobian,
         ) = self._compute_integral_values(mesh, element)
 
+        self.v_lap = self.compute_laplacian(self._element, self._inv_map_jacobian)
+
         (
             self.coords_4_global_dofs,
             self.global_dofs_4_elements,
@@ -42,6 +44,30 @@ class AbstractBasis(abc.ABC):
             self.global_dofs_4_elements,
             self.nodes_4_boundary_dofs,
         )
+
+    def compute_laplacian(
+        self, element: AbstractElement, inv_map_jacobian: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute the laplacian of the shape functions"""
+        bar_coords_gradient = element.barycentric_map_gradient @ inv_map_jacobian
+
+        grad_lambda_1, grad_lambda_2, grad_lambda_3 = torch.split(
+            bar_coords_gradient, 1, dim=-2
+        )
+
+        d11 = (grad_lambda_1 * grad_lambda_1).sum(dim=-1, keepdim=True)
+        d22 = (grad_lambda_2 * grad_lambda_2).sum(dim=-1, keepdim=True)
+        d33 = (grad_lambda_3 * grad_lambda_3).sum(dim=-1, keepdim=True)
+
+        d12 = (grad_lambda_1 * grad_lambda_2).sum(dim=-1, keepdim=True)
+        d23 = (grad_lambda_2 * grad_lambda_3).sum(dim=-1, keepdim=True)
+        d31 = (grad_lambda_3 * grad_lambda_1).sum(dim=-1, keepdim=True)
+
+        v_lap = torch.cat(
+            [4 * d11, 4 * d22, 4 * d33, 8 * d12, 8 * d23, 8 * d31], dim=-2
+        )
+
+        return v_lap
 
     def _compute_integral_values(
         self,

@@ -67,6 +67,11 @@ class InteriorEdgesBasis(AbstractBasis):
             coords4elements,
         )
 
+    def compute_laplacian(
+        self, element: AbstractElement, inv_map_jacobian: torch.Tensor
+    ) -> torch.Tensor:
+        return None
+
     def _compute_basis_parameters(
         self, coords4global_dofs, global_dofs4elements, nodes4boundary_dofs
     ):

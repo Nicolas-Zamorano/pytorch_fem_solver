@@ -30,17 +30,19 @@ class ElementTri(AbstractElement):
     ):
         lambda_1, lambda_2, lambda_3 = torch.split(bar_coords, 1, dim=-2)
 
+        bar_coords_gradient = self.barycentric_map_gradient @ inv_map_jacobian
+
         grad_lambda_1, grad_lambda_2, grad_lambda_3 = torch.split(
-            self.barycentric_map_gradient @ inv_map_jacobian, 1, dim=-2
+            bar_coords_gradient, 1, dim=-2
         )
 
         if self.polynomial_order == 1:
 
             v = bar_coords
 
-            v_grad = self.barycentric_map_gradient @ inv_map_jacobian
+            v_grad = bar_coords_gradient
 
-            v_lap = torch.zeros_like(v)
+            # self.v_lap = None
 
         elif self.polynomial_order == 2:
 
@@ -68,17 +70,17 @@ class ElementTri(AbstractElement):
                 dim=-2,
             )
 
-            d11 = (grad_lambda_1 * grad_lambda_1).sum(dim=-3, keepdim=True)
-            d22 = (grad_lambda_2 * grad_lambda_2).sum(dim=-3, keepdim=True)
-            d33 = (grad_lambda_3 * grad_lambda_3).sum(dim=-3, keepdim=True)
+            # d11 = (grad_lambda_1 * grad_lambda_1).sum(dim=-1, keepdim=True)
+            # d22 = (grad_lambda_2 * grad_lambda_2).sum(dim=-1, keepdim=True)
+            # d33 = (grad_lambda_3 * grad_lambda_3).sum(dim=-1, keepdim=True)
 
-            d12 = (grad_lambda_1 * grad_lambda_2).sum(dim=-3, keepdim=True)
-            d23 = (grad_lambda_2 * grad_lambda_3).sum(dim=-3, keepdim=True)
-            d31 = (grad_lambda_3 * grad_lambda_1).sum(dim=-3, keepdim=True)
+            # d12 = (grad_lambda_1 * grad_lambda_2).sum(dim=-1, keepdim=True)
+            # d23 = (grad_lambda_2 * grad_lambda_3).sum(dim=-1, keepdim=True)
+            # d31 = (grad_lambda_3 * grad_lambda_1).sum(dim=-1, keepdim=True)
 
-            v_lap = torch.cat(
-                [4 * d11, 4 * d22, 4 * d33, 8 * d12, 8 * d23, 8 * d31], dim=-2
-            )
+            # self.v_lap = torch.cat(
+            #     [4 * d11, 4 * d22, 4 * d33, 8 * d12, 8 * d23, 8 * d31], dim=-2
+            # )
 
         elif self.polynomial_order == 3:
 
@@ -156,12 +158,11 @@ class ElementTri(AbstractElement):
                 [dN1, dN2, dN3, dN4, dN5, dN6, dN7, dN8, dN9, dN10], dim=-2
             )
 
-            v_lap = 0
+            # self.v_lap = None
         else:
 
             raise NotImplementedError("Polynomial order not implemented")
 
-        # return v, v_grad, v_lap
         return v, v_grad
 
     def _compute_gauss_values(self):

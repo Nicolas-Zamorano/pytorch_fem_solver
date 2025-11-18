@@ -6,7 +6,7 @@ from torch_fem import (
     FEINNsSolver as Solver,
     SinsProblem as Problem,
     FeedForwardNeuralNetwork as NeuralNetwork,
-    DistanceFunctionBC,
+    # DistanceFunctionBC,
 )
 
 torch.set_default_dtype(torch.float64)
@@ -33,7 +33,7 @@ segments = torch.tensor(
 neural_network = NeuralNetwork(
     input_dimension=2,
     output_dimension=1,
-    nb_hidden_layers=5,
+    nb_hidden_layers=2,
     neurons_per_layers=50,
     # boundary_condition_modifier=DistanceFunctionBC(segments),
 )
@@ -45,9 +45,13 @@ solver = Solver(
     q_order=2 * P_ORDER,
     problem=Problem(),
     neural_network=neural_network,
+    optimizer=torch.optim.LBFGS,
+    optimizer_kwargs={
+        "lr": 5e-5,
+    },
     jit_compile=True,
     posteriori_error=True,
-    epochs=25000,
+    epochs=10000,
     use_early_stopping=False,
     early_stopping_patience=150,
     min_delta=1e-15,

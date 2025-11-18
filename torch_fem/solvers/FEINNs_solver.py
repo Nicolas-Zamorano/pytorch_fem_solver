@@ -76,9 +76,7 @@ class FEINNsSolver(DeepSolver):
 
     def _training_step(self, neural_network: NeuralNetwork):
         if self._posteriori_error:
-            neural_network_value_dofs, neural_network_gradient_dofs = (
-                neural_network.value_and_gradient(self.basis.coords_4_global_dofs)
-            )
+            neural_network_value_dofs = neural_network(self.basis.coords_4_global_dofs)
 
             neural_network_value_dofs[self.precomputed_values["boundary_dofs"]] = (
                 self.precomputed_values["exact_value_dofs"][
@@ -94,9 +92,12 @@ class FEINNsSolver(DeepSolver):
                 "grad_interpolation_function"
             ](neural_network_value_dofs)
 
-            neural_network_laplacian_interpolated = self.precomputed_values[
-                "grad_interpolation_function"
-            ](neural_network_gradient_dofs)
+            neural_network_laplacian_interpolated = (
+                neural_network_value_dofs[
+                    self.basis.global_dofs_4_elements.unsqueeze(-2)
+                ]
+                * self.basis.v_lap
+            ).sum(-2, keepdim=True)
 
             neural_network_grad_edges = self.grad_interpolation_edges_function(neural_network_value_dofs)  # type: ignore
 
