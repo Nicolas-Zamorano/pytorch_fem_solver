@@ -5,14 +5,52 @@ import triangle
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from torch_fem import MeshTri, FemSolver as Solver, TanhProblem as Problem
-
-BASE = 0.5
-EXPONENT = 1
-NB_REFINEMENTS = 13 - EXPONENT
-P_ORDER = 1
+from torch_fem import (
+    MeshTri,
+    VPINNsSolver as Solver,
+    ExponentialProblem as Problem,
+    FeedForwardNeuralNetwork as NeuralNetwork,
+)
 
 torch.set_default_dtype(torch.float64)
+
+BASE = 0.5
+EXPONENT = 8
+NB_REFINEMENTS = 13 - EXPONENT
+P_ORDER = 2
+A_POSTERIORI_ERROR = True
+EPOCHS = 10000
+
+
+if Solver.__name__ == "VPINNsSolver" or Solver.__name__ == "RVPINNsSolver   ":
+    from torch_fem import DistanceFunctionBC
+
+    segments = torch.tensor(
+        [
+            [[0.0, 0.0], [1.0, 0.0]],
+            [[1.0, 0.0], [1.0, 1.0]],
+            [[1.0, 1.0], [0.0, 1.0]],
+            [[0.0, 1.0], [0.0, 0.0]],
+        ]
+    )
+
+    neural_network = NeuralNetwork(
+        input_dimension=2,
+        output_dimension=1,
+        nb_hidden_layers=5,
+        neurons_per_layers=25,
+        boundary_condition_modifier=DistanceFunctionBC(segments_points=segments),
+    )
+
+else:
+    neural_network = NeuralNetwork(
+        input_dimension=2,
+        output_dimension=1,
+        nb_hidden_layers=5,
+        neurons_per_layers=25,
+    )
+
+initial_parameters = neural_network.state_dict()
 
 RESULTS_FOLDER = os.path.join(
     os.getcwd(),
@@ -43,25 +81,40 @@ for level in range(NB_REFINEMENTS):
 
     mesh = MeshTri(triangulation=mesh_data)
 
-    solver = Solver(mesh=mesh, p_order=P_ORDER, q_order=2 * P_ORDER, problem=Problem())
+    neural_network.load_state_dict(initial_parameters)
+
+    solver = Solver(
+        mesh=mesh,
+        p_order=P_ORDER,
+        q_order=2 * P_ORDER,
+        problem=Problem(),
+        neural_network=neural_network,
+        posteriori_error=A_POSTERIORI_ERROR,
+        epochs=EPOCHS,
+        use_early_stopping=True,
+        early_stopping_patience=EPOCHS // 10,
+        min_delta=1e-15,
+    )
 
     solution = solver.solve()
 
     l2_error, h1_error = solver.compute_error(solution)
 
-    figure_solution, figure_error = solver.plot(solution)
+    figure_solution, figure_error, figure_history = solver.plot(solution)
 
     figure_solution.savefig(os.path.join(level_folder, "solution.png"))
     figure_error.savefig(os.path.join(level_folder, "error.png"))
+    figure_history.savefig(os.path.join(level_folder, "history.png"))
     plt.close(figure_solution)
     plt.close(figure_error)
+    plt.close(figure_history)
 
     triangle_size = mesh["cells", "length"].max().item()
 
     mesh_sizes.append(triangle_size)
     l2_errors.append(torch.sqrt(torch.sum(l2_error)).item())
     h1_errors.append(torch.sqrt(torch.sum(h1_error)).item())
-    dof_counts.append(solver.basis.coords_4_global_dofs.shape[-2])
+    dof_counts.append(solver.basis.coordinates_4_global_dofs.shape[-2])
 
 print("\n--- Convergence Analysis ---")
 
