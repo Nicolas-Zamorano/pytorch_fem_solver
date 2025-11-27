@@ -11,29 +11,29 @@ class PoissonProblem(AbstractProblem):
         return basis.v_grad @ basis.v_grad.mT
 
     @staticmethod
-    def linear_form(basis, rhs_values: torch.Tensor) -> torch.Tensor:
+    def linear_form(basis, rhs_value: torch.Tensor) -> torch.Tensor:
         """Linear form for the right-hand side."""
-        return rhs_values * basis.v
+        return rhs_value * basis.v
 
     @staticmethod
     def residual(
-        basis, gradient: torch.Tensor, rhs_values: torch.Tensor
+        basis, gradient: torch.Tensor, rhs_value: torch.Tensor
     ) -> torch.Tensor:
         """Residual form."""
-        return basis.v_grad @ gradient.mT - rhs_values * basis.v
+        return basis.v_grad @ gradient.mT - rhs_value * basis.v
 
     @staticmethod
     def bulk_residual(
-        _,
+        basis,
         laplacian: torch.Tensor,
-        rhs_values: torch.Tensor,
+        rhs_value: torch.Tensor,
     ) -> torch.Tensor:
         """Bulk residual form."""
-        return (laplacian + rhs_values) ** 2
+        return (laplacian + rhs_value) ** 2
 
     @staticmethod
     def jump_residual(
-        _,
+        edges_basis,
         gradient_for_jump: torch.Tensor,
         normals_4_elements: torch.Tensor,
     ) -> torch.Tensor:

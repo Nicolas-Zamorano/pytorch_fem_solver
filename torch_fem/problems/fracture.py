@@ -109,7 +109,7 @@ class FractureProblem(PoissonProblem):
         value: torch.Tensor,
         value_dx: torch.Tensor,
         value_dy: torch.Tensor,
-        value_dz: torch.Tensor,
+        value_dz: torch.Tensor = torch.Tensor(0.0),
     ) -> torch.Tensor:
         return value**2 + value_dx**2 + value_dy**2 + value_dz**2
 
