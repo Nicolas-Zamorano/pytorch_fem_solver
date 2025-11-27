@@ -100,24 +100,7 @@ class DeepSolver(AbstractSolver):
 
         loss_value = self._compute_loss(neural_network)
 
-        neural_network_value_error, neural_network_grad_error = (
-            self._neural_network.value_and_gradient(self.error_basis.integration_points)
-        )
-
-        neural_network_dx_error, neural_network_dy_error = torch.split(
-            neural_network_grad_error, 1, -1
-        )
-
-        h1_error = torch.sqrt(
-            torch.sum(
-                self.basis.integrate_functional(
-                    self.problem.precomputed_H1_norm,
-                    neural_network_value_error - self.precomputed_values["exact_value"],
-                    neural_network_dx_error - self.precomputed_values["exact_dx_value"],
-                    neural_network_dy_error - self.precomputed_values["exact_dy_value"],
-                )
-            )
-        )
+        _, h1_error = self.compute_error(loss_value)
 
         relative_loss = (
             torch.sqrt(loss_value) / self.precomputed_values["exact_H1_norm"]
