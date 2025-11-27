@@ -11,72 +11,38 @@ from ..model.neural_network import FeedForwardNeuralNetwork as NeuralNetwork
 class FEINNsSolver(DeepSolver):
     """Finite Element Method (FEM) solver."""
 
-    def precompute_values(self) -> dict:
+    def precompute_values(self, mesh, polynomial_order, integral_order):
         """Precompute values needed for the FEM solver."""
 
-        self.elements = ElementTri(self.p_order, self.q_order)
-        self.basis = Basis(self.mesh, self.elements)
+        element, basis, precomputed_values = self._precompute_values(
+            mesh, polynomial_order, integral_order
+        )
 
-        exact_value = self.problem.exact(self.basis.integration_points)
-        exact_value_dofs = self.problem.exact(self.basis.coords_4_global_dofs)
-        rhs_values = self.problem.rhs(self.basis.integration_points)
-        exact_dx_value = self.problem.exact_dx(self.basis.integration_points)
-        exact_dy_value = self.problem.exact_dy(self.basis.integration_points)
+        interpolation_function, grad_interpolation_function = basis.interpolate(basis)
+
+        boundary_dofs = basis.basis_parameters["boundary_dofs"].squeeze(-1)
+
+        precomputed_values["interpolation_function"] = interpolation_function
+        precomputed_values["grad_interpolation_function"] = grad_interpolation_function
 
         if self._posteriori_error:
-            self.edges_elements = ElementLine(self.p_order, self.q_order)
-            self.edges_basis = InteriorEdgesBasis(self.mesh, self.edges_elements)
+            self.edges_elements = ElementLine(polynomial_order, integral_order)
+            self.edges_basis = InteriorEdgesBasis(mesh, self.edges_elements)
 
-            _, self.grad_interpolation_edges_function = self.basis.interpolate(
+            _, self.grad_interpolation_edges_function = basis.interpolate(
                 self.edges_basis
             )
-            self.normals = self.basis.mesh["interior_edges", "normals"].unsqueeze(-2)
-            self.element_size = self.basis.mesh["cells", "length"]
+            self.normals = basis.mesh["interior_edges", "normals"].unsqueeze(-2)
+            self.element_size = basis.mesh["cells", "length"]
             self.edges_size = self.edges_basis.mesh["interior_edges", "length"]
 
-        exact_l2_norm = torch.sqrt(
-            torch.sum(
-                self.basis.integrate_functional(
-                    self.problem.precomputed_L2_norm,
-                    exact_value,
-                )
-            )
-        )
-        exact_h1_norm = torch.sqrt(
-            torch.sum(
-                self.basis.integrate_functional(
-                    self.problem.precomputed_H1_norm,
-                    exact_value,
-                    exact_dx_value,
-                    exact_dy_value,
-                )
-            )
-        )
-
-        interpolation_function, grad_interpolation_function = self.basis.interpolate(
-            self.basis
-        )
-
-        boundary_dofs = self.basis.basis_parameters["boundary_dofs"].squeeze(-1)
-
-        precomputed = {
-            "exact_value": exact_value,
-            "rhs_values": rhs_values,
-            "exact_dx_value": exact_dx_value,
-            "exact_dy_value": exact_dy_value,
-            "exact_L2_norm": exact_l2_norm,
-            "exact_H1_norm": exact_h1_norm,
-            "interpolation_function": interpolation_function,
-            "grad_interpolation_function": grad_interpolation_function,
-            "exact_value_dofs": exact_value_dofs,
-            "boundary_dofs": boundary_dofs,
-        }
-
-        return precomputed
+        return element, basis, precomputed_values
 
     def _training_step(self, neural_network: NeuralNetwork):
         if self._posteriori_error:
-            neural_network_value_dofs = neural_network(self.basis.coords_4_global_dofs)
+            neural_network_value_dofs = neural_network(
+                self.basis.coordinates_4_global_dofs
+            )
 
             neural_network_value_dofs[self.precomputed_values["boundary_dofs"]] = (
                 self.precomputed_values["exact_value_dofs"][
@@ -94,7 +60,7 @@ class FEINNsSolver(DeepSolver):
 
             neural_network_laplacian_interpolated = (
                 neural_network_value_dofs[
-                    self.basis.global_dofs_4_elements.unsqueeze(-2)
+                    self.basis.global_dofs_4_local_dofs.unsqueeze(-2)
                 ]
                 * self.basis.v_lap
             ).sum(-2, keepdim=True)
@@ -128,7 +94,9 @@ class FEINNsSolver(DeepSolver):
             )
 
         else:
-            neural_network_value_dofs = neural_network(self.basis.coords_4_global_dofs)
+            neural_network_value_dofs = neural_network(
+                self.basis.coordinates_4_global_dofs
+            )
 
             neural_network_value_dofs[self.precomputed_values["boundary_dofs"]] = (
                 self.precomputed_values["exact_value_dofs"][
@@ -184,7 +152,7 @@ class FEINNsSolver(DeepSolver):
 
     def compute_error(self, neural_network) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        neural_network_value_dofs = neural_network(self.basis.coords_4_global_dofs)
+        neural_network_value_dofs = neural_network(self.basis.coordinates_4_global_dofs)
 
         neural_network_value_dofs[self.precomputed_values["boundary_dofs"]] = (
             self.precomputed_values["exact_value_dofs"][
@@ -221,7 +189,7 @@ class FEINNsSolver(DeepSolver):
     def plot(self, neural_network: NeuralNetwork):
         L2_error, H1_error = self.compute_error(neural_network)
 
-        neural_network_value_dofs = neural_network(self.basis.coords_4_global_dofs)
+        neural_network_value_dofs = neural_network(self.basis.coordinates_4_global_dofs)
 
         neural_network_value_dofs[self.precomputed_values["boundary_dofs"]] = (
             self.precomputed_values["exact_value_dofs"][

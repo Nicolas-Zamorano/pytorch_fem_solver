@@ -4,8 +4,9 @@ import tqdm
 import torch
 from ..problems import AbstractProblem
 from .abstract_solver import AbstractSolver
-import matplotlib.pyplot as plt
-from matplotlib.collections import PolyCollection
+from ..mesh import AbstractMesh
+from matplotlib.figure import Figure
+from matplotlib import pyplot as plt
 from ..model import FeedForwardNeuralNetwork as NeuralNetwork
 
 
@@ -14,11 +15,12 @@ class DeepSolver(AbstractSolver):
 
     def __init__(
         self,
-        mesh,
+        mesh: AbstractMesh,
         p_order: int,
         q_order: int,
         problem: AbstractProblem,
         neural_network: NeuralNetwork,
+        error_mesh: Optional[AbstractMesh] = None,
         jit_compile: bool = True,
         posteriori_error: bool = False,
         epochs: int = 5000,
@@ -66,9 +68,9 @@ class DeepSolver(AbstractSolver):
         self._early_stopping_patience = early_stopping_patience
         self._min_delta = min_delta
 
-        self._loss_history = []
-        self._validation_loss_history = []
-        self._accuracy_history = []
+        self._loss_history: list[float] = []
+        self._validation_loss_history: list[float] = []
+        self._accuracy_history: list[float] = []
 
         self._progress_bar = tqdm.tqdm(range(self._epochs), desc="Training Progress")
 
@@ -89,7 +91,43 @@ class DeepSolver(AbstractSolver):
             if isinstance(self.second_optimizer, torch.optim.LBFGS):
                 self._closure = self.define_closure()
 
-        super().__init__(mesh, p_order, q_order, problem)
+        super().__init__(mesh, p_order, q_order, problem, error_mesh)
+
+    def _training_step(
+        self, neural_network: NeuralNetwork | torch.jit.ScriptModule
+    ) -> Tuple[torch.Tensor, ...]:
+        """Perform a single training step."""
+
+        loss_value = self._compute_loss(neural_network)
+
+        neural_network_value_error, neural_network_grad_error = (
+            self._neural_network.value_and_gradient(self.error_basis.integration_points)
+        )
+
+        neural_network_dx_error, neural_network_dy_error = torch.split(
+            neural_network_grad_error, 1, -1
+        )
+
+        h1_error = torch.sqrt(
+            torch.sum(
+                self.basis.integrate_functional(
+                    self.problem.precomputed_H1_norm,
+                    neural_network_value_error - self.precomputed_values["exact_value"],
+                    neural_network_dx_error - self.precomputed_values["exact_dx_value"],
+                    neural_network_dy_error - self.precomputed_values["exact_dy_value"],
+                )
+            )
+        )
+
+        relative_loss = (
+            torch.sqrt(loss_value) / self.precomputed_values["exact_H1_norm"]
+        )
+
+        return (
+            loss_value,
+            relative_loss,
+            h1_error / self.precomputed_values["exact_H1_norm"],
+        )
 
     def solve(self):
         """Train the neural network."""
@@ -145,7 +183,15 @@ class DeepSolver(AbstractSolver):
 
         self._neural_network.load_state_dict(self.optimal_parameters)
 
-        return self._neural_network
+        nn_value_dofs = (
+            self._neural_network(
+                self.basis.coordinates_4_global_dofs.unsqueeze(-2).unsqueeze(-2)
+            )
+            .squeeze(-2)
+            .squeeze(-2)
+        )
+
+        return nn_value_dofs
 
     def get_training_history(self):
         """Get the history of training losses."""
@@ -167,19 +213,17 @@ class DeepSolver(AbstractSolver):
         return closure
 
     @abc.abstractmethod
-    def _training_step(
+    def _compute_loss(
         self,
-        neural_network: torch.nn.Module,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Define a single training step."""
+        neural_network: NeuralNetwork | torch.jit.ScriptModule,
+    ) -> torch.Tensor:
+        """Computes the Loss."""
         raise NotImplementedError
 
-    def compute_error(
-        self, neural_network: NeuralNetwork
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def compute_error(self, numerical_solution):
 
-        neural_network_value, neural_network_grad = neural_network.value_and_gradient(
-            self.basis.integration_points
+        neural_network_value, neural_network_grad = (
+            self._neural_network.value_and_gradient(self.basis.integration_points)
         )
 
         neural_network_dx, neural_network_dy = torch.split(neural_network_grad, 1, -1)
@@ -198,105 +242,8 @@ class DeepSolver(AbstractSolver):
 
         return L2_error, H1_error
 
-    def plot(self, neural_network: NeuralNetwork):
-
-        coordinates_4_triangles = self.mesh["cells", "coordinates"]
-        coordinates_4_vertices = self.mesh["vertices", "coordinates"]
-
-        exact_value = self.problem.exact(coordinates_4_vertices).squeeze(-1)
-        numerical_solution = (
-            neural_network(coordinates_4_vertices.unsqueeze(-2).unsqueeze(-2))
-            .reshape(-1)
-            .numpy(force=True)
-        )
-
-        L2_error, H1_error = self.compute_error(neural_network)
-
-        x_min, x_max = (
-            coordinates_4_vertices[:, 0].min().numpy(force=True),
-            coordinates_4_vertices[:, 0].max().numpy(force=True),
-        )
-        y_min, y_max = (
-            coordinates_4_vertices[:, 1].min().numpy(force=True),
-            coordinates_4_vertices[:, 1].max().numpy(force=True),
-        )
-        z_exact_min, z_exact_max = exact_value.min().numpy(
-            force=True
-        ), exact_value.max().numpy(force=True)
-
-        figure_solution, (axis_numerical_solution, axis_exact_solution) = plt.subplots(
-            1, 2, figsize=(10, 4), subplot_kw={"projection": "3d"}
-        )
-        axis_numerical_solution.plot_trisurf(
-            coordinates_4_vertices[:, 0].numpy(force=True),
-            coordinates_4_vertices[:, 1].numpy(force=True),
-            numerical_solution,
-            triangles=coordinates_4_triangles,
-            cmap="viridis",
-            edgecolor="black",
-            linewidth=0.2,
-        )
-
-        axis_numerical_solution.set_xlim(x_min, x_max)
-        axis_numerical_solution.set_ylim(y_min, y_max)
-        axis_numerical_solution.set_zlim(z_exact_min, z_exact_max)
-        axis_numerical_solution.set_title("Numerical Solution")
-        axis_numerical_solution.set_xlabel("x")
-        axis_numerical_solution.set_ylabel("y")
-        axis_numerical_solution.set_zlabel("u(x,y)")
-
-        axis_exact_solution.plot_trisurf(
-            coordinates_4_vertices[:, 0].numpy(force=True),
-            coordinates_4_vertices[:, 1].numpy(force=True),
-            exact_value.numpy(force=True),
-            triangles=coordinates_4_triangles,
-            cmap="viridis",
-            edgecolor="black",
-            linewidth=0.2,
-        )
-
-        axis_exact_solution.set_xlim(x_min, x_max)
-        axis_exact_solution.set_ylim(y_min, y_max)
-        axis_exact_solution.set_zlim(z_exact_min, z_exact_max)
-        axis_exact_solution.set_title("Exact Solution")
-        axis_exact_solution.set_xlabel("x")
-        axis_exact_solution.set_ylabel("y")
-        axis_exact_solution.set_zlabel("u(x,y)")
-
-        figure_solution.tight_layout()
-
-        figure_error, (axis_L2, axis_H1) = plt.subplots(1, 2, figsize=(10, 4))
-
-        l2_error_surface = PolyCollection(
-            coordinates_4_triangles,
-            array=L2_error.sqrt().squeeze(-1).numpy(force=True),
-            cmap="viridis",
-            edgecolor="black",
-            linewidths=0.2,
-        )
-        axis_L2.add_collection(l2_error_surface)
-        axis_L2.set_xlim(x_min, x_max)
-        axis_L2.set_ylim(y_min, y_max)
-        axis_L2.set_aspect("equal")
-        axis_L2.set_title(r"L2 Error = {:.4e}".format(L2_error.sum().sqrt().item()))
-        figure_error.colorbar(l2_error_surface, ax=axis_L2)
-
-        h1_error_surface = PolyCollection(
-            coordinates_4_triangles,
-            array=H1_error.sqrt().squeeze(-1).numpy(force=True),
-            cmap="viridis",
-            edgecolor="black",
-            linewidths=0.2,
-        )
-        axis_H1.add_collection(h1_error_surface)
-        axis_H1.set_xlim(x_min, x_max)
-        axis_H1.set_ylim(y_min, y_max)
-        axis_H1.set_aspect("equal")
-        axis_H1.set_title(r"H1 Error = {:.4e}".format(H1_error.sum().sqrt().item()))
-        figure_error.colorbar(h1_error_surface, ax=axis_H1)
-
-        figure_error.tight_layout()
-
+    def plot(self, numerical_solution: torch.Tensor) -> Tuple[Figure, Figure, Figure]:
+        L2_error, H1_error = self._plot(numerical_solution)
         loss_history, validation_loss_history, accuracy_history = (
             self.get_training_history()
         )
@@ -342,8 +289,4 @@ class DeepSolver(AbstractSolver):
         axis_robustness.grid(True)
         figure_training.tight_layout()
 
-        return (
-            figure_solution,
-            figure_error,
-            figure_training,
-        )
+        return L2_error, H1_error, figure_training
