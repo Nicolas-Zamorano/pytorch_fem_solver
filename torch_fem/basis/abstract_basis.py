@@ -1,7 +1,7 @@
 """Abstract class for basis representation"""
 
 import abc
-from typing import Callable, Tuple, Any, Optional
+from typing import Callable, Tuple, Any, Optional, Union, overload
 import torch
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
@@ -192,6 +192,31 @@ class AbstractBasis(abc.ABC):
         """
         raise NotImplementedError
 
+    @overload
+    def interpolate(
+        self,
+        basis: "AbstractBasis",
+        tensor: None = None,
+    ) -> Tuple[
+        Callable[[torch.Tensor], torch.Tensor],
+        Callable[[torch.Tensor], torch.Tensor],
+    ]: ...
+
+    @overload
+    def interpolate(
+        self,
+        basis: "AbstractBasis",
+        tensor: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]: ...
+
+    def interpolate(
+        self, basis: "AbstractBasis", tensor: Optional[torch.Tensor] = None
+    ) -> Union[Tuple[Callable, Callable], Tuple[torch.Tensor, torch.Tensor]]:
+        """Interpolate a tensor over the basis functions, returning the interpolated values
+        and their gradients.
+        """
+        raise NotImplementedError
+
     def reshape_for_assembly(
         self, local_matrices: torch.Tensor, form: str
     ) -> torch.Tensor:
@@ -229,3 +254,10 @@ class AbstractBasis(abc.ABC):
         )
 
         return solution
+
+    def evaluate_at_boundary(self, function: Callable) -> torch.Tensor:
+        """Evaluate a tensor at the boundary dofs."""
+        boundary_dofs = self.basis_parameters["boundary_dofs"]
+        tensor = self.solution_tensor()
+        tensor[boundary_dofs] = function(self.coordinates_4_global_dofs[boundary_dofs])
+        return tensor

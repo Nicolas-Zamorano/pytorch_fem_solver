@@ -1,6 +1,6 @@
 """Class for standard basis representation"""
 
-from typing import Optional, Callable, Tuple
+from typing import Optional, Callable, Tuple, Union, overload
 import torch
 from ..mesh.abstract_mesh import AbstractMesh
 from ..element.abstract_element import AbstractElement
@@ -460,38 +460,46 @@ class Basis(AbstractBasis):
             element.reference_element_area * element.gaussian_weights * det_map_jacobian
         )
 
+    @overload
+    def interpolate(
+        self,
+        basis: AbstractBasis,
+        tensor: None = None,
+    ) -> Tuple[
+        Callable[[torch.Tensor], torch.Tensor],
+        Callable[[torch.Tensor], torch.Tensor],
+    ]: ...
+
+    @overload
+    def interpolate(
+        self,
+        basis: AbstractBasis,
+        tensor: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]: ...
+
     def interpolate(
         self, basis: AbstractBasis, tensor: Optional[torch.Tensor] = None
-    ) -> (
-        Tuple[torch.Tensor, torch.Tensor]
-        | Tuple[
-            Callable[..., torch.Tensor],
-            Callable[..., torch.Tensor],
-        ]
-    ):
+    ) -> Union[
+        Tuple[
+            Callable[[torch.Tensor], torch.Tensor],
+            Callable[[torch.Tensor], torch.Tensor],
+        ],
+        Tuple[torch.Tensor, torch.Tensor],
+    ]:
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
             indices_4_dofs = self.global_dofs_4_local_dofs.unsqueeze(-2)
-
             v = self.v
             v_grad = self.v_grad
 
         elif basis.__class__ == Basis and basis is not self:
-
             elements_mask = basis.mesh["cells", "markers"].squeeze(-1).type(torch.int)
-
-            # Due to size of v is (N_dofs, N_qp, N_d) as their equal for each cells,
-            # so we need repeat it for each cell.
-
             nb_triangles = self.mesh["cells", "coordinates"].shape[0]
-
             v = self.v.repeat(nb_triangles, 1, 1, 1)[elements_mask]
             v_grad = self.v_grad[elements_mask]
-
             indices_4_dofs = self.global_dofs_4_local_dofs[elements_mask].unsqueeze(-2)
 
         elif basis.__class__ == InteriorEdgesBasis:
-
             cells_4_interior_edges = basis.mesh["interior_edges", "cells"]
 
             coordinates_4_cells_first_vertex = basis.mesh.compute_coordinates_4_cells(
@@ -504,10 +512,6 @@ class Basis(AbstractBasis):
             )
 
             integrations_points = basis.integration_points.unsqueeze(-4)
-
-            # For computing the inverse mapping of the integrations points of the interior edges,
-            # is necessary that tensor are in the size (N_E, 2, q_E, N_f, N_d)
-            # (2 is the triangles that share that edge).
 
             new_integrations_points = self._element.compute_inverse_map(
                 coordinates_4_cells_first_vertex,
@@ -534,28 +538,14 @@ class Basis(AbstractBasis):
             raise NotImplementedError("Interpolation for this basis not implemented")
 
         if tensor is not None:
-
             interpolation = (tensor[indices_4_dofs] * v).sum(-2, keepdim=True)
-
             interpolation_grad = (tensor[indices_4_dofs] * v_grad).sum(-2, keepdim=True)
-
             return interpolation, interpolation_grad
 
-        def interpolator(
-            tensor: torch.Tensor,
-        ) -> torch.Tensor:
+        def interpolator(tensor: torch.Tensor) -> torch.Tensor:
             return (tensor[indices_4_dofs] * v).sum(-2, keepdim=True)
 
-        def interpolator_grad(
-            tensor: torch.Tensor,
-        ) -> torch.Tensor:
+        def interpolator_grad(tensor: torch.Tensor) -> torch.Tensor:
             return (tensor[indices_4_dofs] * v_grad).sum(-2, keepdim=True)
 
         return interpolator, interpolator_grad
-
-    def evaluate_at_boundary(self, function: Callable) -> torch.Tensor:
-        """Evaluate a tensor at the boundary dofs."""
-        boundary_dofs = self.basis_parameters["boundary_dofs"]
-        tensor = self.solution_tensor()
-        tensor[boundary_dofs] = function(self.coordinates_4_global_dofs[boundary_dofs])
-        return tensor
