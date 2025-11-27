@@ -36,7 +36,7 @@ elements_edges_coarser = ElementLine(polynomial_order=2, integration_order=4)
 
 basis_edges_coarser = InteriorEdgesBasis(mesh_coarser, elements_edges_coarser)
 
-new_vertices = basis_coarser.coords_4_global_dofs.numpy(force=True)
+new_vertices = basis_coarser.coordinates_4_global_dofs.numpy(force=True)
 
 new_vertices_markers = basis_coarser.nodes_4_boundary_dofs.numpy(force=True)
 

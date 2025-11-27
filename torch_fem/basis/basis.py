@@ -471,7 +471,7 @@ class Basis(AbstractBasis):
     ):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            indices_4_dofs = self.global_dofs_4_elements.unsqueeze(-2)
+            indices_4_dofs = self.global_dofs_4_local_dofs.unsqueeze(-2)
 
             v = self.v
             v_grad = self.v_grad
@@ -488,7 +488,7 @@ class Basis(AbstractBasis):
             v = self.v.repeat(nb_triangles, 1, 1, 1)[elements_mask]
             v_grad = self.v_grad[elements_mask]
 
-            indices_4_dofs = self.global_dofs_4_elements[elements_mask].unsqueeze(-2)
+            indices_4_dofs = self.global_dofs_4_local_dofs[elements_mask].unsqueeze(-2)
 
         elif basis.__class__ == InteriorEdgesBasis:
 
@@ -527,7 +527,7 @@ class Basis(AbstractBasis):
             v_grad = new_v_grad
 
             indices_4_dofs = basis.mesh.compute_coordinates_4_cells(
-                self.global_dofs_4_elements, cells_4_interior_edges
+                self.global_dofs_4_local_dofs, cells_4_interior_edges
             ).unsqueeze(-2)
 
         else:
@@ -553,9 +553,9 @@ class Basis(AbstractBasis):
 
         return interpolator, interpolator_grad
 
-    def evalute_at_boundary(self, function: Callable) -> torch.Tensor:
+    def evaluate_at_boundary(self, function: Callable) -> torch.Tensor:
         """Evaluate a tensor at the boundary dofs."""
         boundary_dofs = self.basis_parameters["boundary_dofs"]
         tensor = self.solution_tensor()
-        tensor[boundary_dofs] = function(self.coords_4_global_dofs[boundary_dofs])
+        tensor[boundary_dofs] = function(self.coordinates_4_global_dofs[boundary_dofs])
         return tensor

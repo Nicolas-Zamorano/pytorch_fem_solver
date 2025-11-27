@@ -30,18 +30,18 @@ class AbstractBasis(abc.ABC):
         self.v_lap = self.compute_laplacian(self._element, self._inv_map_jacobian)
 
         (
-            self.coords_4_global_dofs,
-            self.global_dofs_4_elements,
+            self.coordinates_4_global_dofs,
+            self.global_dofs_4_local_dofs,
             self.nodes_4_boundary_dofs,
-            self.coords_4_elements,
+            self.coordinates_4_local_dofs,
         ) = self._compute_dofs(
             mesh,
             element,
         )
 
         self.basis_parameters = self._compute_basis_parameters(
-            self.coords_4_global_dofs,
-            self.global_dofs_4_elements,
+            self.coordinates_4_global_dofs,
+            self.global_dofs_4_local_dofs,
             self.nodes_4_boundary_dofs,
         )
 

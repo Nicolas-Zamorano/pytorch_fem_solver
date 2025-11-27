@@ -177,7 +177,7 @@ def training_step(
     ) = precomputed_values
 
     nn_value, nn_grad = neural_network.value_and_gradient(
-        coarser_basis.coords_4_global_dofs
+        coarser_basis.coordinates_4_global_dofs
     )
 
     nn_value[dofs_boundary] = value_exact_dofs[dofs_boundary]
@@ -261,7 +261,7 @@ for i in range(NB_REFINEMENTS):
 
     basis_coarser = Basis(mesh_coarser, elements_coarser)
 
-    new_vertices = basis_coarser.coords_4_global_dofs.numpy(force=True)
+    new_vertices = basis_coarser.coordinates_4_global_dofs.numpy(force=True)
     new_segments = basis_coarser.vertices_4_new_edges.numpy(force=True)
 
     centroids = torch.Tensor.numpy(
@@ -308,7 +308,7 @@ for i in range(NB_REFINEMENTS):
 
     rhs_value = rhs(integration_points)
     exact_value = exact(integration_points)
-    exact_value_dofs = exact(basis_finer.coords_4_global_dofs)
+    exact_value_dofs = exact(basis_finer.coordinates_4_global_dofs)
     exact_dx_value = exact_dx(integration_points)
     exact_dy_value = exact_dy(integration_points)
     exact_norm = torch.sqrt(
@@ -367,7 +367,7 @@ for i in range(NB_REFINEMENTS):
 
     model.load_optimal_parameters()
 
-    opt_nn_value = NN(basis_coarser.coords_4_global_dofs)
+    opt_nn_value = NN(basis_coarser.coordinates_4_global_dofs)
 
     opt_nn_value[boundary_dofs] = exact_value_dofs[boundary_dofs]
 

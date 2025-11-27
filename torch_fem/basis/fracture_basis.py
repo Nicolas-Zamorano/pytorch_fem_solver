@@ -305,7 +305,7 @@ class FractureBasis(AbstractBasis):
     ):
         """Interpolate a tensor from the current basis to another basis."""
         if basis is self:
-            vertices_4_cells_4_interior_edges = self.global_dofs_4_elements.unsqueeze(
+            vertices_4_cells_4_interior_edges = self.global_dofs_4_local_dofs.unsqueeze(
                 -2
             )
 
@@ -367,7 +367,7 @@ class FractureBasis(AbstractBasis):
 
             return interpolation, interpolation_grad
 
-        nodes = self.coords_4_global_dofs
+        nodes = self.coordinates_4_global_dofs
 
         def interpolator(
             function: Callable[[torch.Tensor], torch.Tensor],
