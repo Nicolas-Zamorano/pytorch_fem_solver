@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 import torch
 from ..problems import AbstractProblem
 from ..basis import AbstractBasis, Basis
@@ -124,6 +124,11 @@ class AbstractSolver(abc.ABC):
             coordinates_4_vertices[:, 1].max(),
         )
 
+        z_min, z_max = (
+            exact_value.min(),
+            exact_value.max(),
+        )
+
         figure_solution = plt.figure(figsize=(10, 4))
 
         axis_numerical_solution = figure_solution.add_subplot(1, 2, 1, projection="3d")
@@ -139,6 +144,7 @@ class AbstractSolver(abc.ABC):
 
         axis_numerical_solution.set_xlim(x_min, x_max)
         axis_numerical_solution.set_ylim(y_min, y_max)
+        axis_numerical_solution.set_zlim(z_min, z_max)
         axis_numerical_solution.set_title("Numerical Solution")
         axis_numerical_solution.set_xlabel(r"$x$")
         axis_numerical_solution.set_ylabel(r"$y$")
@@ -156,6 +162,7 @@ class AbstractSolver(abc.ABC):
 
         axis_exact_solution.set_xlim(x_min, x_max)
         axis_exact_solution.set_ylim(y_min, y_max)
+        axis_exact_solution.set_zlim(z_min, z_max)
         axis_exact_solution.set_title("Exact Solution")
         axis_exact_solution.set_xlabel(r"$x$")
         axis_exact_solution.set_ylabel(r"$y$")
