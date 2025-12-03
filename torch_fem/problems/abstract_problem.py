@@ -36,7 +36,7 @@ class AbstractProblem(abc.ABC):
         value: torch.Tensor,
         value_dx: torch.Tensor,
         value_dy: torch.Tensor,
-        value_dz: torch.Tensor = torch.tensor(0.0),
+        value_dz: torch.Tensor = torch.tensor([0.0]),
     ) -> torch.Tensor:
         """H1 norm for precomputed values."""
         return value**2 + value_dx**2 + value_dy**2 + value_dz**2

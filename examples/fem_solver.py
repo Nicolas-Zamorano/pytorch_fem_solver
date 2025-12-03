@@ -19,7 +19,9 @@ mesh = MeshTri(triangulation=mesh_data)
 
 P_ORDER = 1
 
-solver = Solver(mesh=mesh, p_order=P_ORDER, q_order=2 * P_ORDER, problem=Problem())
+solver = Solver(
+    mesh=mesh, polynomial_order=P_ORDER, integral_order=2 * P_ORDER, problem=Problem()
+)
 
 solution = solver.solve()
 

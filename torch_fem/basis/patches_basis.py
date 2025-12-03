@@ -99,7 +99,7 @@ class PatchesBasis(AbstractBasis):
         if idx is None:
             idx = self.basis_parameters["inner_dofs"]
         return (
-            tensor[self.patches_idx.squeeze(), idx, idx]
+            tensor[self.patches_idx.squeeze(), idx, idx].unsqueeze(-1).unsqueeze(-1)
             if tensor.size(-1) != 1
-            else tensor[self.patches_idx.squeeze(), idx]
+            else tensor[self.patches_idx.squeeze(), idx].unsqueeze(-1)
         )
