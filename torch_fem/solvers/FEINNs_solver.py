@@ -24,6 +24,10 @@ class FEINNsSolver(DeepSolver):
             basis, tensor=None
         )
 
+        exact_value_dofs = self.problem.exact(basis.coordinates_4_global_dofs)
+        precomputed_values["exact_value_dofs"] = exact_value_dofs
+        precomputed_values["boundary_dofs"] = basis.basis_parameters["boundary_dofs"]
+
         self.interpolation_function = interpolation_function
         self.grad_interpolation_function = grad_interpolation_function
 
@@ -40,7 +44,7 @@ class FEINNsSolver(DeepSolver):
 
         return basis, precomputed_values, error_basis
 
-    def _training_step(self, neural_network):
+    def _compute_loss(self, neural_network):
         if self._posteriori_error:
             neural_network_value_dofs = neural_network(
                 self.basis.coordinates_4_global_dofs
@@ -117,39 +121,13 @@ class FEINNsSolver(DeepSolver):
                 self.basis.integrate_linear_form(
                     self.problem.residual,
                     gradient=neural_network_grad_interpolated,
-                    rhs_values=self.precomputed_values["rhs_values"],
+                    rhs_value=self.precomputed_values["rhs_values"],
                 )
             )
 
             loss_value = torch.sum(residual_vector**2)
 
-        neural_network_interpolated_dx, neural_network_interpolated_dy = torch.split(
-            neural_network_grad_interpolated, 1, -1
-        )
-
-        h1_error = torch.sqrt(
-            torch.sum(
-                self.basis.integrate_functional(
-                    self.problem.precomputed_H1_norm,
-                    neural_network_interpolated
-                    - self.precomputed_values["exact_value"],
-                    neural_network_interpolated_dx
-                    - self.precomputed_values["exact_dx_value"],
-                    neural_network_interpolated_dy
-                    - self.precomputed_values["exact_dy_value"],
-                )
-            )
-        )
-
-        relative_loss = (
-            torch.sqrt(loss_value) / self.precomputed_values["exact_H1_norm"]
-        )
-
-        return (
-            loss_value,
-            relative_loss,
-            h1_error / self.precomputed_values["exact_H1_norm"],
-        )
+        return loss_value
 
     def compute_error(self, numerical_solution) -> Tuple[torch.Tensor, torch.Tensor]:
 
