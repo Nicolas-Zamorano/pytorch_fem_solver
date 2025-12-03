@@ -1,0 +1,152 @@
+from typing import Tuple
+from matplotlib.figure import Figure
+import torch
+from torch.jit._script import ScriptModule
+from .deep_solver import DeepSolver
+from torch_fem import ElementLine, InteriorEdgesBasis
+import matplotlib.pyplot as plt
+from ..model.neural_network import FeedForwardNeuralNetwork as NeuralNetwork
+
+
+class SimplePatchesSolver(DeepSolver):
+    """Finite Element Method (FEM) solver."""
+
+    def precompute_values(
+        self, mesh, polynomial_order, integral_order, error_mesh=None
+    ):
+        """Precompute values needed for the FEM solver."""
+        basis, precomputed_values, error_basis = self._precompute_values(
+            mesh, polynomial_order, integral_order, error_mesh
+        )
+
+        gram_matrix_inverse = torch.linalg.inv(
+            torch.diagflat(
+                torch.diag(
+                    basis.reduce(
+                        basis.integrate_bilinear_form(self.problem.bilinear_form)
+                    )
+                )
+            )
+        )
+        precomputed_values["gram_matrix_inverse"] = gram_matrix_inverse
+
+        interior_nodes = torch.nonzero(
+            mesh["vertices", "markers"].squeeze(-1) != 1, as_tuple=True
+        )[0]
+
+        node_to_triangle_map = mesh.build_node_to_triangle_map(
+            mesh["cells", "vertices"], interior_nodes
+        )
+
+        precomputed_values["node_to_triangle_map"] = node_to_triangle_map
+        self.h1_error_sum = []
+        self.h1_error = []
+
+        if self._posteriori_error:
+            self.edges_elements = ElementLine(polynomial_order, integral_order)
+            self.edges_basis = InteriorEdgesBasis(mesh, self.edges_elements)
+
+            self.jump_integration_points = (
+                self.edges_basis.compute_jump_integration_points(delta=1e-6)
+            )
+            self.normals = basis.mesh["interior_edges", "normals"].unsqueeze(-2)
+            self.element_size = basis.mesh["cells", "length"]
+            self.edges_size = self.edges_basis.mesh["interior_edges", "length"]
+
+        return basis, precomputed_values, error_basis
+
+    def _compute_loss(self, neural_network):
+        if self._posteriori_error:
+            _, neural_network_grad, neural_network_laplacian = (
+                neural_network.value_and_laplacian(self.basis.integration_points)
+            )
+            _, neural_network_grad_edges = neural_network.value_and_gradient(
+                self.jump_integration_points
+            )
+
+            residual_vector = self.basis.reduce(
+                self.basis.integrate_linear_form(
+                    self.problem.residual,
+                    gradient=neural_network_grad,
+                    rhs_values=self.precomputed_values["rhs_values"],
+                )
+            )
+
+            bulk_estimator = self.element_size**2 * self.basis.integrate_functional(
+                self.problem.bulk_residual,
+                laplacian=neural_network_laplacian,
+                rhs_values=self.precomputed_values["rhs_values"],
+            )
+
+            jump_estimator = self.edges_size * self.edges_basis.integrate_functional(
+                self.problem.jump_residual,
+                gradient_for_jump=neural_network_grad_edges,
+                normals_4_elements=self.normals,
+            )
+
+            loss_value = (
+                residual_vector.T
+                @ self.precomputed_values["gram_matrix_inverse"]
+                @ residual_vector
+                + torch.sum(bulk_estimator)
+                + torch.sum(jump_estimator)
+            )
+
+        else:
+            _, neural_network_grad = neural_network.value_and_gradient(
+                self.basis.integration_points
+            )
+
+            residual_vector = self.basis.reduce(
+                self.basis.integrate_linear_form(
+                    self.problem.residual,
+                    gradient=neural_network_grad,
+                    rhs_value=self.precomputed_values["rhs_values"],
+                )
+            )
+            loss_value = (
+                residual_vector.mT
+                @ self.precomputed_values["gram_matrix_inverse"]
+                @ residual_vector
+            )
+
+        return loss_value
+
+    def _training_step(
+        self, neural_network: NeuralNetwork | torch.jit.ScriptModule
+    ) -> Tuple[torch.Tensor, ...]:
+        """Perform a single training step."""
+
+        loss_value = self._compute_loss(neural_network)
+
+        _, h1_error = self.compute_error(loss_value)
+
+        nodes_to_triangle_map = self.precomputed_values["node_to_triangle_map"]
+
+        h1_error_sum = torch.tensor([0.0])
+
+        for nodes_to_triangle in nodes_to_triangle_map:
+            triangle_h1_error = h1_error[nodes_to_triangle].sum().sqrt()
+            h1_error_sum += triangle_h1_error
+
+        h1_error = h1_error.sum().sqrt()
+
+        relative_loss = (
+            torch.sqrt(loss_value) / self.precomputed_values["exact_H1_norm"]
+        )
+
+        self.h1_error.append(h1_error.item())
+
+        self.h1_error_sum.append(h1_error_sum.item())
+
+        return (
+            loss_value,
+            relative_loss,
+            h1_error / self.precomputed_values["exact_H1_norm"],
+        )
+
+        # return (
+        #     loss_value,
+        #     relative_loss,
+        #     h1_error / self.precomputed_values["exact_H1_norm"],
+        # )
