@@ -74,7 +74,7 @@ class VPINNsSolver(DeepSolver):
                 self.basis.integrate_linear_form(
                     self.problem.residual,
                     gradient=neural_network_grad,
-                    rhs_values=self.precomputed_values["rhs_values"],
+                    rhs_value=self.precomputed_values["rhs_values"],
                 )
             )
             loss_value = torch.sum(residual_vector**2)

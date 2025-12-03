@@ -102,6 +102,8 @@ class DeepSolver(AbstractSolver):
 
         _, h1_error = self.compute_error(loss_value)
 
+        h1_error = h1_error.sum().sqrt()
+
         relative_loss = (
             torch.sqrt(loss_value) / self.precomputed_values["exact_H1_norm"]
         )

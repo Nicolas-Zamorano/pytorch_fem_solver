@@ -24,7 +24,7 @@ class FemSolver(AbstractSolver):
             self.problem.bilinear_form
         )
         load_vector = self.basis.integrate_linear_form(
-            self.problem.linear_form, rhs_values=self.precomputed_values["rhs_values"]
+            self.problem.linear_form, rhs_value=self.precomputed_values["rhs_values"]
         )
 
         solution = self.basis.solve(

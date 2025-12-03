@@ -23,17 +23,7 @@ class RVPINNsSolver(DeepSolver):
             basis.reduce(basis.integrate_bilinear_form(self.problem.bilinear_form))
         )
 
-        gram_matrix_patches_inverse = torch.linalg.inv(
-            torch.diagflat(
-                torch.diag(
-                    basis.reduce(
-                        basis.integrate_bilinear_form(self.problem.bilinear_form)
-                    )
-                )
-            )
-        )
         precomputed_values["gram_matrix_inverse"] = gram_matrix_inverse
-        precomputed_values["gram_matrix_patches_inverse"] = gram_matrix_patches_inverse
 
         if self._posteriori_error:
             self.edges_elements = ElementLine(polynomial_order, integral_order)
@@ -94,7 +84,7 @@ class RVPINNsSolver(DeepSolver):
                 self.basis.integrate_linear_form(
                     self.problem.residual,
                     gradient=neural_network_grad,
-                    rhs_values=self.precomputed_values["rhs_values"],
+                    rhs_value=self.precomputed_values["rhs_values"],
                 )
             )
             loss_value = (
