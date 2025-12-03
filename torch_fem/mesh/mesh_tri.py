@@ -183,3 +183,17 @@ class MeshTri(AbstractMesh):
         )
 
         return interior_edges_length, normal_4_interior_edges
+
+    def build_node_to_triangle_map(self, nodes_4_triangles, nodes_of_interest):
+        interest_list = [int(x) for x in nodes_of_interest]
+        index_map = {node: i for i, node in enumerate(interest_list)}
+
+        result = [[] for _ in interest_list]
+
+        for t_idx in range(nodes_4_triangles.shape[0]):
+            a, b, c = nodes_4_triangles[t_idx].tolist()
+            for node in (a, b, c):
+                if node in index_map:
+                    result[index_map[node]].append(t_idx)
+
+        return result
